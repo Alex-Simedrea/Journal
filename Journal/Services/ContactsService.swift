@@ -18,11 +18,6 @@ nonisolated enum ContactAuthorizationState: Equatable, Sendable {
     }
 }
 
-nonisolated struct ContactImportCandidate: Identifiable, Equatable, Sendable {
-    let id: String
-    let name: String
-}
-
 nonisolated struct ContactSnapshot: Equatable, Sendable {
     let identifier: String
     let name: String
@@ -76,19 +71,6 @@ actor ContactsService {
                 throw ContactsServiceError.accessDenied
             }
             return authorizationState()
-        }
-    }
-
-    func importCandidates() throws -> [ContactImportCandidate] {
-        guard authorizationState().permitsAccess else {
-            throw ContactsServiceError.accessDenied
-        }
-
-        return try allSnapshots().map {
-            ContactImportCandidate(
-                id: $0.identifier,
-                name: $0.name
-            )
         }
     }
 
@@ -172,11 +154,16 @@ enum ContactPersonSyncService {
         }
 
         let snapshots = try await ContactsService.shared.nameSnapshots()
-        return try apply(snapshots, to: modelContext)
+        return try apply(
+            snapshots,
+            excluding: ContactImportExclusionStore.identifiers,
+            to: modelContext
+        )
     }
 
     static func apply(
         _ snapshots: [ContactSnapshot],
+        excluding excludedContactIdentifiers: Set<String> = [],
         to modelContext: ModelContext
     ) throws -> ContactSyncResult {
         let people = try modelContext.fetch(FetchDescriptor<Person>())
@@ -193,7 +180,8 @@ enum ContactPersonSyncService {
         var addedCount = 0
         var updatedCount = 0
 
-        for snapshot in snapshots {
+        for snapshot in snapshots
+        where !excludedContactIdentifiers.contains(snapshot.identifier) {
             if let matches = peopleByContactIdentifier[snapshot.identifier] {
                 for (_, person) in matches where person.name != snapshot.name {
                     person.name = snapshot.name
@@ -218,5 +206,20 @@ enum ContactPersonSyncService {
             addedCount: addedCount,
             updatedCount: updatedCount
         )
+    }
+}
+
+@MainActor
+enum ContactImportExclusionStore {
+    private static let key = "excludedContactImportIdentifiers"
+
+    static var identifiers: Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
+    }
+
+    static func exclude(_ identifier: String) {
+        var updatedIdentifiers = identifiers
+        updatedIdentifiers.insert(identifier)
+        UserDefaults.standard.set(Array(updatedIdentifiers), forKey: key)
     }
 }

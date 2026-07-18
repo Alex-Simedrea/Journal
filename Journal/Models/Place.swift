@@ -20,8 +20,6 @@ class Place {
     var accuracyRadiusMeters: Double = 0
 
     var createdAt: Date
-    var lastVisitedAt: Date
-    var visitCount: Int
 
     init(
         id: UUID,
@@ -30,8 +28,6 @@ class Place {
         location: Location,
         systemImage: PlaceSystemImage,
         createdAt: Date,
-        lastVisitedAt: Date,
-        visitCount: Int,
         accuracyRadiusMeters: Double = 0
     ) {
         self.id = id
@@ -40,8 +36,6 @@ class Place {
         self.location = location
         self.systemImage = systemImage
         self.createdAt = createdAt
-        self.lastVisitedAt = lastVisitedAt
-        self.visitCount = visitCount
         self.accuracyRadiusMeters = accuracyRadiusMeters
     }
 
@@ -58,8 +52,6 @@ class Place {
             location: location,
             systemImage: systemImage,
             createdAt: .now,
-            lastVisitedAt: .now,
-            visitCount: 0,
             accuracyRadiusMeters: accuracyRadiusMeters
         )
     }

@@ -10,7 +10,7 @@ enum TransitEntryStore {
     static func insert(
         draft: ResolvedTransitDraft,
         rawInput: String?,
-        modelExchange: TransitModelExchange? = nil,
+        modelExchange: EntryModelExchange? = nil,
         sourceOrganizationName: String? = nil,
         sourceServiceIdentifier: String? = nil,
         in modelContext: ModelContext
@@ -49,6 +49,7 @@ enum TransitEntryStore {
             modelPrompt: modelExchange?.prompt,
             modelToolTranscript: modelExchange?.toolTranscript,
             modelResponse: modelExchange?.response,
+            entryKindReviewReason: draft.entryKindReviewReason,
             needsReview: draft.needsReview
         )
         entry.transitDetails = details

@@ -93,15 +93,20 @@ final class TransitEditModel {
         entry.endTimeZoneIdentifier = destination.location.timeZoneIdentifier
             ?? entry.creationTimeZoneIdentifier
         entry.people = people.filter { selectedPeopleIDs.contains($0.id) }
-        entry.needsReview = false
+        entry.needsReview = entry.entryKindReviewReason != nil
 
         if didChangeTime || entry.timeConfidence == .unresolved {
             entry.timeConfidence = .manualOverride
             details.durationSource = .manualOverride
         }
+        entry.weather = nil
 
         do {
             try modelContext.save()
+            EntryWeatherService.refreshInBackground(
+                entry,
+                in: modelContext
+            )
             return true
         } catch {
             originalState.restore(entry: entry, details: details)
@@ -116,8 +121,8 @@ private struct TransitEditOriginalState {
     let originPlace: Place?
     let destinationPlace: Place?
     let durationSource: DurationSource
-    let originCandidates: [TransitPlaceCandidate]
-    let destinationCandidates: [TransitPlaceCandidate]
+    let originCandidates: [PlaceCandidate]
+    let destinationCandidates: [PlaceCandidate]
     let unresolvedPeople: [String]
     let fieldReviews: [TransitFieldReview]
     let startTime: Date?
@@ -127,6 +132,7 @@ private struct TransitEditOriginalState {
     let timeConfidence: TimeConfidence
     let people: [Person]
     let needsReview: Bool
+    let weather: EntryWeather?
 
     init(entry: LogEntry, details: TransitDetails) {
         transitType = details.type
@@ -144,6 +150,7 @@ private struct TransitEditOriginalState {
         timeConfidence = entry.timeConfidence
         people = entry.people
         needsReview = entry.needsReview
+        weather = entry.weather
     }
 
     func restore(entry: LogEntry, details: TransitDetails) {
@@ -162,5 +169,6 @@ private struct TransitEditOriginalState {
         entry.timeConfidence = timeConfidence
         entry.people = people
         entry.needsReview = needsReview
+        entry.weather = weather
     }
 }

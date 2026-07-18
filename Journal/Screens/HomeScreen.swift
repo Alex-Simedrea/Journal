@@ -21,8 +21,15 @@ struct HomeScreen: View {
             }
         )
         .safeAreaInset(edge: .bottom) {
-            TransitLogMenu {
-                presentation.sheet = .transit($0)
+            EntryLogMenu { action in
+                switch action {
+                case .describe:
+                    presentation.sheet = .describeEntry
+                case .manualTransit:
+                    presentation.sheet = .manualTransit
+                case .manualVisit:
+                    presentation.sheet = .manualVisit
+                }
             }
         }
         .toolbar {
@@ -38,11 +45,13 @@ struct HomeScreen: View {
         }) { sheet in
             HomeSheetContent(
                 sheet: sheet,
+                selectedDay: presentation.selectedDay,
+                selectedDayEntries: presentation.selectedDayEntries,
                 entryProvider: presentation.entry(withID:)
             )
         }
         .alert(
-            "Couldn’t Prepare Transit Logging",
+            "Couldn’t Prepare Entry Logging",
             isPresented: Binding(
                 get: { presentation.setupErrorMessage != nil },
                 set: { if !$0 { presentation.setupErrorMessage = nil } }
@@ -176,14 +185,16 @@ private struct TimelineListItemView: View {
     let onSelect: (UUID) -> Void
 
     var body: some View {
-        switch item {
-        case .occurrence(let occurrence):
-            TimelineOccurrenceRow(
-                occurrence: occurrence,
-                onTap: { onSelect(occurrence.entryID) }
-            )
-        case .timeZoneChange(let change):
-            TimelineTimeZoneChangeRow(change: change)
+        VStack {
+            switch item {
+            case .occurrence(let occurrence):
+                TimelineOccurrenceRow(
+                    occurrence: occurrence,
+                    onTap: { onSelect(occurrence.entryID) }
+                )
+            case .timeZoneChange(let change):
+                TimelineTimeZoneChangeRow(change: change)
+            }
         }
     }
 }
@@ -195,20 +206,12 @@ private struct TimelineOccurrenceRow: View {
     var body: some View {
         Button(action: onTap) {
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: occurrence.role == .crossZoneArrival
-                    ? "airplane.arrival"
-                    : "arrow.triangle.swap")
-                    .font(.title3)
-                    .foregroundStyle(.blue.gradient)
-                    .frame(width: 32, height: 32)
-                    .background(.blue.opacity(0.12), in: .circle)
+                TimelineOccurrenceIcon(occurrence: occurrence)
 
                 VStack(alignment: .leading, spacing: 5) {
                     TimelineOccurrenceTitle(occurrence: occurrence)
 
-                    Text("\(occurrence.origin) → \(occurrence.destination)")
-                        .font(.subheadline)
-                        .foregroundStyle(.primary)
+                    TimelineOccurrenceSubtitle(occurrence: occurrence)
 
                     TimelineOccurrenceTimeLabel(occurrence: occurrence)
                 }
@@ -221,13 +224,102 @@ private struct TimelineOccurrenceRow: View {
     }
 }
 
+private struct TimelineOccurrenceIcon: View {
+    let occurrence: TimelineOccurrence
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(.blue.opacity(0.12))
+                .frame(width: 32, height: 32)
+            switch occurrence.kind {
+            case .placeVisit:
+                PlaceSymbolImage(systemImage: occurrence.visitSystemImage)
+                    .font(.title3)
+            case .transit:
+                Image(systemName: occurrence.role == .crossZoneArrival
+                    ? "airplane.arrival"
+                    : "arrow.triangle.swap")
+                    .font(.title3)
+                    .foregroundStyle(.blue.gradient)
+            case .workout:
+                Image(systemName: occurrence.workoutSystemImageName)
+                    .font(.title3)
+                    .foregroundStyle(.green.gradient)
+            }
+        }
+    }
+}
+
+private struct TimelineOccurrenceSubtitle: View {
+    let occurrence: TimelineOccurrence
+
+    var body: some View {
+        switch occurrence.kind {
+        case .transit:
+            Text("\(occurrence.origin) → \(occurrence.destination)")
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+        case .placeVisit:
+            Text("Place visit")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        case .workout:
+            WorkoutTimelineSubtitle(
+                movementKind: occurrence.workoutMovementKind,
+                origin: occurrence.workoutOrigin,
+                destination: occurrence.workoutDestination,
+                place: occurrence.workoutPlace,
+                distanceMeters: occurrence.workoutDistanceMeters,
+                activeEnergyKilocalories:
+                    occurrence.workoutActiveEnergyKilocalories
+            )
+        }
+    }
+}
+
+private struct WorkoutTimelineSubtitle: View {
+    let movementKind: WorkoutMovementKind?
+    let origin: String
+    let destination: String
+    let place: String
+    let distanceMeters: Double?
+    let activeEnergyKilocalories: Double?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if movementKind == .moving {
+                Text("\(origin) → \(destination)")
+                    .foregroundStyle(.primary)
+                if let distanceMeters {
+                    Text(
+                        Measurement(
+                            value: distanceMeters,
+                            unit: UnitLength.meters
+                        ),
+                        format: .measurement(width: .abbreviated)
+                    )
+                    .foregroundStyle(.secondary)
+                }
+            } else {
+                Text("Workout at \(place)")
+                    .foregroundStyle(.secondary)
+            }
+            if let activeEnergyKilocalories {
+                Text("\(activeEnergyKilocalories, format: .number.precision(.fractionLength(0...1))) kcal")
+                .foregroundStyle(.secondary)
+            }
+        }
+        .font(.subheadline)
+    }
+}
+
 private struct TimelineOccurrenceTitle: View {
     let occurrence: TimelineOccurrence
 
     var body: some View {
         HStack {
-            Text(occurrence.transitType)
-                .font(.headline)
+            TimelineOccurrencePrimaryTitle(occurrence: occurrence)
 
             if occurrence.role == .crossZoneArrival {
                 Text("Arrival")
@@ -243,6 +335,24 @@ private struct TimelineOccurrenceTitle: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.orange)
             }
+        }
+    }
+}
+
+private struct TimelineOccurrencePrimaryTitle: View {
+    let occurrence: TimelineOccurrence
+
+    var body: some View {
+        switch occurrence.kind {
+        case .transit:
+            Text(occurrence.transitType)
+                .font(.headline)
+        case .placeVisit:
+            Text(occurrence.visitPlace)
+                .font(.headline)
+        case .workout:
+            Text(occurrence.workoutActivityName)
+                .font(.headline)
         }
     }
 }
@@ -336,24 +446,36 @@ private enum TimelineFormatting {
     }
 }
 
-private struct TransitLogMenu: View {
-    let onSelect: (TransitComposerMode) -> Void
+private enum EntryLogAction {
+    case describe
+    case manualTransit
+    case manualVisit
+}
+
+private struct EntryLogMenu: View {
+    let onSelect: (EntryLogAction) -> Void
 
     var body: some View {
         Menu {
             Button {
-                onSelect(.naturalLanguage)
+                onSelect(.describe)
             } label: {
-                Label("Describe Transit", systemImage: "text.bubble")
+                Label("Describe Entry", systemImage: "text.bubble")
             }
 
             Button {
-                onSelect(.manual)
+                onSelect(.manualTransit)
             } label: {
-                Label("Enter Manually", systemImage: "list.bullet.rectangle")
+                Label("Manual Transit", systemImage: "arrow.triangle.swap")
+            }
+
+            Button {
+                onSelect(.manualVisit)
+            } label: {
+                Label("Manual Visit", systemImage: "mappin.and.ellipse")
             }
         } label: {
-            Label("Log Transit", systemImage: "plus")
+            Label("Log Entry", systemImage: "plus")
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(.borderedProminent)
@@ -366,21 +488,45 @@ private struct TransitLogMenu: View {
 
 private struct HomeSheetContent: View {
     let sheet: HomeSheet
+    let selectedDay: TimelineDayKey
+    let selectedDayEntries: [LogEntry]
     let entryProvider: (UUID) -> LogEntry?
 
     var body: some View {
         switch sheet {
-        case .transit(let mode):
-            TransitLogSheet(mode: mode)
+        case .describeEntry:
+            EntryLogSheet(
+                selectedDay: selectedDay,
+                selectedDayEntries: selectedDayEntries
+            )
+        case .manualTransit:
+            TransitLogSheet()
+        case .manualVisit:
+            PlaceVisitLogSheet()
         case .details(let entryID):
             if let entry = entryProvider(entryID) {
-                TransitDetailSheet(entry: entry)
+                EntryDetailSheet(entry: entry)
             } else {
                 ContentUnavailableView(
                     "Entry Unavailable",
                     systemImage: "exclamationmark.triangle"
                 )
             }
+        }
+    }
+}
+
+private struct EntryDetailSheet: View {
+    let entry: LogEntry
+
+    var body: some View {
+        switch entry.kind {
+        case .transit:
+            TransitDetailSheet(entry: entry)
+        case .placeVisit:
+            PlaceVisitDetailSheet(entry: entry)
+        case .workout:
+            WorkoutDetailSheet(entry: entry)
         }
     }
 }

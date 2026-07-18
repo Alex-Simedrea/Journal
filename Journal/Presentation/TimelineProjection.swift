@@ -102,9 +102,20 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
     let creationTimeZoneIdentifier: String
     let timeConfidence: TimeConfidence
     let needsReview: Bool
+    let kind: LogKind
     let transitType: String
     let origin: String
     let destination: String
+    let visitPlace: String
+    let visitSystemImage: PlaceSystemImage
+    let workoutActivityName: String
+    let workoutSystemImageName: String
+    let workoutMovementKind: WorkoutMovementKind?
+    let workoutDistanceMeters: Double?
+    let workoutActiveEnergyKilocalories: Double?
+    let workoutOrigin: String
+    let workoutDestination: String
+    let workoutPlace: String
 
     init(entry: LogEntry) {
         let details = entry.transitDetails
@@ -117,6 +128,7 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
         creationTimeZoneIdentifier = entry.creationTimeZoneIdentifier
         timeConfidence = entry.timeConfidence
         needsReview = entry.needsReview
+        kind = entry.kind
         transitType = details?.type ?? "Transit"
         origin = details?.originPlace?.name
             ?? details?.originRawText
@@ -124,6 +136,33 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
         destination = details?.destinationPlace?.name
             ?? details?.destinationRawText
             ?? "Unknown destination"
+        visitPlace = entry.placeVisitDetails?.place?.name
+            ?? entry.placeVisitDetails?.placeRawText
+            ?? "Unknown place"
+        visitSystemImage = entry.placeVisitDetails?.place?.systemImage
+            ?? .mappin
+        let workout = entry.workoutDetails
+        workoutActivityName = workout?.activityName ?? "Workout"
+        workoutSystemImageName = workout.map {
+            WorkoutActivityCatalog.presentation(
+                for: $0.activityTypeRawValue
+            ).systemImageName
+        } ?? "figure.mixed.cardio"
+        workoutMovementKind = workout?.movementKind
+        workoutDistanceMeters = workout?.distanceMeters
+        workoutActiveEnergyKilocalories = workout?.activeEnergyKilocalories
+        workoutOrigin = WorkoutLocationPresentation.name(
+            place: workout?.originPlace,
+            location: workout?.originLocation
+        )
+        workoutDestination = WorkoutLocationPresentation.name(
+            place: workout?.destinationPlace,
+            location: workout?.destinationLocation
+        )
+        workoutPlace = WorkoutLocationPresentation.name(
+            place: workout?.place,
+            location: workout?.sourceLocation
+        )
     }
 
     init(
@@ -136,9 +175,20 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
         creationTimeZoneIdentifier: String,
         timeConfidence: TimeConfidence,
         needsReview: Bool = false,
+        kind: LogKind = .transit,
         transitType: String = "Transit",
         origin: String = "Origin",
-        destination: String = "Destination"
+        destination: String = "Destination",
+        visitPlace: String = "Place",
+        visitSystemImage: PlaceSystemImage = .mappin,
+        workoutActivityName: String = "Workout",
+        workoutSystemImageName: String = "figure.mixed.cardio",
+        workoutMovementKind: WorkoutMovementKind? = nil,
+        workoutDistanceMeters: Double? = nil,
+        workoutActiveEnergyKilocalories: Double? = nil,
+        workoutOrigin: String = "Origin",
+        workoutDestination: String = "Destination",
+        workoutPlace: String = "Place"
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -149,9 +199,21 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
         self.creationTimeZoneIdentifier = creationTimeZoneIdentifier
         self.timeConfidence = timeConfidence
         self.needsReview = needsReview
+        self.kind = kind
         self.transitType = transitType
         self.origin = origin
         self.destination = destination
+        self.visitPlace = visitPlace
+        self.visitSystemImage = visitSystemImage
+        self.workoutActivityName = workoutActivityName
+        self.workoutSystemImageName = workoutSystemImageName
+        self.workoutMovementKind = workoutMovementKind
+        self.workoutDistanceMeters = workoutDistanceMeters
+        self.workoutActiveEnergyKilocalories =
+            workoutActiveEnergyKilocalories
+        self.workoutOrigin = workoutOrigin
+        self.workoutDestination = workoutDestination
+        self.workoutPlace = workoutPlace
     }
 }
 
@@ -166,9 +228,20 @@ struct TimelineOccurrence: Hashable, Identifiable, Sendable {
     let startTime: Date?
     let endTime: Date?
     let needsReview: Bool
+    let kind: LogKind
     let transitType: String
     let origin: String
     let destination: String
+    let visitPlace: String
+    let visitSystemImage: PlaceSystemImage
+    let workoutActivityName: String
+    let workoutSystemImageName: String
+    let workoutMovementKind: WorkoutMovementKind?
+    let workoutDistanceMeters: Double?
+    let workoutActiveEnergyKilocalories: Double?
+    let workoutOrigin: String
+    let workoutDestination: String
+    let workoutPlace: String
 }
 
 struct TimelineTimeZoneChange: Hashable, Identifiable, Sendable {
@@ -238,7 +311,9 @@ struct TimelineProjection: Sendable {
                 identifier: entry.endTimeZoneIdentifier,
                 fallbackIdentifier: entry.creationTimeZoneIdentifier
             )
-            if startZone.identifier != endZone.identifier,
+            if (entry.kind == .transit
+                || entry.workoutMovementKind == .moving),
+               startZone.identifier != endZone.identifier,
                TimelineDayKey(date: endTime, timeZone: endZone) == day {
                 occurrences.append(
                     occurrence(
@@ -331,9 +406,21 @@ struct TimelineProjection: Sendable {
             startTime: entry.startTime,
             endTime: entry.endTime,
             needsReview: entry.needsReview,
+            kind: entry.kind,
             transitType: entry.transitType,
             origin: entry.origin,
-            destination: entry.destination
+            destination: entry.destination,
+            visitPlace: entry.visitPlace,
+            visitSystemImage: entry.visitSystemImage,
+            workoutActivityName: entry.workoutActivityName,
+            workoutSystemImageName: entry.workoutSystemImageName,
+            workoutMovementKind: entry.workoutMovementKind,
+            workoutDistanceMeters: entry.workoutDistanceMeters,
+            workoutActiveEnergyKilocalories:
+                entry.workoutActiveEnergyKilocalories,
+            workoutOrigin: entry.workoutOrigin,
+            workoutDestination: entry.workoutDestination,
+            workoutPlace: entry.workoutPlace
         )
     }
 

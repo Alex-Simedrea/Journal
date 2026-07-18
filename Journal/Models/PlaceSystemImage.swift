@@ -6,7 +6,7 @@
 import AnyLanguageModel
 
 @Generable(description: "An SF Symbol supported by the Journal place picker")
-enum PlaceSystemImage: String, Codable, CaseIterable, Identifiable {
+enum PlaceSystemImage: String, Codable, CaseIterable, Identifiable, Hashable, Sendable {
     case mappin
     case house = "house.fill"
     case buildings = "building.2.fill"

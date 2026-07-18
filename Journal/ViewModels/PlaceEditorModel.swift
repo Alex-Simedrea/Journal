@@ -12,6 +12,7 @@ import SwiftUI
 @MainActor
 @Observable
 final class PlaceEditorModel {
+    let allowsCurrentLocationCapture: Bool
     var name: String
     var selectedSymbol: PlaceSystemImage
     var location: Location?
@@ -37,14 +38,18 @@ final class PlaceEditorModel {
         place: Place? = nil,
         initialName: String = "",
         initialSearchQuery: String = "",
-        initialLocation: Location? = nil
+        initialLocation: Location? = nil,
+        allowsCurrentLocationCapture: Bool = true
     ) {
+        self.allowsCurrentLocationCapture = allowsCurrentLocationCapture
         let initialResolvedLocation = place?.location ?? initialLocation
         name = place?.name ?? initialName
         selectedSymbol = place?.systemImage ?? .mappin
         location = initialResolvedLocation
         accuracyRadiusMeters = place?.accuracyRadiusMeters ?? 0
-        isLoadingLocation = place == nil && initialLocation == nil
+        isLoadingLocation = place == nil
+            && initialLocation == nil
+            && allowsCurrentLocationCapture
 
         if let coordinate = initialResolvedLocation?.coordinate {
             mapPosition = .region(
@@ -75,6 +80,7 @@ final class PlaceEditorModel {
     }
 
     func captureCurrentLocation() async {
+        guard allowsCurrentLocationCapture else { return }
         isLoadingLocation = true
         locationErrorMessage = nil
 
@@ -119,6 +125,9 @@ final class PlaceEditorModel {
                     latitude: coordinate.latitude,
                     longitude: coordinate.longitude,
                     formattedAddress: mapItem.address?.fullAddress,
+                    compactAddress: LocationService.compactAddress(
+                        for: mapItem
+                    ),
                     timeZoneIdentifier: mapItem.timeZone?.identifier
                 )
                 mapPosition = .region(region(center: coordinate, meters: 500))

@@ -12,20 +12,24 @@ struct AddPlaceSheet: View {
     @Environment(\.modelContext) private var modelContext
 
     private let onSave: ((Place) -> Void)?
+    private let capturesCurrentLocation: Bool
     @State private var model: PlaceEditorModel
 
     init(
         initialName: String = "",
         initialSearchQuery: String = "",
         initialLocation: Location? = nil,
+        capturesCurrentLocation: Bool = true,
         onSave: ((Place) -> Void)? = nil
     ) {
         self.onSave = onSave
+        self.capturesCurrentLocation = capturesCurrentLocation
         _model = State(
             initialValue: PlaceEditorModel(
                 initialName: initialName,
                 initialSearchQuery: initialSearchQuery,
-                initialLocation: initialLocation
+                initialLocation: initialLocation,
+                allowsCurrentLocationCapture: capturesCurrentLocation
             )
         )
     }
@@ -69,7 +73,7 @@ struct AddPlaceSheet: View {
             }
         }
         .task {
-            if model.location == nil {
+            if capturesCurrentLocation, model.location == nil {
                 await model.captureCurrentLocation()
             }
         }
@@ -165,7 +169,9 @@ private struct PlaceEditorLocationContent: View {
         } else {
             UnavailableLocationView(
                 message: model.locationErrorMessage,
-                model: model
+                model: model,
+                allowsCurrentLocationCapture:
+                    model.allowsCurrentLocationCapture
             )
         }
     }
@@ -280,17 +286,24 @@ private struct LoadingLocationView: View {
 private struct UnavailableLocationView: View {
     let message: String?
     let model: PlaceEditorModel
+    let allowsCurrentLocationCapture: Bool
 
     var body: some View {
         ContentUnavailableView {
             Label("Location Unavailable", systemImage: "location.slash")
         } description: {
-            Text(message ?? "Your location could not be determined.")
+            Text(
+                message ?? (allowsCurrentLocationCapture
+                    ? "Your location could not be determined."
+                    : "Search for the workout location above to place it on the map.")
+            )
         } actions: {
-            Button("Try Again") {
-                Task { await model.captureCurrentLocation() }
+            if allowsCurrentLocationCapture {
+                Button("Try Again") {
+                    Task { await model.captureCurrentLocation() }
+                }
+                .buttonStyle(.borderedProminent)
             }
-            .buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity, minHeight: 190)
     }

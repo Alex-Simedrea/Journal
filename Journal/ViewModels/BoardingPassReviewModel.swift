@@ -93,7 +93,10 @@ final class BoardingPassReviewModel {
             .location.timeZoneIdentifier ?? TimeZone.current.identifier
     }
 
-    func save(places: [Place], in modelContext: ModelContext) -> Bool {
+    func save(
+        places: [Place],
+        in modelContext: ModelContext
+    ) async -> Bool {
         guard canSave else { return false }
         isSaving = true
         errorMessage = nil
@@ -138,11 +141,15 @@ final class BoardingPassReviewModel {
         let issuer = pendingImport.organizationName
 
         do {
-            _ = try TransitEntryStore.insert(
+            let entry = try TransitEntryStore.insert(
                 draft: draft,
                 rawInput: nil,
                 sourceOrganizationName: issuer,
                 sourceServiceIdentifier: pendingImport.serviceIdentifier,
+                in: modelContext
+            )
+            _ = try? await EntryWeatherService.populate(
+                entry,
                 in: modelContext
             )
             return true

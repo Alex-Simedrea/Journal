@@ -17,13 +17,14 @@ struct ResolvedTransitDraft {
     var timeConfidence: TimeConfidence
     var people: [Person]
     var durationSource: DurationSource
-    var originCandidates: [TransitPlaceCandidate]
-    var destinationCandidates: [TransitPlaceCandidate]
+    var originCandidates: [PlaceCandidate]
+    var destinationCandidates: [PlaceCandidate]
     var unresolvedPeople: [String]
     var fieldReviews: [TransitFieldReview]
+    var entryKindReviewReason: String? = nil
 
     var needsReview: Bool {
-        !fieldReviews.isEmpty
+        entryKindReviewReason != nil || !fieldReviews.isEmpty
     }
 
     mutating func requireReview(
@@ -40,13 +41,14 @@ struct ResolvedTransitDraft {
 enum TransitResolutionService {
     static func resolve(
         generated: GeneratedTransitLog,
-        references: TransitPromptReferences,
+        references: EntryPromptReferences,
         toolSearches: [TransitToolSearch],
         rawInput: String,
         people: [Person],
         transitTypes: [TransitType],
         currentLocation: Location,
-        now: Date
+        now: Date,
+        selectedDayEntries: [LogEntry]
     ) -> ResolvedTransitDraft {
         let typeResolution = resolvedTransitType(
             generated.transitType.canonicalName,
@@ -75,7 +77,8 @@ enum TransitResolutionService {
             origin: origin.place,
             destination: destination.place,
             currentLocation: currentLocation,
-            now: now
+            now: now,
+            selectedDayEntries: selectedDayEntries
         )
 
         var draft = ResolvedTransitDraft(
@@ -171,8 +174,8 @@ enum TransitResolutionService {
 
     private static func resolvePlace(
         _ generated: GeneratedPlaceResolution,
-        endpoint: GeneratedTransitEndpoint,
-        references: TransitPromptReferences,
+        endpoint: GeneratedPlaceRole,
+        references: EntryPromptReferences,
         searches: [TransitToolSearch]
     ) -> PlaceResolution {
         if let key = generated.savedPlaceKey {
@@ -228,7 +231,7 @@ enum TransitResolutionService {
 
     private static func resolvePeople(
         _ generated: [GeneratedPersonResolution],
-        references: TransitPromptReferences,
+        references: EntryPromptReferences,
         people: [Person]
     ) -> PeopleResolution {
         var resolved: [Person] = []
@@ -298,7 +301,8 @@ enum TransitResolutionService {
         origin: Place?,
         destination: Place?,
         currentLocation: Location,
-        now: Date
+        now: Date,
+        selectedDayEntries: [LogEntry]
     ) -> TimeResolution {
         let start = parsedDate(generated.startTimeISO8601)
         let end = parsedDate(generated.endTimeISO8601)
@@ -345,6 +349,17 @@ enum TransitResolutionService {
             error = start == nil || end == nil
                 ? String(localized: "The model did not complete both trip timestamps.")
                 : nil
+
+        case .inferredFromHistory:
+            error = historyInferenceValidationError(
+                rawText: generated.rawText,
+                start: start,
+                end: end,
+                durationSource: generated.durationSource,
+                origin: origin,
+                destination: destination,
+                selectedDayEntries: selectedDayEntries
+            )
 
         case .inferredNearOrigin:
             error = inferenceValidationError(
@@ -394,6 +409,123 @@ enum TransitResolutionService {
     private enum InferenceAnchor {
         case origin
         case destination
+    }
+
+    private static func historyInferenceValidationError(
+        rawText: String?,
+        start: Date?,
+        end: Date?,
+        durationSource: GeneratedDurationSource,
+        origin: Place?,
+        destination: Place?,
+        selectedDayEntries: [LogEntry]
+    ) -> String? {
+        if let rawText, !normalize(rawText).isEmpty {
+            return String(localized: "A history-inferred time must not claim explicit time wording.")
+        }
+        guard let start, let end else {
+            return String(localized: "The model did not complete both history-inferred trip timestamps.")
+        }
+        guard let origin, let destination else {
+            return String(localized: "Both saved places are required to validate a history-inferred time.")
+        }
+
+        let hasStartAnchor = selectedDayEntries.contains { entry in
+            isUsableHistoryEndAnchor(entry)
+                && approximatelyEqual(entry.endTime, start)
+                && historyEndPlaceID(entry) == origin.id
+        }
+        let hasEndAnchor = selectedDayEntries.contains { entry in
+            isUsableHistoryStartAnchor(entry)
+                && approximatelyEqual(entry.startTime, end)
+                && historyStartPlaceID(entry) == destination.id
+        }
+        guard hasStartAnchor || hasEndAnchor else {
+            return String(localized: "The inferred trip time does not match a confirmed selected-day history boundary.")
+        }
+        if durationSource == .none, !(hasStartAnchor && hasEndAnchor) {
+            return String(localized: "The history-inferred trip time has no route-duration source.")
+        }
+        return nil
+    }
+
+    private static func isUsableHistoryStartAnchor(_ entry: LogEntry) -> Bool {
+        guard entry.entryKindReviewReason == nil else { return false }
+        switch entry.kind {
+        case .transit:
+            let reviewedFields = entry.transitDetails?.fieldReviews.map(\.field) ?? []
+            return !reviewedFields.contains(.time)
+                && !reviewedFields.contains(.origin)
+        case .placeVisit:
+            let reviewedFields = entry.placeVisitDetails?.fieldReviews.map(\.field) ?? []
+            return !reviewedFields.contains(.time)
+                && !reviewedFields.contains(.place)
+        case .workout:
+            guard let details = entry.workoutDetails else { return false }
+            let reviewedFields = Set(details.fieldReviews.map(\.field))
+            return details.movementKind == .moving
+                ? !reviewedFields.contains(.origin)
+                    && details.originPlace != nil
+                : !reviewedFields.contains(.place)
+                    && details.place != nil
+        }
+    }
+
+    private static func isUsableHistoryEndAnchor(_ entry: LogEntry) -> Bool {
+        guard entry.entryKindReviewReason == nil else { return false }
+        switch entry.kind {
+        case .transit:
+            let reviewedFields = entry.transitDetails?.fieldReviews.map(\.field) ?? []
+            return !reviewedFields.contains(.time)
+                && !reviewedFields.contains(.destination)
+        case .placeVisit:
+            let reviewedFields = entry.placeVisitDetails?.fieldReviews.map(\.field) ?? []
+            return !reviewedFields.contains(.time)
+                && !reviewedFields.contains(.place)
+        case .workout:
+            guard let details = entry.workoutDetails else { return false }
+            let reviewedFields = Set(details.fieldReviews.map(\.field))
+            return details.movementKind == .moving
+                ? !reviewedFields.contains(.destination)
+                    && details.destinationPlace != nil
+                : !reviewedFields.contains(.place)
+                    && details.place != nil
+        }
+    }
+
+    private static func historyStartPlaceID(_ entry: LogEntry) -> UUID? {
+        switch entry.kind {
+        case .transit:
+            entry.transitDetails?.originPlace?.id
+        case .placeVisit:
+            entry.placeVisitDetails?.place?.id
+        case .workout:
+            if entry.workoutDetails?.movementKind == .moving {
+                entry.workoutDetails?.originPlace?.id
+            } else {
+                entry.workoutDetails?.place?.id
+            }
+        }
+    }
+
+    private static func historyEndPlaceID(_ entry: LogEntry) -> UUID? {
+        switch entry.kind {
+        case .transit:
+            entry.transitDetails?.destinationPlace?.id
+        case .placeVisit:
+            entry.placeVisitDetails?.place?.id
+        case .workout:
+            if entry.workoutDetails?.movementKind == .moving {
+                entry.workoutDetails?.destinationPlace?.id
+            } else {
+                entry.workoutDetails?.place?.id
+            }
+        }
+    }
+
+    private static func approximatelyEqual(_ lhs: Date?, _ rhs: Date) -> Bool {
+        guard let lhs else { return false }
+        return abs(lhs.timeIntervalSince(rhs)) <= 60
     }
 
     private static func inferenceValidationError(
@@ -446,6 +578,7 @@ enum TransitResolutionService {
     ) -> TimeConfidence {
         switch kind {
         case .explicit: .explicit
+        case .inferredFromHistory: .inferredFromHistory
         case .inferredNearOrigin: .inferredNearOrigin
         case .inferredNearDestination: .inferredNearDestination
         case .unresolved: .unresolved
@@ -464,12 +597,12 @@ enum TransitResolutionService {
 
     private static func candidates(
         keys: [String],
-        endpoint: GeneratedTransitEndpoint,
+        endpoint: GeneratedPlaceRole,
         searches: [TransitToolSearch]
-    ) -> [TransitPlaceCandidate] {
+    ) -> [PlaceCandidate] {
         let available = Dictionary(
             uniqueKeysWithValues: searches
-                .filter { $0.endpoint == endpoint }
+                .filter { $0.role == endpoint }
                 .flatMap(\.candidates)
                 .map { ($0.candidateKey, $0.result) }
         )
@@ -480,7 +613,7 @@ enum TransitResolutionService {
                   let result = available[key] else {
                 return nil
             }
-            return TransitPlaceCandidate(
+            return PlaceCandidate(
                 name: result.name,
                 address: result.address,
                 latitude: result.latitude,
@@ -539,7 +672,7 @@ enum TransitResolutionService {
 
 private struct PlaceResolution {
     let place: Place?
-    let candidates: [TransitPlaceCandidate]
+    let candidates: [PlaceCandidate]
     let validationError: String?
 }
 

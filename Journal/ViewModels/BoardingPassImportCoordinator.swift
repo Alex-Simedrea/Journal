@@ -19,27 +19,17 @@ final class BoardingPassImportCoordinator {
     }
 
     func complete(_ pendingImport: PendingBoardingPassImport) {
-        removeAndAdvance(pendingImport)
+        remove(pendingImport)
     }
 
     func discard(_ pendingImport: PendingBoardingPassImport) {
-        removeAndAdvance(pendingImport)
+        remove(pendingImport)
     }
 
-    func deferCurrentImport() {
-        pendingImport = nil
-    }
-
-    private func removeAndAdvance(
-        _ completedImport: PendingBoardingPassImport
-    ) {
+    private func remove(_ completedImport: PendingBoardingPassImport) {
         do {
             try BoardingPassImportInbox.remove(id: completedImport.id)
             pendingImport = nil
-            Task {
-                await Task.yield()
-                loadNextIfNeeded()
-            }
         } catch {
             errorMessage = error.localizedDescription
         }

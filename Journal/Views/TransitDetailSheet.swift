@@ -4,10 +4,12 @@
 //
 
 import MapKit
+import SwiftData
 import SwiftUI
 
 struct TransitDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
 
     let entry: LogEntry
     @State private var isReviewPresented = false
@@ -38,15 +40,18 @@ struct TransitDetailSheet: View {
                         timeConfidence: entry.timeConfidence,
                         peopleNames: entry.people.map(\.name),
                         createdAt: entry.createdAt,
+                        entryKindReviewReason: entry.entryKindReviewReason,
                         fieldReviews: details.fieldReviews
                     )
                 }
 
+                EntryWeatherSection(entry: entry)
+
                 EntryPhotoAttachmentsSection(entry: entry)
 
                 if let rawInput = entry.rawInputString {
-                    TransitOriginalInputSection(rawInput: rawInput)
-                    TransitModelExchangeSection(
+                    EntryOriginalInputSection(rawInput: rawInput)
+                    EntryModelExchangeSection(
                         instructions: entry.modelInstructions,
                         prompt: entry.modelPrompt,
                         toolTranscript: entry.modelToolTranscript,
@@ -59,6 +64,21 @@ struct TransitDetailSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(role: .cancel) { dismiss() }
+                }
+
+                ToolbarItem(placement: .destructiveAction) {
+                    DeleteConfirmationButton(
+                        accessibilityLabel: "Delete Entry",
+                        confirmationTitle: "Delete Entry?",
+                        confirmationMessage: "This entry will be permanently deleted from every day where it appears.",
+                        deleteAction: {
+                            try JournalDeletionService.delete(
+                                entry,
+                                in: modelContext
+                            )
+                        },
+                        onDeleted: { dismiss() }
+                    )
                 }
 
                 ToolbarItemGroup(placement: .primaryAction) {
@@ -78,6 +98,11 @@ struct TransitDetailSheet: View {
             }
             .sheet(isPresented: $isEditingPresented) {
                 TransitEditSheet(entry: entry)
+            }
+            .onChange(of: entry.kind) { _, kind in
+                if kind != .transit {
+                    dismiss()
+                }
             }
         }
     }
@@ -129,6 +154,7 @@ private struct TransitEntrySummarySection: View {
     let timeConfidence: TimeConfidence
     let peopleNames: [String]
     let createdAt: Date
+    let entryKindReviewReason: String?
     let fieldReviews: [TransitFieldReview]
 
     var body: some View {
@@ -142,12 +168,12 @@ private struct TransitEntrySummarySection: View {
             }
             LabeledContent("Origin", value: origin ?? "Unresolved")
             LabeledContent("Destination", value: destination ?? "Unresolved")
-            TransitDetailDateRow(
+            EntryDetailDateRow(
                 title: "Started",
                 date: startTime,
                 timeZoneIdentifier: startTimeZoneIdentifier
             )
-            TransitDetailDateRow(
+            EntryDetailDateRow(
                 title: "Ended",
                 date: endTime,
                 timeZoneIdentifier: endTimeZoneIdentifier
@@ -170,18 +196,34 @@ private struct TransitEntrySummarySection: View {
                 )
             }
 
-            if !fieldReviews.isEmpty {
-                TransitFieldReviewList(reviews: fieldReviews)
+            if entryKindReviewReason != nil || !fieldReviews.isEmpty {
+                TransitFieldReviewList(
+                    entryKindReviewReason: entryKindReviewReason,
+                    reviews: fieldReviews
+                )
             }
         }
     }
 }
 
 private struct TransitFieldReviewList: View {
+    let entryKindReviewReason: String?
     let reviews: [TransitFieldReview]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if let entryKindReviewReason {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Entry type needs review")
+                            .fontWeight(.semibold)
+                        Text(entryKindReviewReason)
+                            .font(.caption)
+                    }
+                } icon: {
+                    Image(systemName: "exclamationmark.circle.fill")
+                }
+            }
             ForEach(reviews) { review in
                 Label {
                     VStack(alignment: .leading, spacing: 2) {
@@ -211,7 +253,7 @@ private extension TransitReviewField {
     }
 }
 
-private struct TransitDetailDateRow: View {
+struct EntryDetailDateRow: View {
     let title: LocalizedStringResource
     let date: Date?
     let timeZoneIdentifier: String
@@ -246,10 +288,11 @@ private struct TransitDetailDateRow: View {
     }
 }
 
-private extension TimeConfidence {
+extension TimeConfidence {
     var title: String {
         switch self {
         case .explicit: "Explicit"
+        case .inferredFromHistory: "Inferred from day history"
         case .inferredNearOrigin: "Inferred near origin"
         case .inferredNearDestination: "Inferred near destination"
         case .unresolved: "Unresolved"
@@ -258,7 +301,7 @@ private extension TimeConfidence {
     }
 }
 
-private struct TransitOriginalInputSection: View {
+struct EntryOriginalInputSection: View {
     let rawInput: String
 
     var body: some View {
@@ -269,7 +312,7 @@ private struct TransitOriginalInputSection: View {
     }
 }
 
-private struct TransitModelExchangeSection: View {
+struct EntryModelExchangeSection: View {
     let instructions: String?
     let prompt: String?
     let toolTranscript: String?
@@ -279,14 +322,14 @@ private struct TransitModelExchangeSection: View {
         Section("Model exchange") {
             if let instructions, let prompt, let response {
                 NavigationLink("Session instructions") {
-                    TransitModelPayloadView(
+                    EntryModelPayloadView(
                         title: "Session Instructions",
                         content: instructions
                     )
                 }
 
                 NavigationLink("Full prompt") {
-                    TransitModelPayloadView(
+                    EntryModelPayloadView(
                         title: "Full Prompt",
                         content: prompt
                     )
@@ -294,7 +337,7 @@ private struct TransitModelExchangeSection: View {
 
                 if let toolTranscript {
                     NavigationLink("Tool calls and outputs") {
-                        TransitModelPayloadView(
+                        EntryModelPayloadView(
                             title: "Tool Calls and Outputs",
                             content: toolTranscript
                         )
@@ -304,7 +347,7 @@ private struct TransitModelExchangeSection: View {
                 }
 
                 NavigationLink("Exact response") {
-                    TransitModelPayloadView(
+                    EntryModelPayloadView(
                         title: "Exact Response",
                         content: response
                     )
@@ -317,7 +360,7 @@ private struct TransitModelExchangeSection: View {
     }
 }
 
-private struct TransitModelPayloadView: View {
+struct EntryModelPayloadView: View {
     let title: LocalizedStringResource
     let content: String
 

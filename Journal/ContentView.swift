@@ -12,6 +12,7 @@ import SwiftUI
                         Place.self,
                         TransitDetails.self,
                         PlaceVisitDetails.self,
+                        WorkoutDetails.self,
                         TransitType.self,
                     ]
                 )
@@ -23,6 +24,7 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @State private var boardingPassImports = BoardingPassImportCoordinator()
+    @State private var workoutImports = WorkoutImportCoordinator()
 
     var body: some View {
         TabView {
@@ -41,11 +43,19 @@ struct ContentView: View {
         .task {
             _ = try? await ContactPersonSyncService
                 .synchronizeAllContacts(in: modelContext)
+            await workoutImports.start(in: modelContext)
+            await EntryWeatherService.populateMissing(in: modelContext)
             boardingPassImports.loadNextIfNeeded()
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 boardingPassImports.loadNextIfNeeded()
+                Task {
+                    await workoutImports.synchronize(in: modelContext)
+                    await EntryWeatherService.populateMissing(
+                        in: modelContext
+                    )
+                }
             }
         }
         .onOpenURL { url in
@@ -57,8 +67,7 @@ struct ContentView: View {
             BoardingPassImportReviewSheet(
                 pendingImport: pendingImport,
                 onComplete: boardingPassImports.complete,
-                onDefer: boardingPassImports.deferCurrentImport,
-                onDiscard: boardingPassImports.discard
+                onCancel: boardingPassImports.discard
             )
         }
         .alert(
@@ -72,6 +81,20 @@ struct ContentView: View {
         } message: {
             Text(
                 boardingPassImports.errorMessage
+                    ?? "An unknown error occurred."
+            )
+        }
+        .alert(
+            "Couldn’t Sync Workouts",
+            isPresented: Binding(
+                get: { workoutImports.errorMessage != nil },
+                set: { if !$0 { workoutImports.errorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(
+                workoutImports.errorMessage
                     ?? "An unknown error occurred."
             )
         }

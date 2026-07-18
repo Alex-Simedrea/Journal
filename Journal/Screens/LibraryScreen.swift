@@ -32,9 +32,13 @@ struct PeopleList: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Person.name) private var people: [Person]
     @State private var syncErrorMessage: String?
+    @State private var selectedPerson: Person?
 
     var body: some View {
-        PeopleListContent(people: people)
+        PeopleListContent(
+            people: people,
+            onSelect: { selectedPerson = $0 }
+        )
             .task {
                 do {
                     _ = try await ContactPersonSyncService
@@ -54,25 +58,34 @@ struct PeopleList: View {
             } message: {
                 Text(syncErrorMessage ?? "An unknown error occurred.")
             }
+            .sheet(item: $selectedPerson) { person in
+                PersonDetailSheet(person: person)
+            }
     }
 }
 
 private struct PeopleListContent: View {
     let people: [Person]
+    let onSelect: (Person) -> Void
 
     var body: some View {
         if people.isEmpty {
             ContentUnavailableView {
                 Label("No People Yet", systemImage: "person.2")
             } description: {
-                Text("Import someone from Contacts or add them manually.")
+                Text("Contacts are imported automatically, or you can add someone manually.")
             }
         } else {
             List(people) { person in
-                PersonRow(
-                    name: person.name,
-                    contactIdentifier: person.contactIdentifier
-                )
+                Button {
+                    onSelect(person)
+                } label: {
+                    PersonRow(
+                        name: person.name,
+                        contactIdentifier: person.contactIdentifier
+                    )
+                }
+                .buttonStyle(.plain)
             }
             .listStyle(.plain)
         }

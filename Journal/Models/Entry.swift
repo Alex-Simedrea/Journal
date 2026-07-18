@@ -10,10 +10,13 @@ import SwiftData
 
 enum LogKind: String, Codable, Hashable, Sendable {
     case transit
+    case placeVisit
+    case workout
 }
 
 enum TimeConfidence: String, Codable, Hashable, Sendable {
     case explicit
+    case inferredFromHistory
     case inferredNearOrigin
     case inferredNearDestination
     case unresolved
@@ -37,10 +40,13 @@ final class LogEntry {
     var modelToolTranscript: String?
     var modelResponse: String?
     var needsReview: Bool
+    var entryKindReviewReason: String?
     var photoReferences: [PhotoReference] = []
+    var weather: EntryWeather?
 
     @Relationship(deleteRule: .cascade) var transitDetails: TransitDetails?
     @Relationship(deleteRule: .cascade) var placeVisitDetails: PlaceVisitDetails?
+    @Relationship(deleteRule: .cascade) var workoutDetails: WorkoutDetails?
 
     @Relationship var people: [Person] = []
 
@@ -60,6 +66,8 @@ final class LogEntry {
         modelToolTranscript: String? = nil,
         modelResponse: String? = nil,
         photoReferences: [PhotoReference] = [],
+        weather: EntryWeather? = nil,
+        entryKindReviewReason: String? = nil,
         needsReview: Bool
     ) {
         self.id = id
@@ -79,6 +87,8 @@ final class LogEntry {
         self.modelToolTranscript = modelToolTranscript
         self.modelResponse = modelResponse
         self.photoReferences = photoReferences
+        self.weather = weather
+        self.entryKindReviewReason = entryKindReviewReason
         self.needsReview = needsReview
     }
 
@@ -96,6 +106,8 @@ final class LogEntry {
         modelToolTranscript: String? = nil,
         modelResponse: String? = nil,
         photoReferences: [PhotoReference] = [],
+        weather: EntryWeather? = nil,
+        entryKindReviewReason: String? = nil,
         needsReview: Bool
     ) {
         self.init(
@@ -114,6 +126,8 @@ final class LogEntry {
             modelToolTranscript: modelToolTranscript,
             modelResponse: modelResponse,
             photoReferences: photoReferences,
+            weather: weather,
+            entryKindReviewReason: entryKindReviewReason,
             needsReview: needsReview
         )
     }

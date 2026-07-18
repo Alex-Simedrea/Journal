@@ -65,6 +65,24 @@ struct PersonContactTests {
         #expect(idempotentResult == ContactSyncResult(addedCount: 0, updatedCount: 0))
     }
 
+    @Test("Launch sync respects contacts explicitly deleted from Journal")
+    func launchSyncExcludesDeletedContacts() throws {
+        let context = try makeContext()
+
+        let result = try ContactPersonSyncService.apply(
+            [
+                ContactSnapshot(identifier: "deleted-contact", name: "Deleted"),
+                ContactSnapshot(identifier: "kept-contact", name: "Kept"),
+            ],
+            excluding: ["deleted-contact"],
+            to: context
+        )
+
+        let people = try context.fetch(FetchDescriptor<Person>())
+        #expect(result == ContactSyncResult(addedCount: 1, updatedCount: 0))
+        #expect(people.map(\.contactIdentifier) == ["kept-contact"])
+    }
+
     @Test(arguments: [
         ("Alexandru Simedrea", "AS"),
         ("Prince", "PR"),
@@ -81,6 +99,7 @@ struct PersonContactTests {
             Place.self,
             TransitDetails.self,
             PlaceVisitDetails.self,
+            WorkoutDetails.self,
             TransitType.self,
         ])
         let configuration = ModelConfiguration(isStoredInMemoryOnly: true)

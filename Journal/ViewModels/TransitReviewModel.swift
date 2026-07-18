@@ -39,6 +39,7 @@ final class TransitReviewModel {
     var errorMessage: String?
 
     let reviewsTransitType: Bool
+    let reviewsEntryKind: Bool
     let reviewsOrigin: Bool
     let reviewsDestination: Bool
     let reviewsTime: Bool
@@ -66,6 +67,7 @@ final class TransitReviewModel {
             || details?.review(for: .people) != nil
         let hasLegacyGlobalReview = entry.needsReview
             && (details?.fieldReviews.isEmpty ?? true)
+            && entry.entryKindReviewReason == nil
 
         transitType = details?.type ?? ""
         originPlaceID = details?.originPlace?.id
@@ -80,6 +82,7 @@ final class TransitReviewModel {
         reviewsDestination = shouldReviewDestination
         reviewsTime = shouldReviewTime
         reviewsPeople = shouldReviewPeople
+        reviewsEntryKind = entry.entryKindReviewReason != nil
 
         reviewsTransitType = (details?.type.isEmpty ?? true)
             || details?.review(for: .transitType) != nil
@@ -108,7 +111,7 @@ final class TransitReviewModel {
 
     func requestPlace(
         for endpoint: TransitEndpoint,
-        candidate: TransitPlaceCandidate?,
+        candidate: PlaceCandidate?,
         rawText: String?
     ) {
         let fallback = rawText ?? ""
@@ -193,12 +196,20 @@ final class TransitReviewModel {
 
         addAlias(details.originRawText, to: origin)
         addAlias(details.destinationRawText, to: destination)
+        entry.entryKindReviewReason = nil
         entry.needsReview = false
+        let originalWeather = entry.weather
+        entry.weather = nil
 
         do {
             try modelContext.save()
+            EntryWeatherService.refreshInBackground(
+                entry,
+                in: modelContext
+            )
             return true
         } catch {
+            entry.weather = originalWeather
             errorMessage = error.localizedDescription
             return false
         }

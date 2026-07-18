@@ -7,20 +7,17 @@ struct BoardingPassImportReviewSheet: View {
     @Query(sort: \TransitType.canonicalName) private var transitTypes: [TransitType]
 
     let onComplete: (PendingBoardingPassImport) -> Void
-    let onDefer: () -> Void
-    let onDiscard: (PendingBoardingPassImport) -> Void
+    let onCancel: (PendingBoardingPassImport) -> Void
 
     @State private var model: BoardingPassReviewModel
 
     init(
         pendingImport: PendingBoardingPassImport,
         onComplete: @escaping (PendingBoardingPassImport) -> Void,
-        onDefer: @escaping () -> Void,
-        onDiscard: @escaping (PendingBoardingPassImport) -> Void
+        onCancel: @escaping (PendingBoardingPassImport) -> Void
     ) {
         self.onComplete = onComplete
-        self.onDefer = onDefer
-        self.onDiscard = onDiscard
+        self.onCancel = onCancel
         _model = State(
             initialValue: BoardingPassReviewModel(
                 pendingImport: pendingImport
@@ -52,22 +49,32 @@ struct BoardingPassImportReviewSheet: View {
                         places: places
                     )
                 )
-                BoardingPassImportDiscardSection {
-                    onDiscard(model.pendingImport)
-                }
             }
             .navigationTitle("Review Boarding Pass")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Not Now", role: .cancel, action: onDefer)
+                    Button(role: .cancel) {
+                        onCancel(model.pendingImport)
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .accessibilityLabel("Discard Boarding Pass")
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Import", role: .confirm) {
-                        if model.save(places: places, in: modelContext) {
-                            onComplete(model.pendingImport)
+                    Button(role: .confirm) {
+                        Task {
+                            if await model.save(
+                                places: places,
+                                in: modelContext
+                            ) {
+                                onComplete(model.pendingImport)
+                            }
                         }
+                    } label: {
+                        Image(systemName: "checkmark")
                     }
+                    .accessibilityLabel("Import Boarding Pass")
                     .disabled(!model.canSave)
                 }
             }
@@ -200,16 +207,6 @@ private struct BoardingPassImportTimeSection: View {
                     \.timeZone,
                     TimeZone(identifier: destinationTimeZoneIdentifier) ?? .current
                 )
-        }
-    }
-}
-
-private struct BoardingPassImportDiscardSection: View {
-    let onDiscard: () -> Void
-
-    var body: some View {
-        Section {
-            Button("Discard Import", role: .destructive, action: onDiscard)
         }
     }
 }

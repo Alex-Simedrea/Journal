@@ -9,6 +9,7 @@ import SwiftUI
 struct PlaceDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Query private var entries: [LogEntry]
 
     let place: Place
     @State private var model: PlaceEditorModel
@@ -25,8 +26,11 @@ struct PlaceDetailSheet: View {
                 PlaceEditorLocationSection(model: model)
                 PlaceMetadataSection(
                     createdAt: place.createdAt,
-                    lastVisitedAt: place.lastVisitedAt,
-                    visitCount: place.visitCount
+                    statistics: PlaceVisitStatisticsService
+                        .calculate(from: entries)[
+                            place.id,
+                            default: PlaceVisitStatistics()
+                        ]
                 )
             }
             .scrollDismissesKeyboard(.interactively)
@@ -37,6 +41,21 @@ struct PlaceDetailSheet: View {
                     Button(role: .cancel) {
                         dismiss()
                     }
+                }
+
+                ToolbarItem(placement: .destructiveAction) {
+                    DeleteConfirmationButton(
+                        accessibilityLabel: "Delete Place",
+                        confirmationTitle: "Delete Place?",
+                        confirmationMessage: "This place will be removed from your library. Existing entries will remain.",
+                        deleteAction: {
+                            try JournalDeletionService.delete(
+                                place,
+                                in: modelContext
+                            )
+                        },
+                        onDeleted: { dismiss() }
+                    )
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
@@ -68,8 +87,7 @@ struct PlaceDetailSheet: View {
 
 private struct PlaceMetadataSection: View {
     let createdAt: Date
-    let lastVisitedAt: Date
-    let visitCount: Int
+    let statistics: PlaceVisitStatistics
 
     var body: some View {
         Section("History") {
@@ -86,7 +104,7 @@ private struct PlaceMetadataSection: View {
             }
 
             LabeledContent("Last visited") {
-                if visitCount > 0 {
+                if let lastVisitedAt = statistics.lastVisitedAt {
                     Text(
                         lastVisitedAt,
                         format: .dateTime
@@ -102,7 +120,7 @@ private struct PlaceMetadataSection: View {
             }
 
             LabeledContent("Visits") {
-                Text(visitCount, format: .number)
+                Text(statistics.visitCount, format: .number)
             }
         }
     }

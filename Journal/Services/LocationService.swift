@@ -4,6 +4,7 @@
 //
 
 import CoreLocation
+import Foundation
 import MapKit
 
 enum LocationCaptureError: LocalizedError {
@@ -76,25 +77,57 @@ final class LocationService {
             latitude: coordinate.latitude,
             longitude: coordinate.longitude,
             formattedAddress: metadata.address,
+            compactAddress: metadata.compactAddress,
             timeZoneIdentifier: metadata.timeZoneIdentifier
         )
     }
 
+    static func compactAddress(for mapItem: MKMapItem) -> String? {
+        let primary = nonempty(mapItem.name)
+            ?? nonempty(mapItem.address?.shortAddress)
+        let city = nonempty(mapItem.addressRepresentations?.cityName)
+
+        guard let primary else { return city }
+        guard let city,
+              normalized(primary) != normalized(city),
+              !normalized(primary).contains(normalized(city)) else {
+            return primary
+        }
+        return [primary, city].joined(separator: ", ")
+    }
+
     private func reverseGeocode(
         _ location: CLLocation
-    ) async -> (address: String?, timeZoneIdentifier: String?) {
+    ) async -> (
+        address: String?,
+        compactAddress: String?,
+        timeZoneIdentifier: String?
+    ) {
         guard let request = MKReverseGeocodingRequest(location: location) else {
-            return (nil, nil)
+            return (nil, nil, nil)
         }
 
         do {
             let item = try await request.mapItems.first
             return (
                 item?.address?.fullAddress,
+                item.flatMap(Self.compactAddress),
                 item?.timeZone?.identifier
             )
         } catch {
-            return (nil, nil)
+            return (nil, nil, nil)
         }
+    }
+
+    private static func nonempty(_ value: String?) -> String? {
+        let value = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value?.isEmpty == false ? value : nil
+    }
+
+    private static func normalized(_ value: String) -> String {
+        value.folding(
+            options: [.caseInsensitive, .diacriticInsensitive],
+            locale: .current
+        )
     }
 }

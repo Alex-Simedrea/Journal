@@ -35,7 +35,7 @@ struct TransitFieldReview: Codable, Hashable, Identifiable {
     var id: TransitReviewField { field }
 }
 
-struct TransitPlaceCandidate: Codable, Hashable, Identifiable {
+struct PlaceCandidate: Codable, Hashable, Identifiable {
     var id: UUID
     var name: String
     var address: String?
@@ -91,8 +91,8 @@ final class TransitDetails {
     var destinationRawText: String?
 
     var durationSource: DurationSource
-    var originCandidates: [TransitPlaceCandidate]
-    var destinationCandidates: [TransitPlaceCandidate]
+    var originCandidates: [PlaceCandidate]
+    var destinationCandidates: [PlaceCandidate]
     var unresolvedPeople: [String]
     var fieldReviews: [TransitFieldReview] = []
 
@@ -105,8 +105,8 @@ final class TransitDetails {
         destinationPlace: Place? = nil,
         destinationRawText: String? = nil,
         durationSource: DurationSource = .unresolved,
-        originCandidates: [TransitPlaceCandidate] = [],
-        destinationCandidates: [TransitPlaceCandidate] = [],
+        originCandidates: [PlaceCandidate] = [],
+        destinationCandidates: [PlaceCandidate] = [],
         unresolvedPeople: [String] = [],
         fieldReviews: [TransitFieldReview] = []
     ) {

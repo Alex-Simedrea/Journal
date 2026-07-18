@@ -9,17 +9,20 @@ struct Location: Hashable {
     var latitude: Double
     var longitude: Double
     var formattedAddress: String?
+    var compactAddress: String?
     var timeZoneIdentifier: String?
 
     init(
         latitude: Double,
         longitude: Double,
         formattedAddress: String? = nil,
+        compactAddress: String? = nil,
         timeZoneIdentifier: String? = nil
     ) {
         self.latitude = latitude
         self.longitude = longitude
         self.formattedAddress = formattedAddress
+        self.compactAddress = compactAddress
         self.timeZoneIdentifier = timeZoneIdentifier
     }
 

@@ -18,6 +18,7 @@ struct TimelineProjectionTests {
             Place.self,
             TransitDetails.self,
             PlaceVisitDetails.self,
+            WorkoutDetails.self,
             TransitType.self,
         ])
         let configuration = ModelConfiguration(isStoredInMemoryOnly: true)

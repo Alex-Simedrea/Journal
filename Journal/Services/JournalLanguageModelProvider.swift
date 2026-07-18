@@ -9,9 +9,9 @@ import Foundation
 @MainActor
 enum JournalLanguageModelProvider {
     static let modelName = "gpt-oss:120b"
-    static let endpoint = URL(string: "https://ollama.com/v1/")!
+    nonisolated static let endpoint = URL(string: "https://ollama.com/v1/")!
 
-    static func configuredModel() throws -> OpenAILanguageModel {
+    static func configuredModel(recordResponses: Bool = false) throws -> OpenAILanguageModel {
         guard let apiKey = LanguageModelCredentialsStore().apiKey() else {
             throw LanguageModelConfigurationError.missingAPIKey
         }
@@ -20,7 +20,10 @@ enum JournalLanguageModelProvider {
             baseURL: endpoint,
             apiKey: apiKey,
             model: modelName,
-            apiVariant: .chatCompletions
+            apiVariant: .chatCompletions,
+            session: recordResponses
+                ? LanguageModelRecordingSession.make()
+                : makeDefaultSession()
         )
     }
 }

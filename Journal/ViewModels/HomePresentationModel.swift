@@ -8,13 +8,19 @@ import Observation
 import SwiftData
 
 enum HomeSheet: Identifiable, Equatable {
-    case transit(TransitComposerMode)
+    case describeEntry
+    case manualTransit
+    case manualVisit
     case details(UUID)
 
     var id: String {
         switch self {
-        case .transit(let mode):
-            "transit-\(mode.rawValue)"
+        case .describeEntry:
+            "describe-entry"
+        case .manualTransit:
+            "manual-transit"
+        case .manualVisit:
+            "manual-visit"
         case .details(let id):
             "details-\(id.uuidString)"
         }
@@ -30,6 +36,7 @@ final class HomePresentationModel {
     var selectedDay = TimelineDayKey.today()
     private(set) var timelineItems: [TimelineListItem] = []
     private(set) var reviewOccurrences: [TimelineOccurrence] = []
+    private(set) var selectedDayEntries: [LogEntry] = []
 
     private var loadedEntries: [LogEntry] = []
 
@@ -79,12 +86,23 @@ final class HomePresentationModel {
                 entries: entries.map(TimelineEntrySnapshot.init),
                 for: selectedDay
             )
+            let selectedEntryIDs = Set(
+                projection.occurrences.map(\.entryID)
+                    + projection.reviewOccurrences.map(\.entryID)
+            )
             loadedEntries = entries
+            selectedDayEntries = entries
+                .filter { selectedEntryIDs.contains($0.id) }
+                .sorted {
+                    ($0.startTime ?? $0.endTime ?? $0.createdAt)
+                        < ($1.startTime ?? $1.endTime ?? $1.createdAt)
+                }
             timelineItems = projection.listItems
             reviewOccurrences = projection.reviewOccurrences
             timelineErrorMessage = nil
         } catch {
             loadedEntries = []
+            selectedDayEntries = []
             timelineItems = []
             reviewOccurrences = []
             timelineErrorMessage = error.localizedDescription

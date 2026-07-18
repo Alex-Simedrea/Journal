@@ -15,6 +15,7 @@ struct TransitReviewSheet: View {
 
     let entry: LogEntry
     @State private var model: TransitReviewModel
+    @State private var isConversionPresented = false
 
     init(entry: LogEntry) {
         self.entry = entry
@@ -25,6 +26,13 @@ struct TransitReviewSheet: View {
         NavigationStack {
             Form {
                 TransitReviewExplanation()
+
+                if model.reviewsEntryKind {
+                    TransitEntryKindReviewSection(
+                        reason: entry.entryKindReviewReason,
+                        onSwitch: { isConversionPresented = true }
+                    )
+                }
 
                 if model.reviewsTransitType {
                     TransitTypeReviewSection(
@@ -117,6 +125,30 @@ struct TransitReviewSheet: View {
                     model.placeWasAdded(place, for: request.endpoint)
                 }
             }
+            .sheet(isPresented: $isConversionPresented) {
+                EntryKindConversionSheet(
+                    entry: entry,
+                    targetKind: .placeVisit,
+                    onConverted: { dismiss() }
+                )
+            }
+        }
+    }
+}
+
+private struct TransitEntryKindReviewSection: View {
+    let reason: String?
+    let onSwitch: () -> Void
+
+    var body: some View {
+        Section {
+            EntryReviewReason(reason: reason)
+            LabeledContent("Selected type", value: "Transit")
+            Button("Switch to Place Visit", action: onSwitch)
+        } header: {
+            Text("Entry type")
+        } footer: {
+            Text("Saving confirms this as transit.")
         }
     }
 }
@@ -159,7 +191,7 @@ private struct TransitOriginReviewSection: View {
     @Bindable var model: TransitReviewModel
     let places: [Place]
     let rawText: String?
-    let candidates: [TransitPlaceCandidate]
+    let candidates: [PlaceCandidate]
     let reason: String?
 
     var body: some View {
@@ -195,7 +227,7 @@ private struct TransitDestinationReviewSection: View {
     @Bindable var model: TransitReviewModel
     let places: [Place]
     let rawText: String?
-    let candidates: [TransitPlaceCandidate]
+    let candidates: [PlaceCandidate]
     let reason: String?
 
     var body: some View {
@@ -228,9 +260,9 @@ private struct TransitDestinationReviewSection: View {
 }
 
 private struct TransitPlaceCandidateList: View {
-    let candidates: [TransitPlaceCandidate]
+    let candidates: [PlaceCandidate]
     let fallbackText: String?
-    let onAdd: (TransitPlaceCandidate?) -> Void
+    let onAdd: (PlaceCandidate?) -> Void
 
     var body: some View {
         ForEach(candidates) { candidate in
@@ -260,7 +292,7 @@ private struct TransitPlaceCandidateList: View {
 }
 
 private struct TransitPlaceCandidateMetrics: View {
-    let candidate: TransitPlaceCandidate
+    let candidate: PlaceCandidate
 
     var body: some View {
         HStack(spacing: 10) {
