@@ -17,6 +17,15 @@ nonisolated struct TransitMapSearchResult: Sendable, Equatable {
     let walkingDurationMinutes: Double?
     let automobileDurationMinutes: Double?
 
+    var location: Location {
+        Location(
+            latitude: latitude,
+            longitude: longitude,
+            displayName: name,
+            formattedAddress: address,
+            timeZoneIdentifier: timeZoneIdentifier
+        )
+    }
 }
 
 nonisolated struct TransitRouteMetrics: Sendable, Equatable {

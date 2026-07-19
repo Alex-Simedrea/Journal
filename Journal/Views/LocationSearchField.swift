@@ -46,10 +46,7 @@ struct LocationSearchField: View {
                 Divider()
                     .padding(.top, 8)
 
-                ForEach(
-                    service.suggestions.enumerated(),
-                    id: \.offset
-                ) { (index, suggestion) in
+                ForEach(service.suggestions) { suggestion in
                     Button {
                         onSelect(suggestion)
                     } label: {
@@ -76,10 +73,8 @@ struct LocationSearchField: View {
                     }
                     .buttonStyle(.plain)
 
-                    if index != service.suggestions.count - 1 {
-                        Divider()
-                            .padding(.leading, 36)
-                    }
+                    Divider()
+                        .padding(.leading, 36)
                 }
             }
 

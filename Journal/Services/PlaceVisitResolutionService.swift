@@ -7,12 +7,13 @@ import Foundation
 
 struct ResolvedPlaceVisitDraft {
     var place: Place?
+    var location: Location?
     var placeRawText: String?
     var startTime: Date?
     var endTime: Date?
     var timeConfidence: TimeConfidence
     var people: [Person]
-    var candidates: [PlaceCandidate]
+    var candidates: [LocationCandidate]
     var unresolvedPeople: [String]
     var fieldReviews: [PlaceVisitFieldReview]
     var entryKindReviewReason: String?
@@ -60,6 +61,7 @@ enum PlaceVisitResolutionService {
 
         var draft = ResolvedPlaceVisitDraft(
             place: placeResolution.place,
+            location: placeResolution.location,
             placeRawText: generated.place.rawText,
             startTime: timeResolution.start,
             endTime: timeResolution.end,
@@ -87,12 +89,12 @@ enum PlaceVisitResolutionService {
         }
         if let error = placeResolution.validationError {
             draft.requireReview(.place, reason: error)
-        } else if placeResolution.place == nil {
+        } else if placeResolution.location == nil {
             draft.requireReview(
                 .place,
                 reason: placeResolution.candidates.isEmpty
-                    ? String(localized: "No saved place or plausible search candidate was resolved.")
-                    : String(localized: "Choose or save one of the suggested places.")
+                    ? String(localized: "No usable location was resolved.")
+                    : String(localized: "Choose one of the suggested locations.")
             )
         }
 
@@ -117,49 +119,54 @@ enum PlaceVisitResolutionService {
     }
 
     private static func resolvePlace(
-        _ generated: GeneratedPlaceResolution,
+        _ generated: GeneratedLocationResolution,
         references: EntryPromptReferences,
         searches: [TransitToolSearch]
     ) -> PlaceVisitPlaceResolution {
-        if let key = generated.savedPlaceKey {
-            guard let place = references.placesByKey[key] else {
-                return PlaceVisitPlaceResolution(
-                    place: nil,
-                    candidates: candidates(
-                        keys: generated.candidateKeys,
-                        searches: searches
-                    ),
-                    validationError: String(localized: "The model returned an unknown saved-place key.")
-                )
-            }
-            return PlaceVisitPlaceResolution(
-                place: place,
-                candidates: [],
-                validationError: generated.candidateKeys.isEmpty
-                    ? nil
-                    : String(localized: "A saved place must not also contain search candidates.")
-            )
-        }
-
         let resolvedCandidates = candidates(
-            keys: generated.candidateKeys,
+            keys: generated.alternativeLocationKeys,
+            references: references,
             searches: searches
         )
-        let unknownCandidate = resolvedCandidates.count
-            != Set(generated.candidateKeys).count
+        guard let key = generated.selectedLocationKey else {
+            return PlaceVisitPlaceResolution(
+                place: nil,
+                location: nil,
+                candidates: resolvedCandidates,
+                validationError: generated.alternativeLocationKeys.isEmpty
+                    ? nil
+                    : String(localized: "Location alternatives require a best selected location.")
+            )
+        }
+        if let reference = references.locationsByKey[key] {
+            return PlaceVisitPlaceResolution(
+                place: reference.place,
+                location: reference.location,
+                candidates: resolvedCandidates,
+                validationError: nil
+            )
+        }
+        if let result = searchResult(key: key, searches: searches) {
+            return PlaceVisitPlaceResolution(
+                place: nil,
+                location: result.location,
+                candidates: resolvedCandidates,
+                validationError: nil
+            )
+        }
         return PlaceVisitPlaceResolution(
             place: nil,
+            location: nil,
             candidates: resolvedCandidates,
-            validationError: unknownCandidate
-                ? String(localized: "The model returned an unknown place candidate key.")
-                : nil
+            validationError: String(localized: "The model returned an unknown location key.")
         )
     }
 
     private static func candidates(
         keys: [String],
+        references: EntryPromptReferences,
         searches: [TransitToolSearch]
-    ) -> [PlaceCandidate] {
+    ) -> [LocationCandidate] {
         let available = Dictionary(
             searches
                 .filter { $0.role == .visit }
@@ -170,11 +177,18 @@ enum PlaceVisitResolutionService {
         var seen: Set<String> = []
 
         return keys.compactMap { key in
-            guard seen.insert(key).inserted,
-                  let result = available[key] else {
-                return nil
+            guard seen.insert(key).inserted else { return nil }
+            if let reference = references.locationsByKey[key] {
+                return LocationCandidate(
+                    name: reference.displayName,
+                    address: reference.location.formattedAddress,
+                    latitude: reference.location.latitude,
+                    longitude: reference.location.longitude,
+                    timeZoneIdentifier: reference.location.timeZoneIdentifier
+                )
             }
-            return PlaceCandidate(
+            guard let result = available[key] else { return nil }
+            return LocationCandidate(
                 name: result.name,
                 address: result.address,
                 latitude: result.latitude,
@@ -185,6 +199,17 @@ enum PlaceVisitResolutionService {
                 automobileDurationMinutes: result.automobileDurationMinutes
             )
         }
+    }
+
+    private static func searchResult(
+        key: String,
+        searches: [TransitToolSearch]
+    ) -> TransitMapSearchResult? {
+        searches
+            .filter { $0.role == .visit }
+            .flatMap(\.candidates)
+            .first { $0.candidateKey == key }?
+            .result
     }
 
     private static func resolvePeople(
@@ -347,7 +372,8 @@ enum PlaceVisitResolutionService {
 
 private struct PlaceVisitPlaceResolution {
     let place: Place?
-    let candidates: [PlaceCandidate]
+    let location: Location?
+    let candidates: [LocationCandidate]
     let validationError: String?
 }
 

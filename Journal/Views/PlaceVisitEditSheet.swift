@@ -14,6 +14,7 @@ struct PlaceVisitEditSheet: View {
 
     let entry: LogEntry
     @State private var model: PlaceVisitEditModel
+    @State private var isPresentingLocationPicker = false
 
     init(entry: LogEntry) {
         self.entry = entry
@@ -23,7 +24,11 @@ struct PlaceVisitEditSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                PlaceVisitEditPlaceSection(model: model, places: places)
+                PlaceVisitEditPlaceSection(
+                    model: model,
+                    places: places,
+                    onChooseLocation: { isPresentingLocationPicker = true }
+                )
                 PlaceVisitEditTimeSection(model: model)
                 EntryPeopleSelectionSection(
                     people: people,
@@ -62,6 +67,13 @@ struct PlaceVisitEditSheet: View {
             } message: {
                 Text(model.errorMessage ?? "An unknown error occurred.")
             }
+            .sheet(isPresented: $isPresentingLocationPicker) {
+                EntryLocationPickerSheet(
+                    title: "Choose Location",
+                    places: places,
+                    onSelect: model.selectLocation
+                )
+            }
         }
     }
 }
@@ -69,15 +81,18 @@ struct PlaceVisitEditSheet: View {
 private struct PlaceVisitEditPlaceSection: View {
     @Bindable var model: PlaceVisitEditModel
     let places: [Place]
+    let onChooseLocation: () -> Void
 
     var body: some View {
         Section("Place") {
-            Picker("Visited", selection: $model.placeID) {
-                Text("Select a place").tag(nil as UUID?)
-                ForEach(places) { place in
-                    Text(place.name).tag(place.id as UUID?)
-                }
-            }
+            EntryLocationSelectionButton(
+                label: "Visited",
+                title: places.first(where: { $0.id == model.placeID })?.name
+                    ?? model.location?.presentationAddress,
+                systemImage: places.first(where: { $0.id == model.placeID })?.systemImage
+                    ?? .mappin,
+                action: onChooseLocation
+            )
         }
     }
 }

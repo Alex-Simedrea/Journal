@@ -14,15 +14,18 @@ struct TransitDetailSheet: View {
     let entry: LogEntry
     @State private var isReviewPresented = false
     @State private var isEditingPresented = false
+    @State private var saveLocationRequest: SaveLocationAsPlaceRequest?
 
     var body: some View {
         NavigationStack {
             Form {
                 if let details = entry.transitDetails {
                     TransitRouteMapSection(
-                        origin: details.originPlace?.location
+                        origin: details.originLocation
+                            ?? details.originPlace?.location
                             ?? details.originCandidates.first?.location,
-                        destination: details.destinationPlace?.location
+                        destination: details.destinationLocation
+                            ?? details.destinationPlace?.location
                             ?? details.destinationCandidates.first?.location
                     )
                     TransitEntrySummarySection(
@@ -30,9 +33,9 @@ struct TransitDetailSheet: View {
                         sourceOrganizationName: details.sourceOrganizationName,
                         sourceServiceIdentifier: details.sourceServiceIdentifier,
                         origin: details.originPlace?.name
-                            ?? details.originRawText,
+                            ?? details.originLocation?.presentationAddress,
                         destination: details.destinationPlace?.name
-                            ?? details.destinationRawText,
+                            ?? details.destinationLocation?.presentationAddress,
                         startTime: entry.startTime,
                         endTime: entry.endTime,
                         startTimeZoneIdentifier: entry.startTimeZoneIdentifier,
@@ -42,6 +45,10 @@ struct TransitDetailSheet: View {
                         createdAt: entry.createdAt,
                         entryKindReviewReason: entry.entryKindReviewReason,
                         fieldReviews: details.fieldReviews
+                    )
+                    TransitSavedPlaceActions(
+                        details: details,
+                        onSelect: { saveLocationRequest = $0 }
                     )
                 }
 
@@ -99,12 +106,65 @@ struct TransitDetailSheet: View {
             .sheet(isPresented: $isEditingPresented) {
                 TransitEditSheet(entry: entry)
             }
+            .sheet(item: $saveLocationRequest) {
+                SaveLocationAsPlaceSheet(request: $0)
+            }
             .onChange(of: entry.kind) { _, kind in
                 if kind != .transit {
                     dismiss()
                 }
             }
         }
+    }
+}
+
+private struct TransitSavedPlaceActions: View {
+    let details: TransitDetails
+    let onSelect: (SaveLocationAsPlaceRequest) -> Void
+
+    var body: some View {
+        EntrySavedPlaceActionsSection(
+            options: options,
+            onSelect: { option in
+                onSelect(
+                    SaveLocationAsPlaceRequest(
+                        name: option.name,
+                        location: option.location
+                    )
+                )
+            }
+        )
+    }
+
+    private var options: [EntryLocationSaveOption] {
+        var values: [EntryLocationSaveOption] = []
+        if let location = details.originLocation {
+            values.append(
+                EntryLocationSaveOption(
+                    id: "origin",
+                    label: "Save Origin as Place",
+                    name: details.originPlace?.name
+                        ?? location.presentationAddress
+                        ?? String(localized: "Origin"),
+                    location: location,
+                    isAlreadySaved: details.originPlace != nil
+                )
+            )
+        }
+        if let location = details.destinationLocation {
+            values.append(
+                EntryLocationSaveOption(
+                    id: "destination",
+                    label: "Save Destination as Place",
+                    name: details.destinationPlace?.name
+                        ?? location.presentationAddress
+                        ?? String(localized: "Destination"),
+                    location: location,
+                    isAlreadySaved: details.destinationPlace != nil
+                )
+            )
+        }
+        return values
     }
 }
 

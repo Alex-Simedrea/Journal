@@ -58,6 +58,12 @@ struct HomeScreen: View {
                 }
             )
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            HomeEntryComposer(
+                selectedDay: selectedDay,
+                onEntryChanged: reloadTimelineAndRoutes
+            )
+        }
         .sheet(isPresented: $isCalendarPresented) {
             TimelineCalendarSheet(
                 selectedDay: selectedDay,
@@ -214,6 +220,7 @@ private struct HomeTimeline: View {
         }
         .background(Color(uiColor: .systemGroupedBackground))
         .scrollContentBackground(.hidden)
+        .scrollDismissesKeyboard(.interactively)
         .id(selectedDay)
     }
 }

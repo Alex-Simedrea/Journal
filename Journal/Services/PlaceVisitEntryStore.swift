@@ -13,15 +13,20 @@ enum PlaceVisitEntryStore {
         modelExchange: EntryModelExchange? = nil,
         in modelContext: ModelContext
     ) throws -> LogEntry {
+        let location = draft.location?.withFallbackDisplayName(
+            draft.place?.name
+        )
         let details = PlaceVisitDetails(
             place: draft.place,
+            location: location,
             placeRawText: draft.placeRawText,
             candidates: draft.candidates,
             unresolvedPeople: draft.unresolvedPeople,
             fieldReviews: draft.fieldReviews
         )
         let creationZone = TimeZone.current.identifier
-        let visitZone = draft.place?.location.timeZoneIdentifier
+        let visitZone = location?.timeZoneIdentifier
+            ?? draft.place?.location.timeZoneIdentifier
             ?? draft.candidates.first?.timeZoneIdentifier
             ?? creationZone
         let entry = LogEntry(

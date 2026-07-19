@@ -19,12 +19,20 @@ final class EntryComposerModel {
             && !isSaving
     }
 
+    var isShowingError: Bool {
+        get { errorMessage != nil }
+        set {
+            if !newValue {
+                errorMessage = nil
+            }
+        }
+    }
+
     func submit(
         places: [Place],
         people: [Person],
         transitTypes: [TransitType],
         selectedDay: TimelineDayKey,
-        selectedDayEntries: [LogEntry],
         modelContext: ModelContext
     ) async -> Bool {
         let rawInput = input.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -38,6 +46,10 @@ final class EntryComposerModel {
             let currentLocation = try await LocationService.shared
                 .captureCurrentLocation()
             let now = Date.now
+            let historyEntries = try EntryPromptHistoryService.entries(
+                around: selectedDay,
+                in: modelContext
+            )
             let statistics = try PlaceVisitStatisticsService.fetch(
                 in: modelContext
             )
@@ -49,7 +61,7 @@ final class EntryComposerModel {
                     transitTypes: transitTypes,
                     visitStatisticsByPlaceID: statistics,
                     selectedDay: selectedDay,
-                    selectedDayEntries: selectedDayEntries,
+                    selectedDayEntries: historyEntries,
                     currentDate: now,
                     currentLocation: currentLocation
                 )
@@ -66,7 +78,7 @@ final class EntryComposerModel {
                     transitTypes: transitTypes,
                     currentLocation: currentLocation,
                     now: now,
-                    selectedDayEntries: selectedDayEntries
+                    selectedDayEntries: historyEntries
                 )
                 draft.entryKindReviewReason = reviewReason(entryKindReview)
                 let entry = try TransitEntryStore.insert(

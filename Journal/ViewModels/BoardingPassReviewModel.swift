@@ -125,8 +125,10 @@ final class BoardingPassReviewModel {
         let draft = ResolvedTransitDraft(
             transitType: transitType,
             originPlace: origin,
+            originLocation: origin?.location,
             originRawText: originName,
             destinationPlace: destination,
+            destinationLocation: destination?.location,
             destinationRawText: destinationName,
             startTime: startTime,
             endTime: endTime,

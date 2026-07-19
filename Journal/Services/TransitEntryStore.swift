@@ -15,13 +15,19 @@ enum TransitEntryStore {
         sourceServiceIdentifier: String? = nil,
         in modelContext: ModelContext
     ) throws -> LogEntry {
+        let originLocation = draft.originLocation?
+            .withFallbackDisplayName(draft.originPlace?.name)
+        let destinationLocation = draft.destinationLocation?
+            .withFallbackDisplayName(draft.destinationPlace?.name)
         let details = TransitDetails(
             type: draft.transitType,
             sourceOrganizationName: sourceOrganizationName,
             sourceServiceIdentifier: sourceServiceIdentifier,
             originPlace: draft.originPlace,
+            originLocation: originLocation,
             originRawText: draft.originRawText,
             destinationPlace: draft.destinationPlace,
+            destinationLocation: destinationLocation,
             destinationRawText: draft.destinationRawText,
             durationSource: draft.durationSource,
             originCandidates: draft.originCandidates,
@@ -30,10 +36,12 @@ enum TransitEntryStore {
             fieldReviews: draft.fieldReviews
         )
         let creationTimeZoneIdentifier = TimeZone.current.identifier
-        let startTimeZoneIdentifier = draft.originPlace?.location.timeZoneIdentifier
+        let startTimeZoneIdentifier = originLocation?.timeZoneIdentifier
+            ?? draft.originPlace?.location.timeZoneIdentifier
             ?? draft.originCandidates.first?.timeZoneIdentifier
             ?? creationTimeZoneIdentifier
-        let endTimeZoneIdentifier = draft.destinationPlace?.location.timeZoneIdentifier
+        let endTimeZoneIdentifier = destinationLocation?.timeZoneIdentifier
+            ?? draft.destinationPlace?.location.timeZoneIdentifier
             ?? draft.destinationCandidates.first?.timeZoneIdentifier
             ?? creationTimeZoneIdentifier
         let entry = LogEntry(

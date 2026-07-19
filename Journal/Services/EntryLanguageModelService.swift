@@ -25,14 +25,14 @@ nonisolated struct GeneratedTransitTypeResolution {
     let review: GeneratedFieldReview
 }
 
-@Generable(description: "One entry place resolved to either a saved place or MapKit candidates")
-nonisolated struct GeneratedPlaceResolution {
+@Generable(description: "One entry location resolved to a saved place, historical endpoint, or MapKit result")
+nonisolated struct GeneratedLocationResolution {
     @Guide(description: "Only the place phrase copied from the user text, without direction words")
     let rawText: String?
-    @Guide(description: "An exact human-readable placeKey copied from SAVED PLACES. Nil for searched or unresolved places.")
-    let savedPlaceKey: String?
-    @Guide(description: "Ordered candidateKey values copied from this place role's MapKit tool output. Empty for a saved place.", .maximumCount(3))
-    let candidateKeys: [String]
+    @Guide(description: "An exact locationKey copied from SAVED PLACES, LOCATION HISTORY, or a MapKit tool result. Nil only when no defensible location exists.")
+    let selectedLocationKey: String?
+    @Guide(description: "Other plausible locationKey values, excluding selectedLocationKey. Empty when the selection is unambiguous.", .maximumCount(3))
+    let alternativeLocationKeys: [String]
     let review: GeneratedFieldReview
 }
 
@@ -78,8 +78,8 @@ nonisolated struct GeneratedPersonResolution {
 @Generable(description: "A structured extraction and resolution of exactly one transit log")
 nonisolated struct GeneratedTransitLog {
     let transitType: GeneratedTransitTypeResolution
-    let origin: GeneratedPlaceResolution
-    let destination: GeneratedPlaceResolution
+    let origin: GeneratedLocationResolution
+    let destination: GeneratedLocationResolution
     let time: GeneratedTimeResolution
     @Guide(description: "Only people explicitly mentioned in the user text", .maximumCount(12))
     let people: [GeneratedPersonResolution]
@@ -98,7 +98,7 @@ nonisolated struct GeneratedPlaceVisitTimeResolution {
 
 @Generable(description: "A structured extraction and resolution of exactly one place visit")
 nonisolated struct GeneratedPlaceVisitLog {
-    let place: GeneratedPlaceResolution
+    let place: GeneratedLocationResolution
     let time: GeneratedPlaceVisitTimeResolution
     @Guide(description: "Only people explicitly mentioned in the user text", .maximumCount(12))
     let people: [GeneratedPersonResolution]
@@ -143,32 +143,32 @@ nonisolated struct SearchPlacesArguments {
     let query: String
 }
 
-@Generable(description: "Arguments for a destination search with route estimates from a saved origin")
+@Generable(description: "Arguments for a destination search with route estimates from any resolved origin")
 nonisolated struct SearchDestinationWithRoutesArguments {
     @Guide(description: "Only the unresolved destination wording copied from the user text")
     let query: String
-    @Guide(description: "The exact human-readable placeKey copied from the resolved SAVED PLACES origin")
-    let originPlaceKey: String
+    @Guide(description: "The exact locationKey for the resolved origin")
+    let originLocationKey: String
 }
 
-@Generable(description: "Arguments for estimating the duration between two resolved saved places")
-nonisolated struct EstimateSavedRouteArguments {
-    @Guide(description: "The exact placeKey for the resolved saved origin")
-    let originPlaceKey: String
-    @Guide(description: "The exact placeKey for the resolved saved destination")
-    let destinationPlaceKey: String
+@Generable(description: "Arguments for estimating the duration between two resolved locations")
+nonisolated struct EstimateRouteArguments {
+    @Guide(description: "The exact locationKey for the resolved origin")
+    let originLocationKey: String
+    @Guide(description: "The exact locationKey for the resolved destination")
+    let destinationLocationKey: String
     @Guide(description: "The exact canonicalName from TRANSIT TYPES")
     let transitType: String
 }
 
-@Generable(description: "Arguments for comparing several saved-place endpoint matches by route")
-nonisolated struct CompareSavedRoutesArguments {
-    @Guide(description: "Whether candidatePlaceKeys are possible origins or destinations")
+@Generable(description: "Arguments for comparing several endpoint matches by route")
+nonisolated struct CompareRoutesArguments {
+    @Guide(description: "Whether candidateLocationKeys are possible origins or destinations")
     let candidateEndpoint: GeneratedPlaceRole
-    @Guide(description: "The exact placeKey for the already-resolved opposite endpoint")
-    let fixedPlaceKey: String
-    @Guide(description: "All plausible SAVED PLACES keys for the ambiguous endpoint", .maximumCount(4))
-    let candidatePlaceKeys: [String]
+    @Guide(description: "The exact locationKey for the already-resolved opposite endpoint")
+    let fixedLocationKey: String
+    @Guide(description: "All plausible location keys for the ambiguous endpoint", .maximumCount(4))
+    let candidateLocationKeys: [String]
     @Guide(description: "The exact canonicalName from TRANSIT TYPES")
     let transitType: String
 }
@@ -191,6 +191,11 @@ nonisolated struct TransitToolSearch: Sendable {
 
 actor TransitToolRecorder {
     private var searches: [TransitToolSearch] = []
+    private var coordinatesByKey: [String: TransitToolCoordinate]
+
+    init(coordinatesByKey: [String: TransitToolCoordinate] = [:]) {
+        self.coordinatesByKey = coordinatesByKey
+    }
 
     func record(
         role: GeneratedPlaceRole,
@@ -209,8 +214,18 @@ actor TransitToolRecorder {
             query: query,
             candidates: candidates
         )
+        for candidate in candidates {
+            coordinatesByKey[candidate.candidateKey] = TransitToolCoordinate(
+                latitude: candidate.result.latitude,
+                longitude: candidate.result.longitude
+            )
+        }
         searches.append(search)
         return search
+    }
+
+    func coordinate(for key: String) -> TransitToolCoordinate? {
+        coordinatesByKey[key]
     }
 
     func recordedSearches() -> [TransitToolSearch] {
@@ -227,9 +242,10 @@ nonisolated struct SearchPlacesTool: Tool {
     let name = "search_places"
     let description = """
         Search MapKit near the user's current location for exactly one origin, destination,
-        or visited place that did not match SAVED PLACES. The query must contain only that
-        place's words from the user text. Never search for a transit type, service, person,
-        time phrase, or a place already resolved to a saved place.
+        or visited place that did not match SAVED PLACES or LOCATION HISTORY. The query must
+        contain only that place's words from the user text. Never search for a transit type,
+        service, person,
+        time phrase, or a location already resolved from the supplied context.
         """
 
     func call(arguments: SearchPlacesArguments) async throws -> String {
@@ -260,14 +276,13 @@ nonisolated struct SearchPlacesTool: Tool {
 }
 
 nonisolated struct SearchDestinationWithRoutesTool: Tool {
-    let originCoordinatesByKey: [String: TransitToolCoordinate]
     let prohibitedQueries: Set<String>
     let recorder: TransitToolRecorder
 
     let name = "search_destination_with_routes"
     let description = """
-        Search MapKit for an unresolved destination when the origin is already a SAVED PLACES
-        match. Pass the exact saved origin placeKey and only the destination words from the
+        Search MapKit for an unresolved destination when the origin is already a resolved
+        location. Pass the exact origin locationKey and only the destination words from the
         user text. Results include distance from the origin plus walking and automobile time.
         Never pass a name in place of a key and never search for the transit type.
         """
@@ -283,11 +298,13 @@ nonisolated struct SearchDestinationWithRoutesTool: Tool {
             )
         }
 
-        guard let origin = originCoordinatesByKey[arguments.originPlaceKey] else {
+        guard let origin = await recorder.coordinate(
+            for: arguments.originLocationKey
+        ) else {
             return TransitToolOutputFormatter.error(
                 role: .destination,
                 query: arguments.query,
-                message: "originPlaceKey is not an exact SAVED PLACES key"
+                message: "originLocationKey is not an available location key"
             )
         }
 
@@ -307,14 +324,14 @@ nonisolated struct SearchDestinationWithRoutesTool: Tool {
     }
 }
 
-nonisolated struct EstimateSavedRouteTool: Tool {
-    let coordinatesByKey: [String: TransitToolCoordinate]
+nonisolated struct EstimateRouteTool: Tool {
+    let recorder: TransitToolRecorder
     let routingModesByTypeOrAlias: [String: TransitRoutingMode]
 
-    let name = "estimate_saved_route"
+    let name = "estimate_route"
     let description = """
-        Estimate a trip duration between two already-resolved SAVED PLACES. Use exact
-        placeKey values and the canonical transit type. MapKit walking time is used only
+        Estimate a trip duration between two already-resolved locations. Use exact
+        locationKey values and the canonical transit type. MapKit walking time is used only
         for walking; MapKit automobile time is the rough estimate for every other transit
         type. The output duration is in minutes and includes its source. You must call this
         whenever the user explicitly gives exactly one time boundary and you need to derive
@@ -322,27 +339,29 @@ nonisolated struct EstimateSavedRouteTool: Tool {
         when inferring both timestamps from proximity.
         """
 
-    func call(arguments: EstimateSavedRouteArguments) async throws -> String {
-        guard let origin = coordinatesByKey[arguments.originPlaceKey],
-              let destination = coordinatesByKey[arguments.destinationPlaceKey] else {
+    func call(arguments: EstimateRouteArguments) async throws -> String {
+        guard let origin = await recorder.coordinate(for: arguments.originLocationKey),
+              let destination = await recorder.coordinate(
+                for: arguments.destinationLocationKey
+              ) else {
             return encode(
                 TransitRouteEstimateOutput(
-                    originPlaceKey: arguments.originPlaceKey,
-                    destinationPlaceKey: arguments.destinationPlaceKey,
+                    originLocationKey: arguments.originLocationKey,
+                    destinationLocationKey: arguments.destinationLocationKey,
                     durationMinutes: nil,
                     durationSource: nil,
-                    error: "Both keys must exactly match SAVED PLACES placeKey values"
+                    error: "Both keys must match available locationKey values"
                 )
             )
         }
-        guard arguments.originPlaceKey != arguments.destinationPlaceKey else {
+        guard arguments.originLocationKey != arguments.destinationLocationKey else {
             return encode(
                 TransitRouteEstimateOutput(
-                    originPlaceKey: arguments.originPlaceKey,
-                    destinationPlaceKey: arguments.destinationPlaceKey,
+                    originLocationKey: arguments.originLocationKey,
+                    destinationLocationKey: arguments.destinationLocationKey,
                     durationMinutes: nil,
                     durationSource: nil,
-                    error: "Origin and destination must be different saved places"
+                    error: "Origin and destination must be different locations"
                 )
             )
         }
@@ -367,8 +386,8 @@ nonisolated struct EstimateSavedRouteTool: Tool {
             )
             return encode(
                 TransitRouteEstimateOutput(
-                    originPlaceKey: arguments.originPlaceKey,
-                    destinationPlaceKey: arguments.destinationPlaceKey,
+                    originLocationKey: arguments.originLocationKey,
+                    destinationLocationKey: arguments.destinationLocationKey,
                     durationMinutes: rounded(duration / 60),
                     durationSource: routingMode == .walking
                         ? "mapkitWalking"
@@ -379,8 +398,8 @@ nonisolated struct EstimateSavedRouteTool: Tool {
         } catch {
             return encode(
                 TransitRouteEstimateOutput(
-                    originPlaceKey: arguments.originPlaceKey,
-                    destinationPlaceKey: arguments.destinationPlaceKey,
+                    originLocationKey: arguments.originLocationKey,
+                    destinationLocationKey: arguments.destinationLocationKey,
                     durationMinutes: nil,
                     durationSource: nil,
                     error: "No route duration could be estimated"
@@ -404,13 +423,13 @@ nonisolated struct EstimateSavedRouteTool: Tool {
     }
 }
 
-nonisolated struct CompareSavedRoutesTool: Tool {
-    let coordinatesByKey: [String: TransitToolCoordinate]
+nonisolated struct CompareRoutesTool: Tool {
+    let recorder: TransitToolRecorder
     let routingModesByTypeOrAlias: [String: TransitRoutingMode]
 
-    let name = "compare_saved_routes"
+    let name = "compare_routes"
     let description = """
-        Compare multiple SAVED PLACES that plausibly match one endpoint when the opposite
+        Compare multiple locations that plausibly match one endpoint when the opposite
         endpoint is already resolved. This is the required tool for ambiguity such as two
         saved places containing the same short name or an exact alias that conflicts with
         the trip's geography. It returns straight-line distance and the relevant MapKit
@@ -418,23 +437,25 @@ nonisolated struct CompareSavedRoutesTool: Tool {
         transit types. Do not use current-location distance as a substitute for this tool.
         """
 
-    func call(arguments: CompareSavedRoutesArguments) async throws -> String {
+    func call(arguments: CompareRoutesArguments) async throws -> String {
         guard arguments.candidateEndpoint != .visit else {
             return encode(
                 SavedRouteComparisonOutput(
                     candidateEndpoint: arguments.candidateEndpoint.label,
-                    fixedPlaceKey: arguments.fixedPlaceKey,
+                    fixedLocationKey: arguments.fixedLocationKey,
                     error: "Route comparison is available only for transit endpoints",
                     candidates: []
                 )
             )
         }
-        guard let fixed = coordinatesByKey[arguments.fixedPlaceKey] else {
+        guard let fixed = await recorder.coordinate(
+            for: arguments.fixedLocationKey
+        ) else {
             return encode(
                 SavedRouteComparisonOutput(
                     candidateEndpoint: arguments.candidateEndpoint.label,
-                    fixedPlaceKey: arguments.fixedPlaceKey,
-                    error: "fixedPlaceKey must exactly match a SAVED PLACES key",
+                    fixedLocationKey: arguments.fixedLocationKey,
+                    error: "fixedLocationKey must match an available location key",
                     candidates: []
                 )
             )
@@ -451,17 +472,17 @@ nonisolated struct CompareSavedRoutesTool: Tool {
         var seen: Set<String> = []
         var comparisons: [SavedRouteCandidateOutput] = []
 
-        for candidateKey in arguments.candidatePlaceKeys where seen.insert(candidateKey).inserted {
-            guard let candidate = coordinatesByKey[candidateKey] else {
+        for candidateKey in arguments.candidateLocationKeys where seen.insert(candidateKey).inserted {
+            guard let candidate = await recorder.coordinate(for: candidateKey) else {
                 comparisons.append(
                     SavedRouteCandidateOutput(
-                        candidatePlaceKey: candidateKey,
-                        originPlaceKey: nil,
-                        destinationPlaceKey: nil,
+                        candidateLocationKey: candidateKey,
+                        originLocationKey: nil,
+                        destinationLocationKey: nil,
                         straightLineDistanceKilometers: nil,
                         durationMinutes: nil,
                         durationSource: nil,
-                        error: "candidatePlaceKey is not an exact SAVED PLACES key"
+                        error: "candidateLocationKey is not an available location key"
                     )
                 )
                 continue
@@ -476,10 +497,10 @@ nonisolated struct CompareSavedRoutesTool: Tool {
                 origin = candidate
                 originKey = candidateKey
                 destination = fixed
-                destinationKey = arguments.fixedPlaceKey
+                destinationKey = arguments.fixedLocationKey
             case .destination:
                 origin = fixed
-                originKey = arguments.fixedPlaceKey
+                originKey = arguments.fixedLocationKey
                 destination = candidate
                 destinationKey = candidateKey
             case .visit:
@@ -510,9 +531,9 @@ nonisolated struct CompareSavedRoutesTool: Tool {
                 )
                 comparisons.append(
                     SavedRouteCandidateOutput(
-                        candidatePlaceKey: candidateKey,
-                        originPlaceKey: originKey,
-                        destinationPlaceKey: destinationKey,
+                        candidateLocationKey: candidateKey,
+                        originLocationKey: originKey,
+                        destinationLocationKey: destinationKey,
                         straightLineDistanceKilometers: rounded(distance),
                         durationMinutes: rounded(duration / 60),
                         durationSource: durationSource,
@@ -522,9 +543,9 @@ nonisolated struct CompareSavedRoutesTool: Tool {
             } catch {
                 comparisons.append(
                     SavedRouteCandidateOutput(
-                        candidatePlaceKey: candidateKey,
-                        originPlaceKey: originKey,
-                        destinationPlaceKey: destinationKey,
+                        candidateLocationKey: candidateKey,
+                        originLocationKey: originKey,
+                        destinationLocationKey: destinationKey,
                         straightLineDistanceKilometers: rounded(distance),
                         durationMinutes: nil,
                         durationSource: durationSource,
@@ -537,7 +558,7 @@ nonisolated struct CompareSavedRoutesTool: Tool {
         return encode(
             SavedRouteComparisonOutput(
                 candidateEndpoint: arguments.candidateEndpoint.label,
-                fixedPlaceKey: arguments.fixedPlaceKey,
+                fixedLocationKey: arguments.fixedLocationKey,
                 error: comparisons.isEmpty ? "No candidate keys were provided" : nil,
                 candidates: comparisons
             )
@@ -561,15 +582,15 @@ nonisolated struct CompareSavedRoutesTool: Tool {
 
 nonisolated private struct SavedRouteComparisonOutput: Encodable {
     let candidateEndpoint: String
-    let fixedPlaceKey: String
+    let fixedLocationKey: String
     let error: String?
     let candidates: [SavedRouteCandidateOutput]
 }
 
 nonisolated private struct SavedRouteCandidateOutput: Encodable {
-    let candidatePlaceKey: String
-    let originPlaceKey: String?
-    let destinationPlaceKey: String?
+    let candidateLocationKey: String
+    let originLocationKey: String?
+    let destinationLocationKey: String?
     let straightLineDistanceKilometers: Double?
     let durationMinutes: Double?
     let durationSource: String?
@@ -577,8 +598,8 @@ nonisolated private struct SavedRouteCandidateOutput: Encodable {
 }
 
 nonisolated private struct TransitRouteEstimateOutput: Encodable {
-    let originPlaceKey: String
-    let destinationPlaceKey: String
+    let originLocationKey: String
+    let destinationLocationKey: String
     let durationMinutes: Double?
     let durationSource: String?
     let error: String?
@@ -642,7 +663,7 @@ nonisolated private struct TransitToolOutput: Encodable {
 }
 
 nonisolated private struct TransitToolCandidateOutput: Encodable {
-    let candidateKey: String
+    let locationKey: String
     let name: String
     let address: String?
     let timeZoneIdentifier: String?
@@ -651,7 +672,7 @@ nonisolated private struct TransitToolCandidateOutput: Encodable {
     let automobileDurationMinutes: Double?
 
     init(_ candidate: TransitToolCandidate) {
-        candidateKey = candidate.candidateKey
+        locationKey = candidate.candidateKey
         name = candidate.result.name
         address = candidate.result.address
         timeZoneIdentifier = candidate.result.timeZoneIdentifier
@@ -672,13 +693,176 @@ struct EntryPromptContext {
     let currentLocation: Location
 }
 
+enum EntryLocationReferenceSource: String, Hashable {
+    case savedPlace
+    case history
+}
+
+struct EntryLocationReference {
+    let key: String
+    let location: Location
+    let place: Place?
+    let source: EntryLocationReferenceSource
+    let displayName: String
+}
+
+private struct HistoryLocationIdentity: Hashable {
+    let entryID: UUID
+    let role: String
+}
+
 struct EntryPromptReferences {
     let placesByKey: [String: Place]
     let peopleByKey: [String: Person]
+    let locationsByKey: [String: EntryLocationReference]
 
-    init(places: [Place], people: [Person]) {
+    private let historyLocationKeys: [HistoryLocationIdentity: String]
+
+    init(
+        places: [Place],
+        people: [Person],
+        historyEntries: [LogEntry] = [],
+        selectedDay: TimelineDayKey? = nil
+    ) {
         placesByKey = Self.placeMap(places)
         peopleByKey = Self.personMap(people)
+        var locations: [String: EntryLocationReference] = [:]
+        for (key, place) in placesByKey {
+            locations[key] = EntryLocationReference(
+                key: key,
+                location: place.location,
+                place: place,
+                source: .savedPlace,
+                displayName: place.name
+            )
+        }
+
+        var historyKeys: [HistoryLocationIdentity: String] = [:]
+        for (index, entry) in historyEntries.enumerated() {
+            let entryNumber = index + 1
+            let dayLabel = Self.historyDayLabel(
+                for: entry,
+                selectedDay: selectedDay
+            )
+            for endpoint in Self.historyEndpoints(for: entry) {
+                let identity = HistoryLocationIdentity(
+                    entryID: entry.id,
+                    role: endpoint.role
+                )
+                let key = "history-\(dayLabel)-entry-\(entryNumber)-\(endpoint.role)"
+                historyKeys[identity] = key
+                locations[key] = EntryLocationReference(
+                    key: key,
+                    location: endpoint.location,
+                    place: endpoint.place,
+                    source: .history,
+                    displayName: endpoint.displayName
+                )
+            }
+        }
+        locationsByKey = locations
+        historyLocationKeys = historyKeys
+    }
+
+    private static func historyDayLabel(
+        for entry: LogEntry,
+        selectedDay: TimelineDayKey?
+    ) -> String {
+        guard let selectedDay else { return "entry-day" }
+        let anchor = entry.startTime ?? entry.endTime ?? entry.createdAt
+        let timeZone = TimeZone(
+            identifier: entry.startTimeZoneIdentifier
+        ) ?? TimeZone(
+            identifier: entry.creationTimeZoneIdentifier
+        ) ?? .current
+        let entryDay = TimelineDayKey(date: anchor, timeZone: timeZone)
+        if entryDay == selectedDay.addingDays(-1) { return "previous-day" }
+        if entryDay == selectedDay { return "selected-day" }
+        if entryDay == selectedDay.addingDays(1) { return "next-day" }
+        return "nearby-day"
+    }
+
+    func historyLocationKey(entryID: UUID, role: String) -> String? {
+        historyLocationKeys[
+            HistoryLocationIdentity(entryID: entryID, role: role)
+        ]
+    }
+
+    private static func historyEndpoints(
+        for entry: LogEntry
+    ) -> [(role: String, location: Location, place: Place?, displayName: String)] {
+        switch entry.kind {
+        case .transit:
+            guard let details = entry.transitDetails else { return [] }
+            return [
+                endpoint(
+                    role: "transit-origin",
+                    location: details.originLocation ?? details.originPlace?.location,
+                    place: details.originPlace,
+                    rawText: details.originRawText
+                ),
+                endpoint(
+                    role: "transit-destination",
+                    location: details.destinationLocation ?? details.destinationPlace?.location,
+                    place: details.destinationPlace,
+                    rawText: details.destinationRawText
+                ),
+            ].compactMap { $0 }
+        case .placeVisit:
+            guard let details = entry.placeVisitDetails else { return [] }
+            return [
+                endpoint(
+                    role: "visit-location",
+                    location: details.location ?? details.place?.location,
+                    place: details.place,
+                    rawText: details.placeRawText
+                ),
+            ].compactMap { $0 }
+        case .workout:
+            guard let details = entry.workoutDetails else { return [] }
+            if details.movementKind == .moving {
+                return [
+                    endpoint(
+                        role: "workout-origin",
+                        location: details.originLocation ?? details.originPlace?.location,
+                        place: details.originPlace,
+                        rawText: nil
+                    ),
+                    endpoint(
+                        role: "workout-destination",
+                        location: details.destinationLocation ?? details.destinationPlace?.location,
+                        place: details.destinationPlace,
+                        rawText: nil
+                    ),
+                ].compactMap { $0 }
+            }
+            return [
+                endpoint(
+                    role: "workout-location",
+                    location: details.sourceLocation ?? details.place?.location,
+                    place: details.place,
+                    rawText: nil
+                ),
+            ].compactMap { $0 }
+        }
+    }
+
+    private static func endpoint(
+        role: String,
+        location: Location?,
+        place: Place?,
+        rawText: String?
+    ) -> (role: String, location: Location, place: Place?, displayName: String)? {
+        guard let location else { return nil }
+        return (
+            role,
+            location,
+            place,
+            place?.name
+                ?? location.preferredName
+                ?? rawText
+                ?? String(localized: "Unnamed location")
+        )
     }
 
     private static func placeMap(
@@ -804,7 +988,9 @@ enum EntryLanguageModelService {
         let model = try JournalLanguageModelProvider.configuredModel(recordResponses: true)
         let references = EntryPromptReferences(
             places: context.places,
-            people: context.people
+            people: context.people,
+            historyEntries: context.selectedDayEntries,
+            selectedDay: context.selectedDay
         )
         let currentCoordinate = context.currentLocation.coordinate
         let requestPrompt = prompt(
@@ -812,17 +998,19 @@ enum EntryLanguageModelService {
             context: context,
             references: references
         )
-        let toolRecorder = TransitToolRecorder()
-        let originCoordinates = Dictionary(
-            uniqueKeysWithValues: references.placesByKey.map { key, place in
+        let locationCoordinates = Dictionary(
+            uniqueKeysWithValues: references.locationsByKey.map { key, reference in
                 (
                     key,
                     TransitToolCoordinate(
-                        latitude: place.location.latitude,
-                        longitude: place.location.longitude
+                        latitude: reference.location.latitude,
+                        longitude: reference.location.longitude
                     )
                 )
             }
+        )
+        let toolRecorder = TransitToolRecorder(
+            coordinatesByKey: locationCoordinates
         )
         let routingModes = Dictionary(
             context.transitTypes.flatMap { definition in
@@ -850,16 +1038,15 @@ enum EntryLanguageModelService {
                     recorder: toolRecorder
                 ),
                 SearchDestinationWithRoutesTool(
-                    originCoordinatesByKey: originCoordinates,
                     prohibitedQueries: prohibitedToolQueries,
                     recorder: toolRecorder
                 ),
-                EstimateSavedRouteTool(
-                    coordinatesByKey: originCoordinates,
+                EstimateRouteTool(
+                    recorder: toolRecorder,
                     routingModesByTypeOrAlias: routingModes
                 ),
-                CompareSavedRoutesTool(
-                    coordinatesByKey: originCoordinates,
+                CompareRoutesTool(
+                    recorder: toolRecorder,
                     routingModesByTypeOrAlias: routingModes
                 ),
             ],
@@ -961,9 +1148,12 @@ enum EntryLanguageModelService {
         - entryKindReview applies only to the classification. Set it when the sentence
           genuinely mixes a trip and a stay or does not establish which event is intended.
         - Every other review belongs to its own field. There is no global confidence score.
-        - A saved place key is copied exactly from SAVED PLACES. It is not a database UUID.
-        - A candidate key is copied exactly from a search tool result. It must never be used
-          as savedPlaceKey.
+        - A location key is an opaque, readable reference copied exactly from SAVED PLACES,
+          LOCATION HISTORY, or a MapKit tool result. It is not a database UUID and it is not
+          necessarily a saved place.
+        - selectedLocationKey is the single best resolved location. A confident MapKit result
+          is valid here and does not require the user to save it. alternativeLocationKeys
+          contains only other plausible results and must exclude the selected key.
         - Give short, evidence-based review reasons. Do not reveal hidden reasoning.
         - Return only the JSON object. Do not use Markdown, code fences, comments, prose, or
           a second alternative response.
@@ -981,14 +1171,14 @@ enum EntryLanguageModelService {
             },
             "origin": {
               "rawText": "<exact origin wording or null>",
-              "savedPlaceKey": "<saved key or null>",
-              "candidateKeys": [],
+              "selectedLocationKey": "<location key or null>",
+              "alternativeLocationKeys": [],
               "review": {"needsReview": false, "reason": null}
             },
             "destination": {
               "rawText": "<exact destination wording or null>",
-              "savedPlaceKey": "<saved key or null>",
-              "candidateKeys": [],
+              "selectedLocationKey": "<location key or null>",
+              "alternativeLocationKeys": [],
               "review": {"needsReview": false, "reason": null}
             },
             "time": {
@@ -1016,8 +1206,8 @@ enum EntryLanguageModelService {
           "placeVisit": {
             "place": {
               "rawText": "<exact place wording or null>",
-              "savedPlaceKey": "<saved key or null>",
-              "candidateKeys": [],
+              "selectedLocationKey": "<location key or null>",
+              "alternativeLocationKeys": [],
               "review": {"needsReview": false, "reason": null}
             },
             "time": {
@@ -1057,11 +1247,15 @@ enum EntryLanguageModelService {
         SHARED RESOLUTION RULES
         1. Parse roles before resolving them. Transport words, people, and time phrases are
            not place queries.
-        2. Resolve places against the complete SAVED PLACES list first. Compare normalized
-           names, aliases, address context, current distance, the other transit endpoint, and
-           transit mode. An exact alias is strong evidence but is not an absolute gate when
-           the complete trip makes another saved place clearly correct.
-        3. Never search for a place already credibly resolved from SAVED PLACES.
+        2. Resolve locations against SAVED PLACES and LOCATION HISTORY first. Saved names and
+           aliases are strong semantic memory. History locations—including unsaved addresses
+           and workout endpoints—are equally valid when the user's wording refers to an entry,
+           an activity, its order, or its endpoint. Compare name, alias, address, timeline
+           position, the opposite endpoint, current distance when allowed, and transit mode.
+           An exact alias is strong evidence but is not an absolute gate when the complete
+           route or history reference makes another location clearly correct.
+        3. Never search for a location already credibly resolved from SAVED PLACES or LOCATION
+           HISTORY. Search is for genuinely new locations, not a prerequisite for unsaved ones.
         4. Search only the unresolved place wording. Never search for a transit type, person,
            direction word, or time phrase.
         5. Resolve people from PEOPLE names and aliases. Include only explicitly mentioned
@@ -1080,8 +1274,12 @@ enum EntryLanguageModelService {
         evidence about where an omitted entry can fit. These are reasoning guidelines, not a
         rigid grammar: understand the user's ordinary wording and the overall sequence rather
         than requiring an exact phrase or an immediately adjacent row.
-        - Each history row has a stable entryKey for discussion only. Never return entryKey
-          as a savedPlaceKey, candidateKey, or personKey.
+        - History covers the selected day plus the immediately previous and next local days.
+          Use relativeDay to distinguish boundary-spanning or naturally relative references.
+          The selected day remains the authoritative date for the new entry.
+        - Each history row has an entryKey for discussion only. Never return entryKey itself.
+          Each usable endpoint instead contains its own locationKey; copy that exact locationKey
+          into selectedLocationKey when the user refers to that endpoint.
         - A workout history row may anchor a transit exactly like another confirmed interval:
           a moving workout starts at its origin and ends at its destination, while a static
           workout starts and ends at its confirmed place. Ignore any workout endpoint listed
@@ -1115,9 +1313,10 @@ enum EntryLanguageModelService {
           proximity when no clear history boundary applies and ENTRY DATE CONTEXT mode is
           today. Never use present-day proximity in selectedDate mode.
         - For a transit, after selecting exactly one history boundary, you MUST call
-          estimate_saved_route for two saved endpoints and derive the other boundary using
-          the returned duration. Use resolutionKind inferredFromHistory, rawText null, the
-          MapKit durationSource, both timestamps, and time review false.
+          estimate_route with the two resolved location keys and derive the other boundary
+          using the returned duration. The endpoints may be saved, historical, or searched.
+          Use resolutionKind inferredFromHistory, rawText null, the MapKit durationSource,
+          both timestamps, and time review false.
         - For a transit whose two boundaries are independently and unambiguously anchored by
           confirmed history, the route tool is optional and durationSource may be none.
         - For a place visit, combine any expressed duration or partial time with continuity.
@@ -1141,18 +1340,21 @@ enum EntryLanguageModelService {
 
         PLACE SEARCH
         search_places supports role origin, destination, or visit. For an unknown visit place,
-        call search_places with role visit. Return up to three candidateKeys, ordered by
-        semantic match, address context, and plausible distance. A search candidate is not a
-        saved place, so savedPlaceKey remains nil and place review is required.
-        Transit may additionally use search_destination_with_routes, estimate_saved_route,
-        and compare_saved_routes. Place visits must never call those route tools.
+        call search_places with role visit. Tool results contain locationKey values. Select the
+        single clearly best semantic and geographic result in selectedLocationKey and set review
+        false; being unsaved is not a reason for review. If several results remain plausible,
+        still select the best-supported result, put up to three other keys in
+        alternativeLocationKeys, and require review with a concise ambiguity reason. If none is
+        defensible, leave selectedLocationKey nil and require review.
+        Transit may additionally use search_destination_with_routes, estimate_route, and
+        compare_routes. Place visits must never call those route tools.
 
         TRANSIT
         - Canonicalize the transit type using TRANSIT TYPES names and aliases. Return the
           canonicalName exactly. A genuinely novel type stays raw and requires type review.
         - Keep origin and destination independent. In "Bolt from home to kasho", Bolt is the
           type, home is origin, and kasho is destination. Never search for Bolt.
-        - When several saved places match one endpoint, use compare_saved_routes against the
+        - When several locations match one endpoint, use compare_routes against the
           resolved opposite endpoint. Mode and route coherence outrank current GPS distance.
         - For an unknown destination with a saved origin, use search_destination_with_routes.
         - Transit time keeps its dedicated inference rules:
@@ -1165,7 +1367,7 @@ enum EntryLanguageModelService {
             start-time anchor. Words such as "arrived", "got there", "got here", and
             "until 00:30" establish an end-time anchor.
           * When the user gives exactly one explicit time anchor and both endpoints are
-            resolved saved places, you MUST call estimate_saved_route. Do this regardless of
+            resolved locations, you MUST call estimate_route. Do this regardless of
             current GPS proximity. If only start is explicit, return
             end=start+duration. If only end is explicit, return
             start=end-duration.
@@ -1233,14 +1435,14 @@ enum EntryLanguageModelService {
             },
             "origin": {
               "rawText": "home",
-              "savedPlaceKey": "home",
-              "candidateKeys": [],
+              "selectedLocationKey": "home",
+              "alternativeLocationKeys": [],
               "review": {"needsReview": false, "reason": null}
             },
             "destination": {
               "rawText": "AFI",
-              "savedPlaceKey": "afi-brasov",
-              "candidateKeys": [],
+              "selectedLocationKey": "afi-brasov",
+              "alternativeLocationKeys": [],
               "review": {"needsReview": false, "reason": null}
             },
             "time": {
@@ -1259,9 +1461,9 @@ enum EntryLanguageModelService {
         Example 1A — explicit arrival, derive departure with a mandatory route call:
         User: "Walk from home to afi, got here at 00:30"
         First resolve home and afi from SAVED PLACES. Then you MUST call:
-        estimate_saved_route({
-          "originPlaceKey": "home",
-          "destinationPlaceKey": "afi-brasov",
+        estimate_route({
+          "originLocationKey": "home",
+          "destinationLocationKey": "afi-brasov",
           "transitType": "Walk"
         })
         If ENTRY DATE CONTEXT is today with entryTimestampISO8601 shortly after midnight on
@@ -1280,7 +1482,7 @@ enum EntryLanguageModelService {
 
         Example 1B — explicit departure, derive arrival with a mandatory route call:
         User: "Uber from home to afi, left at 00:20"
-        After resolving both saved endpoints, you MUST call estimate_saved_route with
+        After resolving both endpoints, you MUST call estimate_route with
         transitType Uber. If it returns durationMinutes 5 and durationSource
         mapkitCarFallback, the time object must be:
         {
@@ -1301,7 +1503,7 @@ enum EntryLanguageModelService {
           "timeZoneIdentifier": "Europe/Bucharest"
         }
         User: "Uber from home to afi, left at 18:00"
-        If estimate_saved_route returns 5 minutes, return start
+        If estimate_route returns 5 minutes, return start
         2026-07-12T18:00:00+03:00 and end 2026-07-12T18:05:00+03:00. The
         device may actually be on July 19, but July 19 must not appear in either timestamp.
         Present-day GPS proximity must not override this selected-date result.
@@ -1317,9 +1519,9 @@ enum EntryLanguageModelService {
         11:00. User: "Walk home from afi". Resolve AFI as origin and Home as destination.
         The history visit ends at the transit origin, so 11:00 is the departure even if the
         current GPS location is near neither endpoint. You MUST call:
-        estimate_saved_route({
-          "originPlaceKey": "afi-brasov",
-          "destinationPlaceKey": "home",
+        estimate_route({
+          "originLocationKey": "afi-brasov",
+          "destinationLocationKey": "home",
           "transitType": "Walk"
         })
         If it returns 14 minutes, the time object must be:
@@ -1334,7 +1536,7 @@ enum EntryLanguageModelService {
 
         Example 1D — explicit wording outranks a matching history row:
         The same AFI visit ends at 11:00. User: "Walk home from afi, left at 10:50".
-        Use the explicit 10:50 departure, call estimate_saved_route, and return
+        Use the explicit 10:50 departure, call estimate_route, and return
         resolutionKind explicit. Do not replace 10:50 with the history end time.
 
         Example 1E — unrelated history falls back to the established rules:
@@ -1342,7 +1544,7 @@ enum EntryLanguageModelService {
         The history endpoint does not match this trip's origin or destination, so do not use
         10:30 or 11:00. If ENTRY DATE CONTEXT mode is today and CURRENT LOCATION CONTEXT is
         inside Home's radius, call
-        estimate_saved_route and apply the inferredNearOrigin rule. If current location is
+        estimate_route and apply the inferredNearOrigin rule. If current location is
         near neither endpoint, leave both timestamps null with resolutionKind unresolved and
         request time review.
 
@@ -1363,8 +1565,8 @@ enum EntryLanguageModelService {
           "placeVisit": {
             "place": {
               "rawText": "kasho",
-              "savedPlaceKey": "kasho-mosaico-urbano",
-              "candidateKeys": [],
+              "selectedLocationKey": "kasho-mosaico-urbano",
+              "alternativeLocationKeys": [],
               "review": {"needsReview": false, "reason": null}
             },
             "time": {
@@ -1396,8 +1598,8 @@ enum EntryLanguageModelService {
           "placeVisit": {
             "place": {
               "rawText": "afi",
-              "savedPlaceKey": "afi-brasov",
-              "candidateKeys": [],
+              "selectedLocationKey": "afi-brasov",
+              "alternativeLocationKeys": [],
               "review": {"needsReview": false, "reason": null}
             },
             "time": {
@@ -1445,8 +1647,8 @@ enum EntryLanguageModelService {
           "placeVisit": {
             "place": {
               "rawText": "Magnolia",
-              "savedPlaceKey": "magnolia",
-              "candidateKeys": [],
+              "selectedLocationKey": "magnolia",
+              "alternativeLocationKeys": [],
               "review": {"needsReview": false, "reason": null}
             },
             "time": {
@@ -1477,14 +1679,19 @@ enum EntryLanguageModelService {
         Example 5 — unknown visit place:
         User: "Dinner at Blue Lantern from 19:00 to 21:00"
         If no SAVED PLACES row plausibly matches, call search_places with
-        {"role":"visit","query":"Blue Lantern"}. Return selected candidateKeys in visit.place,
-        keep savedPlaceKey nil, and require place review. Keep the explicit visit times.
+        {"role":"visit","query":"Blue Lantern"}. If the tool's first result is the only
+        plausible Blue Lantern near the relevant history and has locationKey
+        "visit-search-1-candidate-1", return that key as selectedLocationKey, return [] for
+        alternativeLocationKeys, and set place review false. Keep the explicit visit times.
+        If two results remain plausible, select the better one, return the other key as an
+        alternative, and set place review true. Never require review merely because the
+        selected location is not in SAVED PLACES.
 
         Example 6 — unknown transit destination:
         User: "Uber from home to Blue Lantern"
         Resolve home first, then call search_destination_with_routes for "Blue Lantern".
-        Do not put a candidateKey in savedPlaceKey. If no time was stated, apply the transit
-        proximity rules after resolving the route.
+        Put the clearly best result's locationKey in selectedLocationKey. If no time was
+        stated, apply the transit proximity and history rules using that resolved route.
 
         Example 7 — person ambiguity:
         User: "Worked at the office with Sam from 9 to 17"
@@ -1499,15 +1706,26 @@ enum EntryLanguageModelService {
 
         Example 9 — alias conflict resolved by trip coherence:
         SAVED PLACES contains Precis in Bucharest, AFI Brașov with alias "afi", and AFI
-        Cotroceni near Precis. User: "Walk from precis to afi". Call compare_saved_routes for
+        Cotroceni near Precis. User: "Walk from precis to afi". Call compare_routes for
         both plausible AFI keys against Precis. If AFI Cotroceni is the only plausible walk,
         choose it despite the other exact alias. If no time is stated and GPS is near neither
         endpoint, leave transit time unresolved and review only time.
 
-        Example 10 — no unsupported keys:
-        If the model searches MapKit and receives candidateKey
-        "visit-search-1-candidate-1", it may return that key only in candidateKeys. It must
-        never place the candidate name, address, or key into savedPlaceKey.
+        Example 10 — arbitrary workout endpoint from history:
+        LOCATION HISTORY contains a TD Copy visit ending at 09:10 and, immediately after it,
+        a confirmed moving Walk workout whose origin is an unsaved address. Its origin object
+        has locationKey "history-selected-day-entry-4-workout-origin". User: "Bus from TD Copy
+        to the walk workout's origin after it". Resolve TD Copy from saved locations or its
+        history endpoint. Resolve destination by the activity, order, and endpoint wording,
+        and copy "history-selected-day-entry-4-workout-origin" into destination.selectedLocationKey.
+        Do not search MapKit and do not require destination review simply because this endpoint
+        has no savedPlaceKey. If one explicit or history time anchor exists, call estimate_route
+        with those two location keys to calculate the other boundary.
+
+        Example 11 — search keys must be copied exactly:
+        If MapKit returns locationKey "visit-search-1-candidate-1", return that exact key—not
+        the result name, address, a made-up slug, or coordinates. Put it in selectedLocationKey
+        when it is the best result; use alternativeLocationKeys only for other plausible results.
         """
     static func prompt(
         input: String,
@@ -1612,7 +1830,7 @@ enum EntryLanguageModelService {
             )
             let statistics = context.visitStatisticsByPlaceID[place.id]
             return SavedPlacePromptContext(
-                placeKey: key,
+                locationKey: key,
                 name: place.name,
                 aliases: place.aliases,
                 address: place.location.formattedAddress,
@@ -1629,7 +1847,7 @@ enum EntryLanguageModelService {
                 lastVisitedAtISO8601: statistics?.lastVisitedAt?.ISO8601Format(),
                 visitCount: statistics?.visitCount ?? 0
             )
-        }.sorted { $0.placeKey < $1.placeKey }
+        }.sorted { $0.locationKey < $1.locationKey }
     }
 
     private static func selectedDayHistoryContext(
@@ -1656,33 +1874,70 @@ enum EntryLanguageModelService {
             let transit = entry.transitDetails.map { details in
                 SelectedDayTransitPromptContext(
                     canonicalTransitType: details.type,
-                    originPlaceKey: details.originPlace.flatMap {
-                        placeKeysByID[$0.id]
-                    },
-                    originRawText: details.originRawText,
-                    destinationPlaceKey: details.destinationPlace.flatMap {
-                        placeKeysByID[$0.id]
-                    },
-                    destinationRawText: details.destinationRawText
+                    origin: historyLocationContext(
+                        entry: entry,
+                        role: "transit-origin",
+                        location: details.originLocation ?? details.originPlace?.location,
+                        place: details.originPlace,
+                        rawText: details.originRawText,
+                        placeKeysByID: placeKeysByID,
+                        references: references
+                    ),
+                    destination: historyLocationContext(
+                        entry: entry,
+                        role: "transit-destination",
+                        location: details.destinationLocation ?? details.destinationPlace?.location,
+                        place: details.destinationPlace,
+                        rawText: details.destinationRawText,
+                        placeKeysByID: placeKeysByID,
+                        references: references
+                    )
                 )
             }
             let visit = entry.placeVisitDetails.map { details in
                 SelectedDayVisitPromptContext(
-                    placeKey: details.place.flatMap { placeKeysByID[$0.id] },
-                    placeRawText: details.placeRawText
+                    location: historyLocationContext(
+                        entry: entry,
+                        role: "visit-location",
+                        location: details.location ?? details.place?.location,
+                        place: details.place,
+                        rawText: details.placeRawText,
+                        placeKeysByID: placeKeysByID,
+                        references: references
+                    )
                 )
             }
             let workout = entry.workoutDetails.map { details in
                 SelectedDayWorkoutPromptContext(
                     activityName: details.activityName,
                     movementKind: details.movementKind.rawValue,
-                    placeKey: details.place.flatMap { placeKeysByID[$0.id] },
-                    originPlaceKey: details.originPlace.flatMap {
-                        placeKeysByID[$0.id]
-                    },
-                    destinationPlaceKey: details.destinationPlace.flatMap {
-                        placeKeysByID[$0.id]
-                    },
+                    location: historyLocationContext(
+                        entry: entry,
+                        role: "workout-location",
+                        location: details.sourceLocation ?? details.place?.location,
+                        place: details.place,
+                        rawText: nil,
+                        placeKeysByID: placeKeysByID,
+                        references: references
+                    ),
+                    origin: historyLocationContext(
+                        entry: entry,
+                        role: "workout-origin",
+                        location: details.originLocation ?? details.originPlace?.location,
+                        place: details.originPlace,
+                        rawText: nil,
+                        placeKeysByID: placeKeysByID,
+                        references: references
+                    ),
+                    destination: historyLocationContext(
+                        entry: entry,
+                        role: "workout-destination",
+                        location: details.destinationLocation ?? details.destinationPlace?.location,
+                        place: details.destinationPlace,
+                        rawText: nil,
+                        placeKeysByID: placeKeysByID,
+                        references: references
+                    ),
                     distanceKilometers: details.distanceMeters.map {
                         rounded($0 / 1_000)
                     }
@@ -1706,6 +1961,10 @@ enum EntryLanguageModelService {
 
             return SelectedDayEntryPromptContext(
                 entryKey: "selected-day-entry-\(index + 1)",
+                relativeDay: relativeDayLabel(
+                    for: entry,
+                    selectedDay: context.selectedDay
+                ),
                 entryKind: entry.kind.rawValue,
                 entryKindNeedsReview: entry.entryKindReviewReason != nil,
                 reviewedFields: reviewedFields.sorted(),
@@ -1728,6 +1987,49 @@ enum EntryLanguageModelService {
         return SelectedDayHistoryPromptContext(
             entries: entries
         )
+    }
+
+    private static func historyLocationContext(
+        entry: LogEntry,
+        role: String,
+        location: Location?,
+        place: Place?,
+        rawText: String?,
+        placeKeysByID: [UUID: String],
+        references: EntryPromptReferences
+    ) -> SelectedDayLocationPromptContext? {
+        guard let location,
+              let locationKey = references.historyLocationKey(
+                entryID: entry.id,
+                role: role
+              ) else {
+            return nil
+        }
+        return SelectedDayLocationPromptContext(
+            locationKey: locationKey,
+            savedPlaceKey: place.flatMap { placeKeysByID[$0.id] },
+            displayName: place?.name ?? location.preferredName ?? rawText,
+            compactAddress: location.compactAddress,
+            fullAddress: location.formattedAddress,
+            timeZoneIdentifier: location.timeZoneIdentifier
+        )
+    }
+
+    private static func relativeDayLabel(
+        for entry: LogEntry,
+        selectedDay: TimelineDayKey
+    ) -> String {
+        let anchor = entry.startTime ?? entry.endTime ?? entry.createdAt
+        let timeZone = TimeZone(
+            identifier: entry.startTimeZoneIdentifier
+        ) ?? TimeZone(
+            identifier: entry.creationTimeZoneIdentifier
+        ) ?? .current
+        let day = TimelineDayKey(date: anchor, timeZone: timeZone)
+        if day == selectedDay.addingDays(-1) { return "previousDay" }
+        if day == selectedDay { return "selectedDay" }
+        if day == selectedDay.addingDays(1) { return "nextDay" }
+        return "nearbyDay"
     }
 
     private static func peopleContext(
@@ -1820,6 +2122,7 @@ private struct SelectedDayHistoryPromptContext: Encodable {
 
 private struct SelectedDayEntryPromptContext: Encodable {
     let entryKey: String
+    let relativeDay: String
     let entryKind: String
     let entryKindNeedsReview: Bool
     let reviewedFields: [String]
@@ -1836,24 +2139,30 @@ private struct SelectedDayEntryPromptContext: Encodable {
 
 private struct SelectedDayTransitPromptContext: Encodable {
     let canonicalTransitType: String
-    let originPlaceKey: String?
-    let originRawText: String?
-    let destinationPlaceKey: String?
-    let destinationRawText: String?
+    let origin: SelectedDayLocationPromptContext?
+    let destination: SelectedDayLocationPromptContext?
 }
 
 private struct SelectedDayVisitPromptContext: Encodable {
-    let placeKey: String?
-    let placeRawText: String?
+    let location: SelectedDayLocationPromptContext?
 }
 
 private struct SelectedDayWorkoutPromptContext: Encodable {
     let activityName: String
     let movementKind: String
-    let placeKey: String?
-    let originPlaceKey: String?
-    let destinationPlaceKey: String?
+    let location: SelectedDayLocationPromptContext?
+    let origin: SelectedDayLocationPromptContext?
+    let destination: SelectedDayLocationPromptContext?
     let distanceKilometers: Double?
+}
+
+private struct SelectedDayLocationPromptContext: Encodable {
+    let locationKey: String
+    let savedPlaceKey: String?
+    let displayName: String?
+    let compactAddress: String?
+    let fullAddress: String?
+    let timeZoneIdentifier: String?
 }
 
 private enum EntryDatePromptContext: Encodable {
@@ -1896,7 +2205,7 @@ private struct EntryCurrentLocationContext: Encodable {
 }
 
 private struct SavedPlacePromptContext: Encodable {
-    let placeKey: String
+    let locationKey: String
     let name: String
     let aliases: [String]
     let address: String?

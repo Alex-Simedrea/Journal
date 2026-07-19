@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import CoreLocation
 import Observation
 import SwiftData
 
@@ -13,6 +14,8 @@ final class ManualTransitComposerModel {
     var transitType = ""
     var originPlaceID: UUID?
     var destinationPlaceID: UUID?
+    var originLocation: Location?
+    var destinationLocation: Location?
     var startTime = Date.now.addingTimeInterval(-30 * 60)
     var endTime = Date.now
     var selectedPeopleIDs: Set<UUID> = []
@@ -21,9 +24,10 @@ final class ManualTransitComposerModel {
 
     var canSave: Bool {
         !transitType.isEmpty
-            && originPlaceID != nil
-            && destinationPlaceID != nil
-            && originPlaceID != destinationPlaceID
+            && (originLocation != nil || originPlaceID != nil)
+            && (destinationLocation != nil || destinationPlaceID != nil)
+            && (originPlaceID == nil || destinationPlaceID == nil
+                || originPlaceID != destinationPlaceID)
             && endTime > startTime
             && !isSaving
     }
@@ -42,14 +46,30 @@ final class ManualTransitComposerModel {
         }
     }
 
+    func selectOrigin(_ selection: EntryLocationSelection) {
+        originPlaceID = selection.placeID
+        originLocation = selection.location
+    }
+
+    func selectDestination(_ selection: EntryLocationSelection) {
+        destinationPlaceID = selection.placeID
+        destinationLocation = selection.location
+    }
+
     func save(
         places: [Place],
         people: [Person],
         modelContext: ModelContext
     ) async -> Bool {
-        guard canSave,
-              let origin = places.first(where: { $0.id == originPlaceID }),
-              let destination = places.first(where: { $0.id == destinationPlaceID }) else {
+        let origin = places.first(where: { $0.id == originPlaceID })
+        let destination = places.first(where: { $0.id == destinationPlaceID })
+        let resolvedOrigin = origin?.location ?? originLocation
+        let resolvedDestination = destination?.location ?? destinationLocation
+        guard let resolvedOrigin, let resolvedDestination,
+              CLLocation(latitude: resolvedOrigin.latitude, longitude: resolvedOrigin.longitude)
+                .distance(from: CLLocation(latitude: resolvedDestination.latitude, longitude: resolvedDestination.longitude)) > 1,
+              endTime > startTime,
+              !transitType.isEmpty else {
             return false
         }
 
@@ -61,9 +81,11 @@ final class ManualTransitComposerModel {
         let draft = ResolvedTransitDraft(
             transitType: transitType,
             originPlace: origin,
-            originRawText: origin.name,
+            originLocation: resolvedOrigin,
+            originRawText: origin?.name ?? resolvedOrigin.preferredName,
             destinationPlace: destination,
-            destinationRawText: destination.name,
+            destinationLocation: resolvedDestination,
+            destinationRawText: destination?.name ?? resolvedDestination.preferredName,
             startTime: startTime,
             endTime: endTime,
             timeConfidence: .manualOverride,

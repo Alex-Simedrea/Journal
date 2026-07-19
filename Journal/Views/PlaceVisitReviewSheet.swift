@@ -15,6 +15,7 @@ struct PlaceVisitReviewSheet: View {
     let entry: LogEntry
     @State private var model: PlaceVisitReviewModel
     @State private var isConversionPresented = false
+    @State private var isLocationPickerPresented = false
 
     init(entry: LogEntry) {
         self.entry = entry
@@ -35,9 +36,11 @@ struct PlaceVisitReviewSheet: View {
                     PlaceVisitPlaceReviewSection(
                         model: model,
                         places: places,
-                        rawText: entry.placeVisitDetails?.placeRawText,
                         candidates: entry.placeVisitDetails?.candidates ?? [],
-                        reason: model.reviewReason(for: .place, in: entry)
+                        reason: model.reviewReason(for: .place, in: entry),
+                        onChooseLocation: {
+                            isLocationPickerPresented = true
+                        }
                     )
                 }
                 if model.reviewsTime {
@@ -90,6 +93,13 @@ struct PlaceVisitReviewSheet: View {
                     model.placeWasAdded(place)
                 }
             }
+            .sheet(isPresented: $isLocationPickerPresented) {
+                EntryLocationPickerSheet(
+                    title: "Choose Location",
+                    places: places,
+                    onSelect: model.selectLocation
+                )
+            }
             .alert(
                 "Couldn’t Save Corrections",
                 isPresented: Binding(
@@ -137,65 +147,73 @@ private struct PlaceVisitEntryKindReviewSection: View {
 private struct PlaceVisitPlaceReviewSection: View {
     @Bindable var model: PlaceVisitReviewModel
     let places: [Place]
-    let rawText: String?
-    let candidates: [PlaceCandidate]
+    let candidates: [LocationCandidate]
     let reason: String?
+    let onChooseLocation: () -> Void
 
     var body: some View {
         Section("Place") {
             EntryReviewReason(reason: reason)
-            if let rawText {
-                LabeledContent("From text", value: rawText)
-            }
-            Picker("Saved place", selection: $model.placeID) {
-                Text("Choose a place").tag(nil as UUID?)
-                ForEach(places) { place in
-                    Text(place.name).tag(place.id as UUID?)
-                }
-            }
+            EntryLocationSelectionButton(
+                label: "Location",
+                title: places.first(where: { $0.id == model.placeID })?.name
+                    ?? model.location?.presentationAddress,
+                systemImage: places.first(where: { $0.id == model.placeID })?.systemImage
+                    ?? .mappin,
+                action: onChooseLocation
+            )
             PlaceVisitCandidateList(
                 candidates: candidates,
-                fallbackText: rawText,
-                onAdd: { model.requestPlace(candidate: $0, rawText: rawText) }
+                onUse: model.useCandidate,
+                onSave: model.requestPlace
             )
         }
     }
 }
 
 private struct PlaceVisitCandidateList: View {
-    let candidates: [PlaceCandidate]
-    let fallbackText: String?
-    let onAdd: (PlaceCandidate?) -> Void
+    let candidates: [LocationCandidate]
+    let onUse: (LocationCandidate) -> Void
+    let onSave: (LocationCandidate) -> Void
 
     var body: some View {
         ForEach(candidates) { candidate in
-            Button {
-                onAdd(candidate)
-            } label: {
-                VStack(alignment: .leading, spacing: 3) {
-                    Label(candidate.name, systemImage: "plus.circle")
-                    if let address = candidate.address {
-                        Text(address)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let distance = candidate.distanceKilometers {
-                        Text(
-                            "\(distance, format: .number.precision(.fractionLength(1))) km away"
-                        )
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    }
-                }
+            PlaceVisitCandidateRow(
+                candidate: candidate,
+                onUse: { onUse(candidate) },
+                onSave: { onSave(candidate) }
+            )
+        }
+    }
+}
+
+private struct PlaceVisitCandidateRow: View {
+    let candidate: LocationCandidate
+    let onUse: () -> Void
+    let onSave: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(candidate.name)
+                .font(.headline)
+            if let address = candidate.address {
+                Text(address)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let distance = candidate.distanceKilometers {
+                Text("\(distance, format: .number.precision(.fractionLength(1))) km away")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            HStack {
+                Button("Use Location", action: onUse)
+                    .buttonStyle(.borderedProminent)
+                Button("Save as Place", action: onSave)
+                    .buttonStyle(.bordered)
             }
         }
-        if candidates.isEmpty, fallbackText != nil {
-            Button {
-                onAdd(nil)
-            } label: {
-                Label("Save as a new place", systemImage: "plus.circle")
-            }
-        }
+        .padding(.vertical, 4)
     }
 }
 
@@ -221,7 +239,7 @@ private struct PlaceVisitPeopleReviewSection: View {
         Section("People") {
             EntryReviewReason(reason: reason)
             ForEach($model.personResolutions) { $resolution in
-                Picker(resolution.rawText, selection: $resolution.personID) {
+                Picker("Person", selection: $resolution.personID) {
                     Text("Choose a person").tag(nil as UUID?)
                     ForEach(people) { person in
                         Text(person.name).tag(person.id as UUID?)

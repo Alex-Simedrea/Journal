@@ -35,7 +35,7 @@ struct TransitFieldReview: Codable, Hashable, Identifiable {
     var id: TransitReviewField { field }
 }
 
-struct PlaceCandidate: Codable, Hashable, Identifiable {
+struct LocationCandidate: Codable, Hashable, Identifiable {
     var id: UUID
     var name: String
     var address: String?
@@ -72,6 +72,7 @@ struct PlaceCandidate: Codable, Hashable, Identifiable {
         Location(
             latitude: latitude,
             longitude: longitude,
+            displayName: name,
             formattedAddress: address,
             timeZoneIdentifier: timeZoneIdentifier
         )
@@ -86,14 +87,16 @@ final class TransitDetails {
     var sourceServiceIdentifier: String?
 
     var originPlace: Place?
+    var originLocation: Location?
     var originRawText: String?
     var destinationPlace: Place?
+    var destinationLocation: Location?
     var destinationRawText: String?
 
     var durationSource: DurationSource
     var distanceMeters: Double?
-    var originCandidates: [PlaceCandidate]
-    var destinationCandidates: [PlaceCandidate]
+    var originCandidates: [LocationCandidate]
+    var destinationCandidates: [LocationCandidate]
     var unresolvedPeople: [String]
     var fieldReviews: [TransitFieldReview] = []
 
@@ -102,13 +105,15 @@ final class TransitDetails {
         sourceOrganizationName: String? = nil,
         sourceServiceIdentifier: String? = nil,
         originPlace: Place? = nil,
+        originLocation: Location? = nil,
         originRawText: String? = nil,
         destinationPlace: Place? = nil,
+        destinationLocation: Location? = nil,
         destinationRawText: String? = nil,
         durationSource: DurationSource = .unresolved,
         distanceMeters: Double? = nil,
-        originCandidates: [PlaceCandidate] = [],
-        destinationCandidates: [PlaceCandidate] = [],
+        originCandidates: [LocationCandidate] = [],
+        destinationCandidates: [LocationCandidate] = [],
         unresolvedPeople: [String] = [],
         fieldReviews: [TransitFieldReview] = []
     ) {
@@ -116,8 +121,10 @@ final class TransitDetails {
         self.sourceOrganizationName = sourceOrganizationName
         self.sourceServiceIdentifier = sourceServiceIdentifier
         self.originPlace = originPlace
+        self.originLocation = originLocation ?? originPlace?.location
         self.originRawText = originRawText
         self.destinationPlace = destinationPlace
+        self.destinationLocation = destinationLocation ?? destinationPlace?.location
         self.destinationRawText = destinationRawText
         self.durationSource = durationSource
         self.distanceMeters = distanceMeters

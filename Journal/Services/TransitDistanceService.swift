@@ -24,9 +24,11 @@ enum TransitDistanceService {
         in modelContext: ModelContext
     ) async {
         guard let details = entry.transitDetails,
-              let origin = details.originPlace?.location
+              let origin = details.originLocation
+                ?? details.originPlace?.location
                 ?? details.originCandidates.first?.location,
-              let destination = details.destinationPlace?.location
+              let destination = details.destinationLocation
+                ?? details.destinationPlace?.location
                 ?? details.destinationCandidates.first?.location else {
             return
         }

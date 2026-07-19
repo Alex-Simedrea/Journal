@@ -24,19 +24,22 @@ struct PlaceVisitFieldReview: Codable, Hashable, Identifiable {
 @Model
 final class PlaceVisitDetails {
     var place: Place?
+    var location: Location?
     var placeRawText: String?
-    var candidates: [PlaceCandidate]
+    var candidates: [LocationCandidate]
     var unresolvedPeople: [String]
     var fieldReviews: [PlaceVisitFieldReview]
 
     init(
         place: Place? = nil,
+        location: Location? = nil,
         placeRawText: String? = nil,
-        candidates: [PlaceCandidate] = [],
+        candidates: [LocationCandidate] = [],
         unresolvedPeople: [String] = [],
         fieldReviews: [PlaceVisitFieldReview] = []
     ) {
         self.place = place
+        self.location = location ?? place?.location
         self.placeRawText = placeRawText
         self.candidates = candidates
         self.unresolvedPeople = unresolvedPeople

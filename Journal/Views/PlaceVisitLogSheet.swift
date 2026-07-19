@@ -12,11 +12,16 @@ struct PlaceVisitLogSheet: View {
     @Query(sort: \Place.name) private var places: [Place]
     @Query(sort: \Person.name) private var people: [Person]
     @State private var model = PlaceVisitComposerModel()
+    @State private var isPresentingLocationPicker = false
 
     var body: some View {
         NavigationStack {
             Form {
-                PlaceVisitManualPlaceSection(model: model, places: places)
+                PlaceVisitManualPlaceSection(
+                    model: model,
+                    places: places,
+                    onChooseLocation: { isPresentingLocationPicker = true }
+                )
                 PlaceVisitManualTimeSection(model: model)
                 EntryPeopleSelectionSection(
                     people: people,
@@ -51,6 +56,13 @@ struct PlaceVisitLogSheet: View {
             } message: {
                 Text(model.errorMessage ?? "An unknown error occurred.")
             }
+            .sheet(isPresented: $isPresentingLocationPicker) {
+                EntryLocationPickerSheet(
+                    title: "Choose Location",
+                    places: places,
+                    onSelect: model.selectLocation
+                )
+            }
         }
         .interactiveDismissDisabled(model.isSaving)
     }
@@ -59,15 +71,18 @@ struct PlaceVisitLogSheet: View {
 private struct PlaceVisitManualPlaceSection: View {
     @Bindable var model: PlaceVisitComposerModel
     let places: [Place]
+    let onChooseLocation: () -> Void
 
     var body: some View {
         Section("Place") {
-            Picker("Visited", selection: $model.placeID) {
-                Text("Select a place").tag(nil as UUID?)
-                ForEach(places) { place in
-                    Text(place.name).tag(place.id as UUID?)
-                }
-            }
+            EntryLocationSelectionButton(
+                label: "Visited",
+                title: places.first(where: { $0.id == model.placeID })?.name
+                    ?? model.location?.presentationAddress,
+                systemImage: places.first(where: { $0.id == model.placeID })?.systemImage
+                    ?? .mappin,
+                action: onChooseLocation
+            )
         }
     }
 }

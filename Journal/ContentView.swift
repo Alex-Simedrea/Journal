@@ -36,7 +36,7 @@ struct ContentView: View {
             }
             Tab("Library", systemImage: "square.stack") {
                 NavigationStack {
-                    LibraryScreen(selectedDay: selectedDay)
+                    LibraryScreen()
                 }
             }
             Tab("Settings", systemImage: "gearshape") {

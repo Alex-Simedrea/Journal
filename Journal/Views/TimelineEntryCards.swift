@@ -416,6 +416,7 @@ private struct TimelineWorkoutMiniMap: View {
                 occurrence: occurrence,
                 points: routeModel.points
             )
+            .environment(\.colorScheme, .dark)
 
             if let distance = occurrence.snapshot.workoutDistanceMeters {
                 Text(

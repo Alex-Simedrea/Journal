@@ -149,16 +149,18 @@ enum EntryWeatherService {
     private static func resolvedLocation(for entry: LogEntry) -> Location? {
         switch entry.kind {
         case .transit:
-            entry.transitDetails?.originPlace?.location
+            entry.transitDetails?.originLocation
+                ?? entry.transitDetails?.originPlace?.location
         case .placeVisit:
-            entry.placeVisitDetails?.place?.location
+            entry.placeVisitDetails?.location
+                ?? entry.placeVisitDetails?.place?.location
         case .workout:
             if entry.workoutDetails?.movementKind == .moving {
-                entry.workoutDetails?.originPlace?.location
-                    ?? entry.workoutDetails?.originLocation
+                entry.workoutDetails?.originLocation
+                    ?? entry.workoutDetails?.originPlace?.location
             } else {
-                entry.workoutDetails?.place?.location
-                    ?? entry.workoutDetails?.sourceLocation
+                entry.workoutDetails?.sourceLocation
+                    ?? entry.workoutDetails?.place?.location
             }
         }
     }

@@ -13,6 +13,7 @@ struct PlaceVisitDetailSheet: View {
     let entry: LogEntry
     @State private var isReviewPresented = false
     @State private var isEditingPresented = false
+    @State private var saveLocationRequest: SaveLocationAsPlaceRequest?
 
     var body: some View {
         NavigationStack {
@@ -20,15 +21,16 @@ struct PlaceVisitDetailSheet: View {
                 if let details = entry.placeVisitDetails {
                     PlaceVisitMapSection(
                         name: details.place?.name
-                            ?? details.placeRawText
+                            ?? details.location?.presentationAddress
                             ?? "Visited place",
                         systemImage: details.place?.systemImage ?? .mappin,
-                        location: details.place?.location
+                        location: details.location
+                            ?? details.place?.location
                             ?? details.candidates.first?.location
                     )
                     PlaceVisitSummarySection(
                         placeName: details.place?.name
-                            ?? details.placeRawText,
+                            ?? details.location?.presentationAddress,
                         startTime: entry.startTime,
                         endTime: entry.endTime,
                         timeZoneIdentifier: entry.startTimeZoneIdentifier,
@@ -37,6 +39,10 @@ struct PlaceVisitDetailSheet: View {
                         createdAt: entry.createdAt,
                         entryKindReviewReason: entry.entryKindReviewReason,
                         fieldReviews: details.fieldReviews
+                    )
+                    PlaceVisitSavedPlaceAction(
+                        details: details,
+                        onSelect: { saveLocationRequest = $0 }
                     )
                 }
 
@@ -87,11 +93,45 @@ struct PlaceVisitDetailSheet: View {
             .sheet(isPresented: $isEditingPresented) {
                 PlaceVisitEditSheet(entry: entry)
             }
+            .sheet(item: $saveLocationRequest) {
+                SaveLocationAsPlaceSheet(request: $0)
+            }
             .onChange(of: entry.kind) { _, kind in
                 if kind != .placeVisit {
                     dismiss()
                 }
             }
+        }
+    }
+}
+
+private struct PlaceVisitSavedPlaceAction: View {
+    let details: PlaceVisitDetails
+    let onSelect: (SaveLocationAsPlaceRequest) -> Void
+
+    var body: some View {
+        if let location = details.location {
+            EntrySavedPlaceActionsSection(
+                options: [
+                    EntryLocationSaveOption(
+                        id: "visit",
+                        label: "Save Location as Place",
+                        name: details.place?.name
+                            ?? location.presentationAddress
+                            ?? String(localized: "Location"),
+                        location: location,
+                        isAlreadySaved: details.place != nil
+                    ),
+                ],
+                onSelect: { option in
+                    onSelect(
+                        SaveLocationAsPlaceRequest(
+                            name: option.name,
+                            location: option.location
+                        )
+                    )
+                }
+            )
         }
     }
 }

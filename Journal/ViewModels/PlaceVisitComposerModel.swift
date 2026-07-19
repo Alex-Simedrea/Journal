@@ -11,6 +11,7 @@ import SwiftData
 @Observable
 final class PlaceVisitComposerModel {
     var placeID: UUID?
+    var location: Location?
     var startTime = Date.now.addingTimeInterval(-60 * 60)
     var endTime = Date.now
     var selectedPeopleIDs: Set<UUID> = []
@@ -18,7 +19,7 @@ final class PlaceVisitComposerModel {
     var errorMessage: String?
 
     var canSave: Bool {
-        placeID != nil && endTime > startTime && !isSaving
+        (location != nil || placeID != nil) && endTime > startTime && !isSaving
     }
 
     func togglePerson(_ id: UUID) {
@@ -29,13 +30,19 @@ final class PlaceVisitComposerModel {
         }
     }
 
+    func selectLocation(_ selection: EntryLocationSelection) {
+        placeID = selection.placeID
+        location = selection.location
+    }
+
     func save(
         places: [Place],
         people: [Person],
         modelContext: ModelContext
     ) async -> Bool {
+        let place = places.first(where: { $0.id == placeID })
         guard canSave,
-              let place = places.first(where: { $0.id == placeID }) else {
+              let resolvedLocation = place?.location ?? location else {
             return false
         }
 
@@ -45,7 +52,8 @@ final class PlaceVisitComposerModel {
 
         let draft = ResolvedPlaceVisitDraft(
             place: place,
-            placeRawText: place.name,
+            location: resolvedLocation,
+            placeRawText: place?.name ?? resolvedLocation.preferredName,
             startTime: startTime,
             endTime: endTime,
             timeConfidence: .manualOverride,

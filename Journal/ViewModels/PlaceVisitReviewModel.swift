@@ -18,6 +18,7 @@ struct AddVisitPlaceRequest: Identifiable, Equatable {
 @Observable
 final class PlaceVisitReviewModel {
     var placeID: UUID?
+    var location: Location?
     var startTime: Date
     var endTime: Date
     var personResolutions: [PersonAliasResolution]
@@ -37,12 +38,14 @@ final class PlaceVisitReviewModel {
         let resolutions = (details?.unresolvedPeople ?? []).map {
             PersonAliasResolution(rawText: $0, personID: nil)
         }
+        let resolvedLocation = details?.location ?? details?.place?.location
         placeID = details?.place?.id
+        location = resolvedLocation
         startTime = fallbackStart
         endTime = max(fallbackEnd, fallbackStart.addingTimeInterval(60))
         personResolutions = resolutions
         reviewsEntryKind = entry.entryKindReviewReason != nil
-        reviewsPlace = details?.place == nil
+        reviewsPlace = resolvedLocation == nil
             || details?.review(for: .place) != nil
         reviewsTime = entry.startTime == nil
             || entry.endTime == nil
@@ -52,22 +55,36 @@ final class PlaceVisitReviewModel {
     }
 
     var canSave: Bool {
-        placeID != nil
+        location != nil
             && endTime > startTime
             && personResolutions.allSatisfy { $0.personID != nil }
     }
 
-    func requestPlace(candidate: PlaceCandidate?, rawText: String?) {
-        let fallback = rawText ?? ""
+    func requestPlace(candidate: LocationCandidate) {
         addPlaceRequest = AddVisitPlaceRequest(
-            initialName: candidate?.name ?? fallback,
-            searchQuery: candidate?.name ?? fallback,
-            initialLocation: candidate?.location
+            initialName: candidate.name,
+            searchQuery: candidate.name,
+            initialLocation: candidate.location
         )
     }
 
     func placeWasAdded(_ place: Place) {
         placeID = place.id
+        location = place.location
+    }
+
+    func selectLocation(_ selection: EntryLocationSelection) {
+        placeID = selection.placeID
+        location = selection.location
+    }
+
+    func useCandidate(_ candidate: LocationCandidate) {
+        selectLocation(
+            EntryLocationSelection(
+                location: candidate.location,
+                title: candidate.name
+            )
+        )
     }
 
     func reviewReason(
@@ -83,18 +100,20 @@ final class PlaceVisitReviewModel {
         people: [Person],
         in modelContext: ModelContext
     ) -> Bool {
+        let place = places.first(where: { $0.id == placeID })
         guard canSave,
               let details = entry.placeVisitDetails,
-              let place = places.first(where: { $0.id == placeID }) else {
+              let location = place?.location ?? location else {
             return false
         }
 
         details.place = place
+        details.location = location
         details.candidates = []
         details.fieldReviews = []
         entry.startTime = startTime
         entry.endTime = endTime
-        let zone = place.location.timeZoneIdentifier
+        let zone = location.timeZoneIdentifier
             ?? entry.creationTimeZoneIdentifier
         entry.startTimeZoneIdentifier = zone
         entry.endTimeZoneIdentifier = zone
@@ -111,7 +130,7 @@ final class PlaceVisitReviewModel {
             addAlias(resolution.rawText, to: person)
         }
         details.unresolvedPeople = []
-        addAlias(details.placeRawText, to: place)
+        if let place { addAlias(details.placeRawText, to: place) }
         entry.entryKindReviewReason = nil
         entry.needsReview = false
         entry.weather = nil

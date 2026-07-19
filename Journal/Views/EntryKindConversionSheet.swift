@@ -16,6 +16,7 @@ struct EntryKindConversionSheet: View {
     let entry: LogEntry
     let onConverted: () -> Void
     @State private var model: EntryKindConversionModel
+    @State private var presentedLocation: ConversionLocationRole?
 
     init(
         entry: LogEntry,
@@ -35,7 +36,11 @@ struct EntryKindConversionSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                EntryKindConversionFields(model: model, places: places)
+                EntryKindConversionFields(
+                    model: model,
+                    places: places,
+                    onChooseLocation: { presentedLocation = $0 }
+                )
                 EntryKindConversionTimeSection(model: model)
                 EntryPeopleSelectionSection(
                     people: people,
@@ -78,6 +83,18 @@ struct EntryKindConversionSheet: View {
             .task(id: transitTypes.map(\.canonicalName)) {
                 model.prepare(transitTypes: transitTypes)
             }
+            .sheet(item: $presentedLocation) { role in
+                EntryLocationPickerSheet(
+                    title: role.title,
+                    places: places
+                ) { selection in
+                    switch role {
+                    case .origin: model.selectOrigin(selection)
+                    case .destination: model.selectDestination(selection)
+                    case .visit: model.selectVisitLocation(selection)
+                    }
+                }
+            }
         }
     }
 }
@@ -85,33 +102,67 @@ struct EntryKindConversionSheet: View {
 private struct EntryKindConversionFields: View {
     @Bindable var model: EntryKindConversionModel
     let places: [Place]
+    let onChooseLocation: (ConversionLocationRole) -> Void
 
     var body: some View {
-        if model.targetKind == .transit {
-            Section("Route") {
-                TextField("Transit type", text: $model.transitType)
-                Picker("From", selection: $model.originPlaceID) {
-                    Text("Select a place").tag(nil as UUID?)
-                    ForEach(places) { place in
-                        Text(place.name).tag(place.id as UUID?)
-                    }
+        Group {
+            if model.targetKind == .transit {
+                Section("Route") {
+                    TextField("Transit type", text: $model.transitType)
+                    EntryLocationSelectionButton(
+                        label: "From",
+                        title: title(placeID: model.originPlaceID, location: model.originLocation),
+                        systemImage: symbol(placeID: model.originPlaceID),
+                        action: { onChooseLocation(.origin) }
+                    )
+                    EntryLocationSelectionButton(
+                        label: "To",
+                        title: title(
+                            placeID: model.destinationPlaceID,
+                            location: model.destinationLocation
+                        ),
+                        systemImage: symbol(placeID: model.destinationPlaceID),
+                        action: { onChooseLocation(.destination) }
+                    )
                 }
-                Picker("To", selection: $model.destinationPlaceID) {
-                    Text("Select a place").tag(nil as UUID?)
-                    ForEach(places) { place in
-                        Text(place.name).tag(place.id as UUID?)
-                    }
+            } else {
+                Section("Place") {
+                    EntryLocationSelectionButton(
+                        label: "Visited",
+                        title: title(
+                            placeID: model.visitPlaceID,
+                            location: model.visitLocation
+                        ),
+                        systemImage: symbol(placeID: model.visitPlaceID),
+                        action: { onChooseLocation(.visit) }
+                    )
                 }
             }
-        } else {
-            Section("Place") {
-                Picker("Visited", selection: $model.visitPlaceID) {
-                    Text("Select a place").tag(nil as UUID?)
-                    ForEach(places) { place in
-                        Text(place.name).tag(place.id as UUID?)
-                    }
-                }
-            }
+        }
+    }
+
+    private func title(placeID: UUID?, location: Location?) -> String? {
+        places.first(where: { $0.id == placeID })?.name
+            ?? location?.presentationAddress
+    }
+
+    private func symbol(placeID: UUID?) -> PlaceSystemImage {
+        places.first(where: { $0.id == placeID })?.systemImage ?? .mappin
+    }
+}
+
+private enum ConversionLocationRole: String, Identifiable {
+    case origin
+    case destination
+    case visit
+
+    var id: String { rawValue }
+
+    var title: LocalizedStringKey {
+        switch self {
+        case .origin: "Choose Origin"
+        case .destination: "Choose Destination"
+        case .visit: "Choose Location"
         }
     }
 }

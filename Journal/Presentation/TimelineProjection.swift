@@ -102,7 +102,7 @@ struct TimelineLocationSnapshot: Hashable, Identifiable, Sendable {
         fallbackLocation: Location?,
         fallbackSystemImage: PlaceSystemImage = .mappin
     ) {
-        let location = place?.location ?? fallbackLocation
+        let location = fallbackLocation ?? place?.location
         name = place?.name ?? fallbackName
         latitude = location?.latitude ?? 0
         longitude = location?.longitude ?? 0
@@ -218,20 +218,22 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
         let transit = entry.transitDetails
         transitType = transit?.type ?? "Transit"
         origin = transit?.originPlace?.name
-            ?? transit?.originRawText
+            ?? transit?.originLocation?.timelineAddress
             ?? "Unknown origin"
         destination = transit?.destinationPlace?.name
-            ?? transit?.destinationRawText
+            ?? transit?.destinationLocation?.timelineAddress
             ?? "Unknown destination"
         originLocation = Self.location(
             place: transit?.originPlace,
             fallbackName: origin,
-            candidate: transit?.originCandidates.first
+            location: transit?.originLocation
+                ?? transit?.originCandidates.first?.location
         )
         destinationLocation = Self.location(
             place: transit?.destinationPlace,
             fallbackName: destination,
-            candidate: transit?.destinationCandidates.first
+            location: transit?.destinationLocation
+                ?? transit?.destinationCandidates.first?.location
         )
         if let storedDistance = transit?.distanceMeters {
             transitDistanceMeters = storedDistance
@@ -252,13 +254,13 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
 
         let visit = entry.placeVisitDetails
         visitPlace = visit?.place?.name
-            ?? visit?.placeRawText
+            ?? visit?.location?.timelineAddress
             ?? "Unknown place"
         visitSystemImage = visit?.place?.systemImage ?? .mappin
         visitLocation = Self.location(
             place: visit?.place,
             fallbackName: visitPlace,
-            candidate: visit?.candidates.first
+            location: visit?.location ?? visit?.candidates.first?.location
         )
 
         let workout = entry.workoutDetails
@@ -272,15 +274,15 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
         workoutMovementKind = workout?.movementKind
         workoutDistanceMeters = workout?.distanceMeters
         workoutActiveEnergyKilocalories = workout?.activeEnergyKilocalories
-        workoutOrigin = WorkoutLocationPresentation.name(
+        workoutOrigin = Self.timelineLocationName(
             place: workout?.originPlace,
             location: workout?.originLocation
         )
-        workoutDestination = WorkoutLocationPresentation.name(
+        workoutDestination = Self.timelineLocationName(
             place: workout?.destinationPlace,
             location: workout?.destinationLocation
         )
-        workoutPlace = WorkoutLocationPresentation.name(
+        workoutPlace = Self.timelineLocationName(
             place: workout?.place,
             location: workout?.sourceLocation
         )
@@ -382,7 +384,7 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
     private static func location(
         place: Place?,
         fallbackName: String,
-        candidate: PlaceCandidate?
+        candidate: LocationCandidate?
     ) -> TimelineLocationSnapshot? {
         location(
             place: place,
@@ -417,6 +419,15 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
                 longitude: destination.longitude
             )
         )
+    }
+
+    private static func timelineLocationName(
+        place: Place?,
+        location: Location?
+    ) -> String {
+        place?.name
+            ?? location?.timelineAddress
+            ?? String(localized: "Location unavailable")
     }
 
     private static func reviewSnapshots(

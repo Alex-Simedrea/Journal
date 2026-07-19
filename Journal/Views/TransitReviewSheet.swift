@@ -16,6 +16,7 @@ struct TransitReviewSheet: View {
     let entry: LogEntry
     @State private var model: TransitReviewModel
     @State private var isConversionPresented = false
+    @State private var presentedLocationEndpoint: TransitEndpoint?
 
     init(entry: LogEntry) {
         self.entry = entry
@@ -49,9 +50,11 @@ struct TransitReviewSheet: View {
                     TransitOriginReviewSection(
                         model: model,
                         places: places,
-                        rawText: entry.transitDetails?.originRawText,
                         candidates: entry.transitDetails?.originCandidates ?? [],
-                        reason: model.reviewReason(for: .origin, in: entry)
+                        reason: model.reviewReason(for: .origin, in: entry),
+                        onChooseLocation: {
+                            presentedLocationEndpoint = .origin
+                        }
                     )
                 }
 
@@ -59,9 +62,11 @@ struct TransitReviewSheet: View {
                     TransitDestinationReviewSection(
                         model: model,
                         places: places,
-                        rawText: entry.transitDetails?.destinationRawText,
                         candidates: entry.transitDetails?.destinationCandidates ?? [],
-                        reason: model.reviewReason(for: .destination, in: entry)
+                        reason: model.reviewReason(for: .destination, in: entry),
+                        onChooseLocation: {
+                            presentedLocationEndpoint = .destination
+                        }
                     )
                 }
 
@@ -132,6 +137,16 @@ struct TransitReviewSheet: View {
                     onConverted: { dismiss() }
                 )
             }
+            .sheet(item: $presentedLocationEndpoint) { endpoint in
+                EntryLocationPickerSheet(
+                    title: endpoint == .origin
+                        ? "Choose Origin"
+                        : "Choose Destination",
+                    places: places
+                ) {
+                    model.selectLocation($0, for: endpoint)
+                }
+            }
         }
     }
 }
@@ -190,32 +205,30 @@ private struct TransitTypeReviewSection: View {
 private struct TransitOriginReviewSection: View {
     @Bindable var model: TransitReviewModel
     let places: [Place]
-    let rawText: String?
-    let candidates: [PlaceCandidate]
+    let candidates: [LocationCandidate]
     let reason: String?
+    let onChooseLocation: () -> Void
 
     var body: some View {
         Section("Origin") {
             TransitFieldReviewReason(reason: reason)
-            if let rawText {
-                LabeledContent("From text", value: rawText)
-            }
 
-            Picker("Saved place", selection: $model.originPlaceID) {
-                Text("Choose a place").tag(nil as UUID?)
-                ForEach(places) { place in
-                    Text(place.name).tag(place.id as UUID?)
-                }
-            }
+            EntryLocationSelectionButton(
+                label: "Location",
+                title: places.first(where: { $0.id == model.originPlaceID })?.name
+                    ?? model.originLocation?.presentationAddress,
+                systemImage: places.first(where: { $0.id == model.originPlaceID })?.systemImage
+                    ?? .mappin,
+                action: onChooseLocation
+            )
 
             TransitPlaceCandidateList(
                 candidates: candidates,
-                fallbackText: rawText,
-                onAdd: {
+                onUse: { model.useCandidate($0, for: .origin) },
+                onSave: {
                     model.requestPlace(
                         for: .origin,
-                        candidate: $0,
-                        rawText: rawText
+                        candidate: $0
                     )
                 }
             )
@@ -226,32 +239,30 @@ private struct TransitOriginReviewSection: View {
 private struct TransitDestinationReviewSection: View {
     @Bindable var model: TransitReviewModel
     let places: [Place]
-    let rawText: String?
-    let candidates: [PlaceCandidate]
+    let candidates: [LocationCandidate]
     let reason: String?
+    let onChooseLocation: () -> Void
 
     var body: some View {
         Section("Destination") {
             TransitFieldReviewReason(reason: reason)
-            if let rawText {
-                LabeledContent("From text", value: rawText)
-            }
 
-            Picker("Saved place", selection: $model.destinationPlaceID) {
-                Text("Choose a place").tag(nil as UUID?)
-                ForEach(places) { place in
-                    Text(place.name).tag(place.id as UUID?)
-                }
-            }
+            EntryLocationSelectionButton(
+                label: "Location",
+                title: places.first(where: { $0.id == model.destinationPlaceID })?.name
+                    ?? model.destinationLocation?.presentationAddress,
+                systemImage: places.first(where: { $0.id == model.destinationPlaceID })?.systemImage
+                    ?? .mappin,
+                action: onChooseLocation
+            )
 
             TransitPlaceCandidateList(
                 candidates: candidates,
-                fallbackText: rawText,
-                onAdd: {
+                onUse: { model.useCandidate($0, for: .destination) },
+                onSave: {
                     model.requestPlace(
                         for: .destination,
-                        candidate: $0,
-                        rawText: rawText
+                        candidate: $0
                     )
                 }
             )
@@ -260,39 +271,53 @@ private struct TransitDestinationReviewSection: View {
 }
 
 private struct TransitPlaceCandidateList: View {
-    let candidates: [PlaceCandidate]
-    let fallbackText: String?
-    let onAdd: (PlaceCandidate?) -> Void
+    let candidates: [LocationCandidate]
+    let onUse: (LocationCandidate) -> Void
+    let onSave: (LocationCandidate) -> Void
 
     var body: some View {
         ForEach(candidates) { candidate in
-            Button {
-                onAdd(candidate)
-            } label: {
-                VStack(alignment: .leading, spacing: 3) {
-                    Label(candidate.name, systemImage: "plus.circle")
-                    if let address = candidate.address {
-                        Text(address)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    TransitPlaceCandidateMetrics(candidate: candidate)
-                }
-            }
+            TransitPlaceCandidateRow(
+                candidate: candidate,
+                onUse: { onUse(candidate) },
+                onSave: { onSave(candidate) }
+            )
         }
 
-        if candidates.isEmpty, fallbackText != nil {
-            Button {
-                onAdd(nil)
-            } label: {
-                Label("Save as a new place", systemImage: "plus.circle")
+    }
+}
+
+private struct TransitPlaceCandidateRow: View {
+    let candidate: LocationCandidate
+    let onUse: () -> Void
+    let onSave: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(candidate.name)
+                    .font(.headline)
+                if let address = candidate.address {
+                    Text(address)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                TransitPlaceCandidateMetrics(candidate: candidate)
+            }
+
+            HStack {
+                Button("Use Location", action: onUse)
+                    .buttonStyle(.borderedProminent)
+                Button("Save as Place", action: onSave)
+                    .buttonStyle(.bordered)
             }
         }
+        .padding(.vertical, 4)
     }
 }
 
 private struct TransitPlaceCandidateMetrics: View {
-    let candidate: PlaceCandidate
+    let candidate: LocationCandidate
 
     var body: some View {
         HStack(spacing: 10) {
@@ -352,7 +377,7 @@ private struct TransitPeopleReviewSection: View {
         Section("People") {
             TransitFieldReviewReason(reason: reason)
             ForEach($model.personResolutions) { $resolution in
-                Picker(resolution.rawText, selection: $resolution.personID) {
+                Picker("Person", selection: $resolution.personID) {
                     Text("Choose a person").tag(nil as UUID?)
                     ForEach(people) { person in
                         Text(person.name).tag(person.id as UUID?)

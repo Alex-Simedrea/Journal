@@ -60,10 +60,10 @@ struct PlaceVisitTests {
             references.peopleByKey.first(where: { $0.value.id == person.id })?.key
         )
         let generated = GeneratedPlaceVisitLog(
-            place: GeneratedPlaceResolution(
+            place: GeneratedLocationResolution(
                 rawText: "kasho",
-                savedPlaceKey: placeKey,
-                candidateKeys: [],
+                selectedLocationKey: placeKey,
+                alternativeLocationKeys: [],
                 review: review(false)
             ),
             time: GeneratedPlaceVisitTimeResolution(
@@ -200,10 +200,10 @@ struct PlaceVisitTests {
         )
         let references = EntryPromptReferences(places: [], people: [])
         let generated = GeneratedPlaceVisitLog(
-            place: GeneratedPlaceResolution(
+            place: GeneratedLocationResolution(
                 rawText: "Blue Lantern",
-                savedPlaceKey: nil,
-                candidateKeys: ["visit-search-1-candidate-1"],
+                selectedLocationKey: nil,
+                alternativeLocationKeys: ["visit-search-1-candidate-1"],
                 review: review(true, reason: "Choose a search result.")
             ),
             time: GeneratedPlaceVisitTimeResolution(
@@ -225,10 +225,10 @@ struct PlaceVisitTests {
         #expect(draft.fieldReviews.contains { $0.field == .place })
 
         let unknown = GeneratedPlaceVisitLog(
-            place: GeneratedPlaceResolution(
+            place: GeneratedLocationResolution(
                 rawText: "Blue Lantern",
-                savedPlaceKey: nil,
-                candidateKeys: ["origin-search-1-candidate-1"],
+                selectedLocationKey: nil,
+                alternativeLocationKeys: ["origin-search-1-candidate-1"],
                 review: review(false)
             ),
             time: generated.time,
@@ -242,6 +242,57 @@ struct PlaceVisitTests {
         )
         #expect(unknownDraft.candidates.isEmpty)
         #expect(unknownDraft.fieldReviews.contains { $0.field == .place })
+    }
+
+    @Test("A confident MapKit result is a valid unsaved visit location")
+    func confidentSearchLocation() {
+        let result = TransitMapSearchResult(
+            name: "Blue Lantern",
+            address: "Brașov, Romania",
+            latitude: 45.65,
+            longitude: 25.60,
+            timeZoneIdentifier: "Europe/Bucharest",
+            distanceKilometers: 1.2,
+            walkingDurationMinutes: nil,
+            automobileDurationMinutes: nil
+        )
+        let search = TransitToolSearch(
+            role: .visit,
+            query: "Blue Lantern",
+            candidates: [
+                TransitToolCandidate(
+                    candidateKey: "visit-search-1-candidate-1",
+                    result: result
+                ),
+            ]
+        )
+        let generated = GeneratedPlaceVisitLog(
+            place: GeneratedLocationResolution(
+                rawText: "Blue Lantern",
+                selectedLocationKey: "visit-search-1-candidate-1",
+                alternativeLocationKeys: [],
+                review: review(false)
+            ),
+            time: GeneratedPlaceVisitTimeResolution(
+                rawText: "from 19 to 21",
+                startTimeISO8601: "2026-07-18T19:00:00+03:00",
+                endTimeISO8601: "2026-07-18T21:00:00+03:00",
+                review: review(false)
+            ),
+            people: []
+        )
+
+        let draft = resolve(
+            generated,
+            references: EntryPromptReferences(places: [], people: []),
+            searches: [search],
+            rawInput: "Dinner at Blue Lantern from 19 to 21"
+        )
+
+        #expect(draft.place == nil)
+        #expect(draft.location?.displayName == "Blue Lantern")
+        #expect(draft.location?.timeZoneIdentifier == "Europe/Bucharest")
+        #expect(draft.fieldReviews.contains { $0.field == .place } == false)
     }
 
     @Test("Malformed and inverted visit timestamps require time review")
@@ -480,13 +531,19 @@ struct PlaceVisitTests {
         visit.startTimeZoneIdentifier = "Europe/Bucharest"
         visit.endTimeZoneIdentifier = "Europe/Bucharest"
         visit.timeConfidence = .explicit
-        let references = EntryPromptReferences(places: [afi], people: [])
+        let selectedDay = TimelineDayKey(year: 2026, month: 7, day: 18)
+        let references = EntryPromptReferences(
+            places: [afi],
+            people: [],
+            historyEntries: [visit],
+            selectedDay: selectedDay
+        )
         let context = EntryPromptContext(
             places: [afi],
             people: [],
             transitTypes: [],
             visitStatisticsByPlaceID: [:],
-            selectedDay: TimelineDayKey(year: 2026, month: 7, day: 18),
+            selectedDay: selectedDay,
             selectedDayEntries: [visit],
             currentDate: date("2026-07-18T12:00:00+03:00"),
             currentLocation: Location(
@@ -512,7 +569,9 @@ struct PlaceVisitTests {
         )
         #expect(prompt.contains(#""entryLocalDate""#) == false)
         #expect(prompt.contains(#""selectedLocalDate""#) == false)
-        #expect(prompt.contains(#""placeKey" : "afi-brasov""#))
+        #expect(prompt.contains(#""savedPlaceKey" : "afi-brasov""#))
+        #expect(prompt.contains(#""relativeDay" : "selectedDay""#))
+        #expect(prompt.contains("history-selected-day-entry-1-visit-location"))
         #expect(prompt.contains(#""startTimeISO8601" : "2026-07-18T10:30:00+03:00""#))
         #expect(prompt.contains(#""endTimeISO8601" : "2026-07-18T11:00:00+03:00""#))
     }
@@ -553,11 +612,108 @@ struct PlaceVisitTests {
     func visitHistoryInstructions() {
         let instructions = EntryLanguageModelService.instructions
 
-        #expect(instructions.contains("Entries do not need to be adjacent"))
+        #expect(instructions.contains("Entries do not need"))
+        #expect(instructions.contains("to be adjacent"))
         #expect(instructions.contains("stayed at AFI for 10 minutes"))
         #expect(instructions.contains("after the Bolt from Home"))
         #expect(instructions.contains("still return its complete timestamps"))
+        #expect(instructions.contains("workout's origin after it"))
+        #expect(instructions.contains("does not require the user to save it"))
         #expect(instructions.contains("Never infer a place-visit time from history") == false)
+    }
+
+    @Test("Unsaved workout endpoints receive reusable history location keys")
+    func unsavedWorkoutHistoryLocationKey() throws {
+        let origin = Location(
+            latitude: 44.446,
+            longitude: 26.074,
+            displayName: "Piața Revoluției",
+            formattedAddress: "Piața Revoluției, Bucharest, Romania",
+            timeZoneIdentifier: "Europe/Bucharest"
+        )
+        let destination = Location(
+            latitude: 44.45,
+            longitude: 26.09,
+            displayName: "University Square",
+            formattedAddress: "University Square, Bucharest, Romania",
+            timeZoneIdentifier: "Europe/Bucharest"
+        )
+        let workout = LogEntry(
+            kind: .workout,
+            startTime: date("2026-07-18T09:10:00+03:00"),
+            endTime: date("2026-07-18T09:40:00+03:00"),
+            needsReview: false
+        )
+        workout.workoutDetails = WorkoutDetails(
+            healthKitWorkoutUUID: UUID(),
+            activityTypeRawValue: 52,
+            activityName: "Walk",
+            movementKind: .moving,
+            originLocation: origin,
+            destinationLocation: destination
+        )
+        let selectedDay = TimelineDayKey(year: 2026, month: 7, day: 18)
+        let references = EntryPromptReferences(
+            places: [],
+            people: [],
+            historyEntries: [workout],
+            selectedDay: selectedDay
+        )
+        let key = try #require(
+            references.historyLocationKey(
+                entryID: workout.id,
+                role: "workout-origin"
+            )
+        )
+
+        #expect(key == "history-selected-day-entry-1-workout-origin")
+        #expect(references.locationsByKey[key]?.location == origin)
+        #expect(references.locationsByKey[key]?.place == nil)
+    }
+
+    @Test("Saving a location as a place links selected snapshots without rewriting them")
+    func savedPlacePromotion() throws {
+        let context = try makeContext()
+        let snapshot = Location(
+            latitude: 45.6501,
+            longitude: 25.6001,
+            displayName: "Coffee Shop",
+            formattedAddress: "1 Main Street, Brașov",
+            timeZoneIdentifier: "Europe/Bucharest"
+        )
+        let entry = LogEntry(
+            kind: .placeVisit,
+            startTime: date("2026-07-18T10:00:00+03:00"),
+            endTime: date("2026-07-18T11:00:00+03:00"),
+            needsReview: false
+        )
+        entry.placeVisitDetails = PlaceVisitDetails(
+            location: snapshot,
+            placeRawText: "coffee shop"
+        )
+        let place = Place(
+            name: "Coffee Shop",
+            location: Location(
+                latitude: 45.6502,
+                longitude: 25.6002,
+                displayName: "Coffee Shop",
+                formattedAddress: "1 Main Street, Brașov",
+                timeZoneIdentifier: "Europe/Bucharest"
+            )
+        )
+        context.insert(entry)
+        context.insert(place)
+        try context.save()
+
+        let matches = try SavedPlacePromotionService.matches(
+            for: place,
+            in: context
+        )
+        #expect(matches.count == 1)
+        try SavedPlacePromotionService.apply(matches, to: place, in: context)
+
+        #expect(entry.placeVisitDetails?.place?.id == place.id)
+        #expect(entry.placeVisitDetails?.location == snapshot)
     }
 
     @Test("A confirmed visit boundary validates transit history inference")
@@ -597,16 +753,16 @@ struct PlaceVisitTests {
                 canonicalName: "Walk",
                 review: review(false)
             ),
-            origin: GeneratedPlaceResolution(
+            origin: GeneratedLocationResolution(
                 rawText: "afi",
-                savedPlaceKey: afiKey,
-                candidateKeys: [],
+                selectedLocationKey: afiKey,
+                alternativeLocationKeys: [],
                 review: review(false)
             ),
-            destination: GeneratedPlaceResolution(
+            destination: GeneratedLocationResolution(
                 rawText: "home",
-                savedPlaceKey: homeKey,
-                candidateKeys: [],
+                selectedLocationKey: homeKey,
+                alternativeLocationKeys: [],
                 review: review(false)
             ),
             time: GeneratedTimeResolution(
@@ -645,10 +801,10 @@ struct PlaceVisitTests {
         timeNeedsReview: Bool
     ) -> GeneratedPlaceVisitLog {
         GeneratedPlaceVisitLog(
-            place: GeneratedPlaceResolution(
+            place: GeneratedLocationResolution(
                 rawText: "place",
-                savedPlaceKey: placeKey,
-                candidateKeys: [],
+                selectedLocationKey: placeKey,
+                alternativeLocationKeys: [],
                 review: review(placeKey == nil)
             ),
             time: GeneratedPlaceVisitTimeResolution(

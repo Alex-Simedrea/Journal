@@ -4,12 +4,15 @@
 //
 
 import Foundation
+import CoreLocation
 import Observation
 import SwiftData
 
-enum TransitEndpoint: String, Equatable {
+enum TransitEndpoint: String, Equatable, Identifiable {
     case origin
     case destination
+
+    var id: String { rawValue }
 }
 
 struct AddTransitPlaceRequest: Identifiable, Equatable {
@@ -32,6 +35,8 @@ final class TransitReviewModel {
     var transitType: String
     var originPlaceID: UUID?
     var destinationPlaceID: UUID?
+    var originLocation: Location?
+    var destinationLocation: Location?
     var startTime: Date
     var endTime: Date
     var personResolutions: [PersonAliasResolution]
@@ -55,9 +60,11 @@ final class TransitReviewModel {
         let resolutions = (details?.unresolvedPeople ?? []).map {
             PersonAliasResolution(rawText: $0, personID: nil)
         }
-        let shouldReviewOrigin = details?.originPlace == nil
+        let shouldReviewOrigin = (details?.originLocation
+            ?? details?.originPlace?.location) == nil
             || details?.review(for: .origin) != nil
-        let shouldReviewDestination = details?.destinationPlace == nil
+        let shouldReviewDestination = (details?.destinationLocation
+            ?? details?.destinationPlace?.location) == nil
             || details?.review(for: .destination) != nil
         let shouldReviewTime = entry.startTime == nil
             || entry.endTime == nil
@@ -72,6 +79,9 @@ final class TransitReviewModel {
         transitType = details?.type ?? ""
         originPlaceID = details?.originPlace?.id
         destinationPlaceID = details?.destinationPlace?.id
+        originLocation = details?.originLocation ?? details?.originPlace?.location
+        destinationLocation = details?.destinationLocation
+            ?? details?.destinationPlace?.location
         startTime = entry.startTime ?? resolvedEnd.addingTimeInterval(-30 * 60)
         endTime = resolvedEnd
         personResolutions = resolutions
@@ -95,9 +105,8 @@ final class TransitReviewModel {
 
     var canSave: Bool {
         !transitType.isEmpty
-            && originPlaceID != nil
-            && destinationPlaceID != nil
-            && originPlaceID != destinationPlaceID
+            && originLocation != nil
+            && destinationLocation != nil
             && endTime > startTime
             && personResolutions.allSatisfy { $0.personID != nil }
     }
@@ -111,15 +120,13 @@ final class TransitReviewModel {
 
     func requestPlace(
         for endpoint: TransitEndpoint,
-        candidate: PlaceCandidate?,
-        rawText: String?
+        candidate: LocationCandidate
     ) {
-        let fallback = rawText ?? ""
         addPlaceRequest = AddTransitPlaceRequest(
             endpoint: endpoint,
-            initialName: candidate?.name ?? fallback,
-            searchQuery: candidate?.name ?? fallback,
-            initialLocation: candidate?.location
+            initialName: candidate.name,
+            searchQuery: candidate.name,
+            initialLocation: candidate.location
         )
     }
 
@@ -127,9 +134,38 @@ final class TransitReviewModel {
         switch endpoint {
         case .origin:
             originPlaceID = place.id
+            originLocation = place.location
         case .destination:
             destinationPlaceID = place.id
+            destinationLocation = place.location
         }
+    }
+
+    func selectLocation(
+        _ selection: EntryLocationSelection,
+        for endpoint: TransitEndpoint
+    ) {
+        switch endpoint {
+        case .origin:
+            originPlaceID = selection.placeID
+            originLocation = selection.location
+        case .destination:
+            destinationPlaceID = selection.placeID
+            destinationLocation = selection.location
+        }
+    }
+
+    func useCandidate(
+        _ candidate: LocationCandidate,
+        for endpoint: TransitEndpoint
+    ) {
+        selectLocation(
+            EntryLocationSelection(
+                location: candidate.location,
+                title: candidate.name
+            ),
+            for: endpoint
+        )
     }
 
     func useJustNow() {
@@ -155,21 +191,27 @@ final class TransitReviewModel {
         people: [Person],
         modelContext: ModelContext
     ) -> Bool {
+        let origin = places.first(where: { $0.id == originPlaceID })
+        let destination = places.first(where: { $0.id == destinationPlaceID })
         guard canSave,
               let details = entry.transitDetails,
-              let origin = places.first(where: { $0.id == originPlaceID }),
-              let destination = places.first(where: { $0.id == destinationPlaceID }) else {
+              let originLocation = origin?.location ?? originLocation,
+              let destinationLocation = destination?.location ?? destinationLocation,
+              CLLocation(latitude: originLocation.latitude, longitude: originLocation.longitude)
+                .distance(from: CLLocation(latitude: destinationLocation.latitude, longitude: destinationLocation.longitude)) > 1 else {
             return false
         }
 
         details.type = transitType
         details.originPlace = origin
+        details.originLocation = originLocation
         details.destinationPlace = destination
+        details.destinationLocation = destinationLocation
         entry.startTime = startTime
         entry.endTime = endTime
-        entry.startTimeZoneIdentifier = origin.location.timeZoneIdentifier
+        entry.startTimeZoneIdentifier = originLocation.timeZoneIdentifier
             ?? entry.creationTimeZoneIdentifier
-        entry.endTimeZoneIdentifier = destination.location.timeZoneIdentifier
+        entry.endTimeZoneIdentifier = destinationLocation.timeZoneIdentifier
             ?? entry.creationTimeZoneIdentifier
         details.originCandidates = []
         details.destinationCandidates = []
@@ -195,8 +237,8 @@ final class TransitReviewModel {
             details.durationSource = .manualOverride
         }
 
-        addAlias(details.originRawText, to: origin)
-        addAlias(details.destinationRawText, to: destination)
+        if let origin { addAlias(details.originRawText, to: origin) }
+        if let destination { addAlias(details.destinationRawText, to: destination) }
         entry.entryKindReviewReason = nil
         entry.needsReview = false
         let originalWeather = entry.weather

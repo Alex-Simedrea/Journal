@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import CoreLocation
 import Observation
 import SwiftData
 
@@ -13,6 +14,8 @@ final class TransitEditModel {
     var transitType: String
     var originPlaceID: UUID?
     var destinationPlaceID: UUID?
+    var originLocation: Location?
+    var destinationLocation: Location?
     var startTime: Date
     var endTime: Date
     var selectedPeopleIDs: Set<UUID>
@@ -29,6 +32,10 @@ final class TransitEditModel {
         transitType = entry.transitDetails?.type ?? ""
         originPlaceID = entry.transitDetails?.originPlace?.id
         destinationPlaceID = entry.transitDetails?.destinationPlace?.id
+        originLocation = entry.transitDetails?.originLocation
+            ?? entry.transitDetails?.originPlace?.location
+        destinationLocation = entry.transitDetails?.destinationLocation
+            ?? entry.transitDetails?.destinationPlace?.location
         startTime = fallbackStart
         endTime = max(fallbackEnd, fallbackStart.addingTimeInterval(60))
         selectedPeopleIDs = Set(entry.people.map(\.id))
@@ -38,9 +45,8 @@ final class TransitEditModel {
 
     var canSave: Bool {
         !transitType.isEmpty
-            && originPlaceID != nil
-            && destinationPlaceID != nil
-            && originPlaceID != destinationPlaceID
+            && originLocation != nil
+            && destinationLocation != nil
             && endTime > startTime
     }
 
@@ -58,16 +64,30 @@ final class TransitEditModel {
         }
     }
 
+    func selectOrigin(_ selection: EntryLocationSelection) {
+        originPlaceID = selection.placeID
+        originLocation = selection.location
+    }
+
+    func selectDestination(_ selection: EntryLocationSelection) {
+        destinationPlaceID = selection.placeID
+        destinationLocation = selection.location
+    }
+
     func save(
         entry: LogEntry,
         places: [Place],
         people: [Person],
         in modelContext: ModelContext
     ) -> Bool {
+        let origin = places.first(where: { $0.id == originPlaceID })
+        let destination = places.first(where: { $0.id == destinationPlaceID })
         guard canSave,
               let details = entry.transitDetails,
-              let origin = places.first(where: { $0.id == originPlaceID }),
-              let destination = places.first(where: { $0.id == destinationPlaceID }) else {
+              let originLocation = origin?.location ?? originLocation,
+              let destinationLocation = destination?.location ?? destinationLocation,
+              CLLocation(latitude: originLocation.latitude, longitude: originLocation.longitude)
+                .distance(from: CLLocation(latitude: destinationLocation.latitude, longitude: destinationLocation.longitude)) > 1 else {
             return false
         }
 
@@ -80,7 +100,9 @@ final class TransitEditModel {
 
         details.type = transitType
         details.originPlace = origin
+        details.originLocation = originLocation
         details.destinationPlace = destination
+        details.destinationLocation = destinationLocation
         details.originCandidates = []
         details.destinationCandidates = []
         details.unresolvedPeople = []
@@ -89,9 +111,9 @@ final class TransitEditModel {
 
         entry.startTime = startTime
         entry.endTime = endTime
-        entry.startTimeZoneIdentifier = origin.location.timeZoneIdentifier
+        entry.startTimeZoneIdentifier = originLocation.timeZoneIdentifier
             ?? entry.creationTimeZoneIdentifier
-        entry.endTimeZoneIdentifier = destination.location.timeZoneIdentifier
+        entry.endTimeZoneIdentifier = destinationLocation.timeZoneIdentifier
             ?? entry.creationTimeZoneIdentifier
         entry.people = people.filter { selectedPeopleIDs.contains($0.id) }
         entry.needsReview = entry.entryKindReviewReason != nil
@@ -124,11 +146,13 @@ final class TransitEditModel {
 private struct TransitEditOriginalState {
     let transitType: String
     let originPlace: Place?
+    let originLocation: Location?
     let destinationPlace: Place?
+    let destinationLocation: Location?
     let durationSource: DurationSource
     let distanceMeters: Double?
-    let originCandidates: [PlaceCandidate]
-    let destinationCandidates: [PlaceCandidate]
+    let originCandidates: [LocationCandidate]
+    let destinationCandidates: [LocationCandidate]
     let unresolvedPeople: [String]
     let fieldReviews: [TransitFieldReview]
     let startTime: Date?
@@ -143,7 +167,9 @@ private struct TransitEditOriginalState {
     init(entry: LogEntry, details: TransitDetails) {
         transitType = details.type
         originPlace = details.originPlace
+        originLocation = details.originLocation
         destinationPlace = details.destinationPlace
+        destinationLocation = details.destinationLocation
         durationSource = details.durationSource
         distanceMeters = details.distanceMeters
         originCandidates = details.originCandidates
@@ -163,7 +189,9 @@ private struct TransitEditOriginalState {
     func restore(entry: LogEntry, details: TransitDetails) {
         details.type = transitType
         details.originPlace = originPlace
+        details.originLocation = originLocation
         details.destinationPlace = destinationPlace
+        details.destinationLocation = destinationLocation
         details.durationSource = durationSource
         details.distanceMeters = distanceMeters
         details.originCandidates = originCandidates
