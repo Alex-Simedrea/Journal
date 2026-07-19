@@ -102,7 +102,7 @@ struct TimelineProjectionTests {
         )
     }
 
-    @Test("Cross-zone transit repeats on the origin day and arrival day")
+    @Test("Cross-zone transit is coalesced to one card per day")
     func bucharestToNewYork() {
         let flight = entry(
             createdAt: date("2026-07-17T20:00:00+03:00"),
@@ -115,11 +115,10 @@ struct TimelineProjectionTests {
         let arrivalDay = project([flight], on: day(18))
 
         #expect(departureDay.occurrences.map(\.role) == [.intervalDay])
+        #expect(arrivalDay.occurrences.map(\.role) == [.intervalDay])
+        #expect(arrivalDay.occurrences.first?.changesTimeZone == true)
         #expect(
-            arrivalDay.occurrences.map(\.role) == [
-                .intervalDay,
-                .crossZoneArrival,
-            ]
+            arrivalDay.occurrences.first?.endTimeZoneIdentifier == newYork
         )
     }
 
@@ -133,12 +132,9 @@ struct TimelineProjectionTests {
         )
         let result = project([flight], on: day(17))
 
-        #expect(result.occurrences.map(\.role) == [.intervalDay, .crossZoneArrival])
-        #expect(result.listItems.count == 3)
-        guard case .timeZoneChange = result.listItems[1] else {
-            Issue.record("Expected a timezone marker between the occurrences")
-            return
-        }
+        #expect(result.occurrences.map(\.role) == [.intervalDay])
+        #expect(result.listItems.count == 1)
+        #expect(result.occurrences.first?.changesTimeZone == true)
 
         let startZone = try #require(TimeZone(identifier: bucharest))
         let endZone = try #require(TimeZone(identifier: newYork))
@@ -158,7 +154,61 @@ struct TimelineProjectionTests {
 
         let result = project([snapshot], on: day(17))
         #expect(result.occurrences.first?.timeZoneIdentifier == bucharest)
-        #expect(result.occurrences.last?.timeZoneIdentifier == newYork)
+        #expect(result.occurrences.first?.endTimeZoneIdentifier == newYork)
+    }
+
+    @Test("Rows distinguish contiguous, gapped, and overlapping entries")
+    func rowRelationships() {
+        let first = entry(
+            createdAt: date("2026-07-17T08:00:00+03:00"),
+            start: date("2026-07-17T09:00:00+03:00"),
+            end: date("2026-07-17T10:00:00+03:00")
+        )
+        let contiguous = entry(
+            createdAt: date("2026-07-17T08:00:00+03:00"),
+            start: date("2026-07-17T10:00:00+03:00"),
+            end: date("2026-07-17T11:00:00+03:00")
+        )
+        let overlapping = entry(
+            createdAt: date("2026-07-17T08:00:00+03:00"),
+            start: date("2026-07-17T10:30:00+03:00"),
+            end: date("2026-07-17T11:30:00+03:00")
+        )
+        let gapped = entry(
+            createdAt: date("2026-07-17T08:00:00+03:00"),
+            start: date("2026-07-17T12:00:00+03:00"),
+            end: date("2026-07-17T13:00:00+03:00")
+        )
+
+        let rows = project(
+            [first, contiguous, overlapping, gapped],
+            on: day(17)
+        ).rows
+
+        #expect(rows[0].relationshipToPrevious == .first)
+        #expect(rows[1].relationshipToPrevious == .contiguous)
+        #expect(rows[2].relationshipToPrevious == .overlap)
+        #expect(
+            rows[3].relationshipToPrevious == .gap(30 * 60)
+        )
+    }
+
+    @Test("All boundaries match within the displayed minute")
+    func minuteBoundaryMatching() {
+        let previous = entry(
+            createdAt: date("2026-07-17T08:00:00+03:00"),
+            start: date("2026-07-17T09:00:00+03:00"),
+            end: date("2026-07-17T10:00:05+03:00")
+        )
+        let regularEntry = entry(
+            createdAt: date("2026-07-17T08:00:00+03:00"),
+            start: date("2026-07-17T10:00:52+03:00"),
+            end: date("2026-07-17T11:00:00+03:00")
+        )
+
+        let regularRows = project([previous, regularEntry], on: day(17)).rows
+
+        #expect(regularRows[1].relationshipToPrevious == .contiguous)
     }
 
     @Test("Missing, start-only, and end-only entries are grouped for review")

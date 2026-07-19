@@ -257,6 +257,13 @@ enum PlaceVisitResolutionService {
     ) -> PlaceVisitTimeResolution {
         let start = parsedDate(generated.startTimeISO8601)
         let end = parsedDate(generated.endTimeISO8601)
+        let rawText = generated.rawText?.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        let hasTextualTimeEvidence = rawText?.isEmpty == false
+        let resolvedConfidence: TimeConfidence = hasTextualTimeEvidence
+            ? .explicit
+            : .inferredFromHistory
         let suppliedInvalid = (generated.startTimeISO8601 != nil && start == nil)
             || (generated.endTimeISO8601 != nil && end == nil)
 
@@ -264,7 +271,7 @@ enum PlaceVisitResolutionService {
             return PlaceVisitTimeResolution(
                 start: start,
                 end: end,
-                confidence: start == nil && end == nil ? .unresolved : .explicit,
+                confidence: start == nil && end == nil ? .unresolved : resolvedConfidence,
                 validationError: String(localized: "The model returned an invalid visit timestamp.")
             )
         }
@@ -272,19 +279,26 @@ enum PlaceVisitResolutionService {
             return PlaceVisitTimeResolution(
                 start: start,
                 end: end,
-                confidence: .explicit,
+                confidence: resolvedConfidence,
                 validationError: String(localized: "The visit end time must be after its start time.")
             )
         }
         if start != nil || end != nil {
-            guard let rawText = generated.rawText,
-                  !normalize(rawText).isEmpty,
-                  normalize(rawInput).contains(normalize(rawText)) else {
+            if let rawText, !rawText.isEmpty {
+                guard normalize(rawInput).contains(normalize(rawText)) else {
+                    return PlaceVisitTimeResolution(
+                        start: start,
+                        end: end,
+                        confidence: resolvedConfidence,
+                        validationError: String(localized: "The visit time is not supported by the original text or selected-day history.")
+                    )
+                }
+            } else if start == nil || end == nil {
                 return PlaceVisitTimeResolution(
                     start: start,
                     end: end,
-                    confidence: .explicit,
-                    validationError: String(localized: "The visit time is not supported by the original text.")
+                    confidence: resolvedConfidence,
+                    validationError: String(localized: "A history-inferred visit must provide a complete interval.")
                 )
             }
         }
@@ -292,7 +306,7 @@ enum PlaceVisitResolutionService {
             return PlaceVisitTimeResolution(
                 start: start,
                 end: end,
-                confidence: start == nil && end == nil ? .unresolved : .explicit,
+                confidence: start == nil && end == nil ? .unresolved : resolvedConfidence,
                 validationError: generated.review.needsReview
                     ? nil
                     : String(localized: "An incomplete visit interval must be marked for review.")
@@ -301,7 +315,7 @@ enum PlaceVisitResolutionService {
         return PlaceVisitTimeResolution(
             start: start,
             end: end,
-            confidence: .explicit,
+            confidence: resolvedConfidence,
             validationError: nil
         )
     }

@@ -175,6 +175,7 @@ final class TransitReviewModel {
         details.destinationCandidates = []
         details.unresolvedPeople = []
         details.fieldReviews = []
+        details.distanceMeters = nil
 
         for resolution in personResolutions {
             guard let personID = resolution.personID,
@@ -204,6 +205,10 @@ final class TransitReviewModel {
         do {
             try modelContext.save()
             EntryWeatherService.refreshInBackground(
+                entry,
+                in: modelContext
+            )
+            TransitDistanceService.refreshInBackground(
                 entry,
                 in: modelContext
             )

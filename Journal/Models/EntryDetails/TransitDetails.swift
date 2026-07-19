@@ -91,6 +91,7 @@ final class TransitDetails {
     var destinationRawText: String?
 
     var durationSource: DurationSource
+    var distanceMeters: Double?
     var originCandidates: [PlaceCandidate]
     var destinationCandidates: [PlaceCandidate]
     var unresolvedPeople: [String]
@@ -105,6 +106,7 @@ final class TransitDetails {
         destinationPlace: Place? = nil,
         destinationRawText: String? = nil,
         durationSource: DurationSource = .unresolved,
+        distanceMeters: Double? = nil,
         originCandidates: [PlaceCandidate] = [],
         destinationCandidates: [PlaceCandidate] = [],
         unresolvedPeople: [String] = [],
@@ -118,6 +120,7 @@ final class TransitDetails {
         self.destinationPlace = destinationPlace
         self.destinationRawText = destinationRawText
         self.durationSource = durationSource
+        self.distanceMeters = distanceMeters
         self.originCandidates = originCandidates
         self.destinationCandidates = destinationCandidates
         self.unresolvedPeople = unresolvedPeople

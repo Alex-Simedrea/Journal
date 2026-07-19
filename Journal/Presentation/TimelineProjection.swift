@@ -3,6 +3,7 @@
 //  Journal
 //
 
+import CoreLocation
 import Foundation
 
 struct TimelineDayKey: Hashable, Identifiable, Sendable {
@@ -49,11 +50,7 @@ struct TimelineDayKey: Hashable, Identifiable, Sendable {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
         let nextDay = addingDays(1)
-        let startComponents = DateComponents(
-            year: year,
-            month: month,
-            day: day
-        )
+        let startComponents = DateComponents(year: year, month: month, day: day)
         let endComponents = DateComponents(
             year: nextDay.year,
             month: nextDay.month,
@@ -92,6 +89,67 @@ struct TimelineOccurrenceID: Hashable, Sendable {
     let role: TimelineOccurrenceRole
 }
 
+struct TimelineLocationSnapshot: Hashable, Identifiable, Sendable {
+    let id: String
+    let name: String
+    let latitude: Double
+    let longitude: Double
+    let systemImage: PlaceSystemImage
+
+    init(
+        place: Place?,
+        fallbackName: String,
+        fallbackLocation: Location?,
+        fallbackSystemImage: PlaceSystemImage = .mappin
+    ) {
+        let location = place?.location ?? fallbackLocation
+        name = place?.name ?? fallbackName
+        latitude = location?.latitude ?? 0
+        longitude = location?.longitude ?? 0
+        systemImage = place?.systemImage ?? fallbackSystemImage
+        if let place {
+            id = place.id.uuidString
+        } else if let location {
+            id = "\(fallbackName)-\(location.latitude)-\(location.longitude)"
+        } else {
+            id = "unresolved-\(fallbackName)"
+        }
+    }
+
+    var hasCoordinate: Bool {
+        (-90...90).contains(latitude)
+            && (-180...180).contains(longitude)
+            && !(latitude == 0 && longitude == 0)
+    }
+
+    var coordinate: CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+}
+
+struct TimelinePersonSnapshot: Hashable, Identifiable, Sendable {
+    let id: UUID
+    let name: String
+    let contactIdentifier: String?
+}
+
+enum TimelineReviewTarget: String, Hashable, Sendable {
+    case entryKind
+    case transitType
+    case origin
+    case destination
+    case place
+    case time
+    case people
+}
+
+struct TimelineReviewSnapshot: Hashable, Identifiable, Sendable {
+    let target: TimelineReviewTarget
+    let reason: String
+
+    var id: String { "\(target.rawValue)-\(reason)" }
+}
+
 struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
     let id: UUID
     let createdAt: Date
@@ -103,11 +161,25 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
     let timeConfidence: TimeConfidence
     let needsReview: Bool
     let kind: LogKind
+
     let transitType: String
+    let transitDistanceMeters: Double?
+    let transitDistanceIsApproximate: Bool
     let origin: String
     let destination: String
+    let originLocation: TimelineLocationSnapshot?
+    let destinationLocation: TimelineLocationSnapshot?
+
     let visitPlace: String
     let visitSystemImage: PlaceSystemImage
+    let visitLocation: TimelineLocationSnapshot?
+
+    let people: [TimelinePersonSnapshot]
+    let photoReferences: [PhotoReference]
+    let weather: EntryWeather?
+    let reviews: [TimelineReviewSnapshot]
+
+    let workoutUUID: UUID?
     let workoutActivityName: String
     let workoutSystemImageName: String
     let workoutMovementKind: WorkoutMovementKind?
@@ -116,9 +188,13 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
     let workoutOrigin: String
     let workoutDestination: String
     let workoutPlace: String
+    let workoutOriginLocation: TimelineLocationSnapshot?
+    let workoutDestinationLocation: TimelineLocationSnapshot?
+    let workoutPlaceLocation: TimelineLocationSnapshot?
+    let workoutRouteStart: WorkoutCoordinateSnapshot?
+    let workoutRouteEnd: WorkoutCoordinateSnapshot?
 
     init(entry: LogEntry) {
-        let details = entry.transitDetails
         id = entry.id
         createdAt = entry.createdAt
         startTime = entry.startTime
@@ -129,19 +205,64 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
         timeConfidence = entry.timeConfidence
         needsReview = entry.needsReview
         kind = entry.kind
-        transitType = details?.type ?? "Transit"
-        origin = details?.originPlace?.name
-            ?? details?.originRawText
+        people = entry.people.map {
+            TimelinePersonSnapshot(
+                id: $0.id,
+                name: $0.name,
+                contactIdentifier: $0.contactIdentifier
+            )
+        }
+        photoReferences = entry.photoReferences
+        weather = entry.weather
+
+        let transit = entry.transitDetails
+        transitType = transit?.type ?? "Transit"
+        origin = transit?.originPlace?.name
+            ?? transit?.originRawText
             ?? "Unknown origin"
-        destination = details?.destinationPlace?.name
-            ?? details?.destinationRawText
+        destination = transit?.destinationPlace?.name
+            ?? transit?.destinationRawText
             ?? "Unknown destination"
-        visitPlace = entry.placeVisitDetails?.place?.name
-            ?? entry.placeVisitDetails?.placeRawText
+        originLocation = Self.location(
+            place: transit?.originPlace,
+            fallbackName: origin,
+            candidate: transit?.originCandidates.first
+        )
+        destinationLocation = Self.location(
+            place: transit?.destinationPlace,
+            fallbackName: destination,
+            candidate: transit?.destinationCandidates.first
+        )
+        if let storedDistance = transit?.distanceMeters {
+            transitDistanceMeters = storedDistance
+            transitDistanceIsApproximate = false
+        } else if let originLocation,
+                  let destinationLocation,
+                  originLocation.hasCoordinate,
+                  destinationLocation.hasCoordinate {
+            transitDistanceMeters = Self.geodesicDistance(
+                from: originLocation,
+                to: destinationLocation
+            )
+            transitDistanceIsApproximate = true
+        } else {
+            transitDistanceMeters = nil
+            transitDistanceIsApproximate = false
+        }
+
+        let visit = entry.placeVisitDetails
+        visitPlace = visit?.place?.name
+            ?? visit?.placeRawText
             ?? "Unknown place"
-        visitSystemImage = entry.placeVisitDetails?.place?.systemImage
-            ?? .mappin
+        visitSystemImage = visit?.place?.systemImage ?? .mappin
+        visitLocation = Self.location(
+            place: visit?.place,
+            fallbackName: visitPlace,
+            candidate: visit?.candidates.first
+        )
+
         let workout = entry.workoutDetails
+        workoutUUID = workout?.healthKitWorkoutUUID
         workoutActivityName = workout?.activityName ?? "Workout"
         workoutSystemImageName = workout.map {
             WorkoutActivityCatalog.presentation(
@@ -163,6 +284,30 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
             place: workout?.place,
             location: workout?.sourceLocation
         )
+        workoutOriginLocation = Self.location(
+            place: workout?.originPlace,
+            fallbackName: workoutOrigin,
+            location: workout?.originLocation
+        )
+        workoutDestinationLocation = Self.location(
+            place: workout?.destinationPlace,
+            fallbackName: workoutDestination,
+            location: workout?.destinationLocation
+        )
+        workoutPlaceLocation = Self.location(
+            place: workout?.place,
+            fallbackName: workoutPlace,
+            location: workout?.sourceLocation
+        )
+        workoutRouteStart = workout?.originLocation.map {
+            WorkoutCoordinateSnapshot(location: $0)
+        } ?? workout?.sourceLocation.map {
+            WorkoutCoordinateSnapshot(location: $0)
+        }
+        workoutRouteEnd = workout?.destinationLocation.map {
+            WorkoutCoordinateSnapshot(location: $0)
+        }
+        reviews = Self.reviewSnapshots(for: entry)
     }
 
     init(
@@ -188,7 +333,9 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
         workoutActiveEnergyKilocalories: Double? = nil,
         workoutOrigin: String = "Origin",
         workoutDestination: String = "Destination",
-        workoutPlace: String = "Place"
+        workoutPlace: String = "Place",
+        workoutRouteStart: WorkoutCoordinateSnapshot? = nil,
+        workoutRouteEnd: WorkoutCoordinateSnapshot? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -201,19 +348,148 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
         self.needsReview = needsReview
         self.kind = kind
         self.transitType = transitType
+        transitDistanceMeters = nil
+        transitDistanceIsApproximate = false
         self.origin = origin
         self.destination = destination
+        originLocation = nil
+        destinationLocation = nil
         self.visitPlace = visitPlace
         self.visitSystemImage = visitSystemImage
+        visitLocation = nil
+        people = []
+        photoReferences = []
+        weather = nil
+        reviews = needsReview
+            ? [TimelineReviewSnapshot(target: .time, reason: "Time needs review")]
+            : []
+        workoutUUID = nil
         self.workoutActivityName = workoutActivityName
         self.workoutSystemImageName = workoutSystemImageName
         self.workoutMovementKind = workoutMovementKind
         self.workoutDistanceMeters = workoutDistanceMeters
-        self.workoutActiveEnergyKilocalories =
-            workoutActiveEnergyKilocalories
+        self.workoutActiveEnergyKilocalories = workoutActiveEnergyKilocalories
         self.workoutOrigin = workoutOrigin
         self.workoutDestination = workoutDestination
         self.workoutPlace = workoutPlace
+        workoutOriginLocation = nil
+        workoutDestinationLocation = nil
+        workoutPlaceLocation = nil
+        self.workoutRouteStart = workoutRouteStart
+        self.workoutRouteEnd = workoutRouteEnd
+    }
+
+    private static func location(
+        place: Place?,
+        fallbackName: String,
+        candidate: PlaceCandidate?
+    ) -> TimelineLocationSnapshot? {
+        location(
+            place: place,
+            fallbackName: fallbackName,
+            location: candidate?.location
+        )
+    }
+
+    private static func location(
+        place: Place?,
+        fallbackName: String,
+        location: Location?
+    ) -> TimelineLocationSnapshot? {
+        guard place != nil || location != nil else { return nil }
+        return TimelineLocationSnapshot(
+            place: place,
+            fallbackName: fallbackName,
+            fallbackLocation: location
+        )
+    }
+
+    private static func geodesicDistance(
+        from origin: TimelineLocationSnapshot,
+        to destination: TimelineLocationSnapshot
+    ) -> Double {
+        CLLocation(
+            latitude: origin.latitude,
+            longitude: origin.longitude
+        ).distance(
+            from: CLLocation(
+                latitude: destination.latitude,
+                longitude: destination.longitude
+            )
+        )
+    }
+
+    private static func reviewSnapshots(
+        for entry: LogEntry
+    ) -> [TimelineReviewSnapshot] {
+        var result: [TimelineReviewSnapshot] = []
+        if let reason = entry.entryKindReviewReason {
+            result.append(.init(target: .entryKind, reason: reason))
+        }
+        switch entry.kind {
+        case .transit:
+            result.append(contentsOf: entry.transitDetails?.fieldReviews.map {
+                TimelineReviewSnapshot(
+                    target: target(for: $0.field),
+                    reason: $0.reason
+                )
+            } ?? [])
+        case .placeVisit:
+            result.append(contentsOf: entry.placeVisitDetails?.fieldReviews.map {
+                TimelineReviewSnapshot(
+                    target: target(for: $0.field),
+                    reason: $0.reason
+                )
+            } ?? [])
+        case .workout:
+            result.append(contentsOf: entry.workoutDetails?.fieldReviews.map {
+                TimelineReviewSnapshot(
+                    target: target(for: $0.field),
+                    reason: $0.reason
+                )
+            } ?? [])
+        }
+        return result
+    }
+
+    private static func target(
+        for field: TransitReviewField
+    ) -> TimelineReviewTarget {
+        switch field {
+        case .transitType: .transitType
+        case .origin: .origin
+        case .destination: .destination
+        case .time: .time
+        case .people: .people
+        }
+    }
+
+    private static func target(
+        for field: PlaceVisitReviewField
+    ) -> TimelineReviewTarget {
+        switch field {
+        case .place: .place
+        case .time: .time
+        case .people: .people
+        }
+    }
+
+    private static func target(
+        for field: WorkoutReviewField
+    ) -> TimelineReviewTarget {
+        switch field {
+        case .place: .place
+        case .origin: .origin
+        case .destination: .destination
+        }
+    }
+}
+
+extension TimelineEntrySnapshot {
+    var workoutWeatherLocation: TimelineLocationSnapshot? {
+        workoutMovementKind == .moving
+            ? workoutOriginLocation
+            : workoutPlaceLocation
     }
 }
 
@@ -222,6 +498,7 @@ struct TimelineOccurrence: Hashable, Identifiable, Sendable {
     let entryID: UUID
     let role: TimelineOccurrenceRole
     let timeZoneIdentifier: String
+    let endTimeZoneIdentifier: String
     let sortTime: Date
     let visibleStartTime: Date?
     let visibleEndTime: Date?
@@ -229,19 +506,46 @@ struct TimelineOccurrence: Hashable, Identifiable, Sendable {
     let endTime: Date?
     let needsReview: Bool
     let kind: LogKind
-    let transitType: String
-    let origin: String
-    let destination: String
-    let visitPlace: String
-    let visitSystemImage: PlaceSystemImage
-    let workoutActivityName: String
-    let workoutSystemImageName: String
-    let workoutMovementKind: WorkoutMovementKind?
-    let workoutDistanceMeters: Double?
-    let workoutActiveEnergyKilocalories: Double?
-    let workoutOrigin: String
-    let workoutDestination: String
-    let workoutPlace: String
+    let snapshot: TimelineEntrySnapshot
+
+    var changesTimeZone: Bool {
+        timeZoneIdentifier != endTimeZoneIdentifier
+            && visibleEndTime == endTime
+    }
+
+    var reviewsTime: Bool {
+        snapshot.reviews.contains { $0.target == .time }
+    }
+
+    var transitType: String { snapshot.transitType }
+    var origin: String { snapshot.origin }
+    var destination: String { snapshot.destination }
+    var visitPlace: String { snapshot.visitPlace }
+    var visitSystemImage: PlaceSystemImage { snapshot.visitSystemImage }
+    var workoutActivityName: String { snapshot.workoutActivityName }
+    var workoutSystemImageName: String { snapshot.workoutSystemImageName }
+    var workoutMovementKind: WorkoutMovementKind? { snapshot.workoutMovementKind }
+    var workoutDistanceMeters: Double? { snapshot.workoutDistanceMeters }
+    var workoutActiveEnergyKilocalories: Double? {
+        snapshot.workoutActiveEnergyKilocalories
+    }
+    var workoutOrigin: String { snapshot.workoutOrigin }
+    var workoutDestination: String { snapshot.workoutDestination }
+    var workoutPlace: String { snapshot.workoutPlace }
+}
+
+enum TimelinePreviousRelationship: Hashable, Sendable {
+    case first
+    case contiguous
+    case gap(TimeInterval)
+    case overlap
+}
+
+struct TimelineRow: Hashable, Identifiable, Sendable {
+    let occurrence: TimelineOccurrence
+    let relationshipToPrevious: TimelinePreviousRelationship
+
+    var id: TimelineOccurrenceID { occurrence.id }
 }
 
 struct TimelineTimeZoneChange: Hashable, Identifiable, Sendable {
@@ -267,6 +571,7 @@ enum TimelineListItem: Hashable, Identifiable, Sendable {
 
 struct TimelineProjection: Sendable {
     let occurrences: [TimelineOccurrence]
+    let rows: [TimelineRow]
     let reviewOccurrences: [TimelineOccurrence]
     let listItems: [TimelineListItem]
 
@@ -291,72 +596,89 @@ struct TimelineProjection: Sendable {
                 identifier: entry.startTimeZoneIdentifier,
                 fallbackIdentifier: entry.creationTimeZoneIdentifier
             )
-            if let dayInterval = day.dateInterval(in: startZone),
-               startTime < dayInterval.end,
-               endTime > dayInterval.start {
-                occurrences.append(
-                    occurrence(
-                        entry: entry,
-                        day: day,
-                        role: .intervalDay,
-                        timeZoneIdentifier: startZone.identifier,
-                        sortTime: max(startTime, dayInterval.start),
-                        visibleStartTime: max(startTime, dayInterval.start),
-                        visibleEndTime: min(endTime, dayInterval.end)
-                    )
-                )
-            }
-
             let endZone = timeZone(
                 identifier: entry.endTimeZoneIdentifier,
                 fallbackIdentifier: entry.creationTimeZoneIdentifier
             )
-            if (entry.kind == .transit
-                || entry.workoutMovementKind == .moving),
-               startZone.identifier != endZone.identifier,
-               TimelineDayKey(date: endTime, timeZone: endZone) == day {
-                occurrences.append(
-                    occurrence(
-                        entry: entry,
-                        day: day,
-                        role: .crossZoneArrival,
-                        timeZoneIdentifier: endZone.identifier,
-                        sortTime: endTime,
-                        visibleStartTime: nil,
-                        visibleEndTime: endTime
-                    )
-                )
+            let startDayInterval = day.dateInterval(in: startZone)
+            let overlapsStartZoneDay = startDayInterval.map {
+                startTime < $0.end && endTime > $0.start
+            } ?? false
+            let isCrossZoneArrivalDay = (
+                entry.kind == .transit || entry.workoutMovementKind == .moving
+            ) && startZone.identifier != endZone.identifier
+                && TimelineDayKey(date: endTime, timeZone: endZone) == day
+
+            guard overlapsStartZoneDay || isCrossZoneArrivalDay else { continue }
+
+            let visibleStart: Date?
+            let visibleEnd: Date?
+            let role: TimelineOccurrenceRole
+            if overlapsStartZoneDay, let interval = startDayInterval {
+                visibleStart = max(startTime, interval.start)
+                visibleEnd = isCrossZoneArrivalDay
+                    ? endTime
+                    : min(endTime, interval.end)
+                role = .intervalDay
+            } else {
+                visibleStart = nil
+                visibleEnd = endTime
+                role = .crossZoneArrival
             }
+            occurrences.append(
+                occurrence(
+                    entry: entry,
+                    day: day,
+                    role: role,
+                    timeZoneIdentifier: startZone.identifier,
+                    endTimeZoneIdentifier: endZone.identifier,
+                    sortTime: visibleStart ?? endTime,
+                    visibleStartTime: visibleStart,
+                    visibleEndTime: visibleEnd
+                )
+            )
         }
 
         occurrences.sort(by: occurrenceOrder)
         reviews.sort(by: occurrenceOrder)
 
-        var listItems: [TimelineListItem] = []
         var previous: TimelineOccurrence?
-        for occurrence in occurrences {
+        let rows = occurrences.map { occurrence in
+            let relationship: TimelinePreviousRelationship
             if let previous,
-               previous.timeZoneIdentifier != occurrence.timeZoneIdentifier {
-                listItems.append(
-                    .timeZoneChange(
-                        TimelineTimeZoneChange(
-                            id: occurrence.id,
-                            fromTimeZoneIdentifier: previous.timeZoneIdentifier,
-                            toTimeZoneIdentifier: occurrence.timeZoneIdentifier,
-                            date: occurrence.sortTime
-                        )
-                    )
-                )
+               let previousEnd = previous.visibleEndTime,
+               let start = occurrence.visibleStartTime {
+                if boundariesAreContiguous(previousEnd, start) {
+                    relationship = .contiguous
+                } else if previousEnd < start {
+                    relationship = .gap(start.timeIntervalSince(previousEnd))
+                } else {
+                    relationship = .overlap
+                }
+            } else {
+                relationship = .first
             }
-            listItems.append(.occurrence(occurrence))
             previous = occurrence
+            return TimelineRow(
+                occurrence: occurrence,
+                relationshipToPrevious: relationship
+            )
         }
 
         return TimelineProjection(
             occurrences: occurrences,
+            rows: rows,
             reviewOccurrences: reviews,
-            listItems: listItems
+            listItems: occurrences.map(TimelineListItem.occurrence)
         )
+    }
+
+    private static func boundariesAreContiguous(
+        _ previousEnd: Date,
+        _ nextStart: Date
+    ) -> Bool {
+        return floor(previousEnd.timeIntervalSinceReferenceDate / 60)
+            == floor(nextStart.timeIntervalSinceReferenceDate / 60)
     }
 
     private static func unresolvedOccurrence(
@@ -375,6 +697,7 @@ struct TimelineProjection: Sendable {
             day: day,
             role: .unresolvedReview,
             timeZoneIdentifier: creationZone.identifier,
+            endTimeZoneIdentifier: creationZone.identifier,
             sortTime: entry.startTime ?? entry.endTime ?? entry.createdAt,
             visibleStartTime: entry.startTime,
             visibleEndTime: entry.endTime
@@ -386,6 +709,7 @@ struct TimelineProjection: Sendable {
         day: TimelineDayKey,
         role: TimelineOccurrenceRole,
         timeZoneIdentifier: String,
+        endTimeZoneIdentifier: String,
         sortTime: Date,
         visibleStartTime: Date?,
         visibleEndTime: Date?
@@ -400,6 +724,7 @@ struct TimelineProjection: Sendable {
             entryID: entry.id,
             role: role,
             timeZoneIdentifier: timeZoneIdentifier,
+            endTimeZoneIdentifier: endTimeZoneIdentifier,
             sortTime: sortTime,
             visibleStartTime: visibleStartTime,
             visibleEndTime: visibleEndTime,
@@ -407,20 +732,7 @@ struct TimelineProjection: Sendable {
             endTime: entry.endTime,
             needsReview: entry.needsReview,
             kind: entry.kind,
-            transitType: entry.transitType,
-            origin: entry.origin,
-            destination: entry.destination,
-            visitPlace: entry.visitPlace,
-            visitSystemImage: entry.visitSystemImage,
-            workoutActivityName: entry.workoutActivityName,
-            workoutSystemImageName: entry.workoutSystemImageName,
-            workoutMovementKind: entry.workoutMovementKind,
-            workoutDistanceMeters: entry.workoutDistanceMeters,
-            workoutActiveEnergyKilocalories:
-                entry.workoutActiveEnergyKilocalories,
-            workoutOrigin: entry.workoutOrigin,
-            workoutDestination: entry.workoutDestination,
-            workoutPlace: entry.workoutPlace
+            snapshot: entry
         )
     }
 

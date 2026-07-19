@@ -369,12 +369,8 @@ struct WorkoutTests {
             for: TimelineDayKey(year: 2026, month: 7, day: 18)
         )
 
-        #expect(
-            arrivalDay.occurrences.map(\.role) == [
-                .intervalDay,
-                .crossZoneArrival,
-            ]
-        )
+        #expect(arrivalDay.occurrences.map(\.role) == [.intervalDay])
+        #expect(arrivalDay.occurrences.first?.changesTimeZone == true)
     }
 
     @Test("Workout weather uses the historical start location")

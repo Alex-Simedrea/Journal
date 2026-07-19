@@ -57,6 +57,7 @@ enum TransitEntryStore {
 
         modelContext.insert(entry)
         try modelContext.save()
+        TransitDistanceService.refreshInBackground(entry, in: modelContext)
         return entry
     }
 }

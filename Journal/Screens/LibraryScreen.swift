@@ -9,6 +9,11 @@ import SwiftData
 import SwiftUI
 
 struct LibraryScreen: View {
+    @Environment(\.modelContext) private var modelContext
+    let selectedDay: TimelineDayKey
+    @State private var sheet: LibrarySheet?
+    @State private var selectedDayEntries: [LogEntry] = []
+
     var body: some View {
         List {
             NavigationLink(
@@ -24,6 +29,118 @@ struct LibraryScreen: View {
                     .navigationTitle("People")
                     .navigationBarTitleDisplayMode(.large)
             )
+        }
+        .navigationTitle("Library")
+        .toolbarTitleDisplayMode(.inlineLarge)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                LibraryAddMenu(
+                    onDescribeEntry: presentDescribeEntry,
+                    onManualTransit: { sheet = .manualTransit },
+                    onManualVisit: { sheet = .manualVisit },
+                    onNewPlace: { sheet = .newPlace },
+                    onNewPerson: { sheet = .newPerson }
+                )
+            }
+        }
+        .sheet(item: $sheet) { sheet in
+            LibrarySheetContent(
+                sheet: sheet,
+                selectedDay: selectedDay,
+                selectedDayEntries: selectedDayEntries
+            )
+        }
+    }
+
+    private func presentDescribeEntry() {
+        let window = selectedDay.conservativeQueryWindow
+        let lowerBound = window.start
+        let upperBound = window.end
+        let predicate = #Predicate<LogEntry> { entry in
+            (entry.createdAt >= lowerBound && entry.createdAt < upperBound)
+                || (
+                    (entry.startTime ?? upperBound) < upperBound
+                        && (entry.endTime ?? lowerBound) > lowerBound
+                )
+                || (
+                    (entry.endTime ?? upperBound) >= lowerBound
+                        && (entry.endTime ?? upperBound) < upperBound
+                )
+        }
+        let descriptor = FetchDescriptor<LogEntry>(
+            predicate: predicate,
+            sortBy: [SortDescriptor(\LogEntry.createdAt)]
+        )
+        selectedDayEntries = (try? modelContext.fetch(descriptor)) ?? []
+        sheet = .describeEntry
+    }
+}
+
+private enum LibrarySheet: String, Identifiable {
+    case describeEntry
+    case manualTransit
+    case manualVisit
+    case newPlace
+    case newPerson
+
+    var id: String { rawValue }
+}
+
+private struct LibraryAddMenu: View {
+    let onDescribeEntry: () -> Void
+    let onManualTransit: () -> Void
+    let onManualVisit: () -> Void
+    let onNewPlace: () -> Void
+    let onNewPerson: () -> Void
+
+    var body: some View {
+        Menu {
+            Section("Entries") {
+                Button(action: onDescribeEntry) {
+                    Label("Describe Entry", systemImage: "text.bubble")
+                }
+                Button(action: onManualTransit) {
+                    Label("Manual Transit", systemImage: "arrow.triangle.swap")
+                }
+                Button(action: onManualVisit) {
+                    Label("Manual Visit", systemImage: "mappin.and.ellipse")
+                }
+            }
+
+            Section("Library") {
+                Button(action: onNewPlace) {
+                    Label("New Place", systemImage: "plus")
+                }
+                Button(action: onNewPerson) {
+                    Label("New Person", systemImage: "person.badge.plus")
+                }
+            }
+        } label: {
+            Label("Add", systemImage: "plus")
+        }
+    }
+}
+
+private struct LibrarySheetContent: View {
+    let sheet: LibrarySheet
+    let selectedDay: TimelineDayKey
+    let selectedDayEntries: [LogEntry]
+
+    var body: some View {
+        switch sheet {
+        case .describeEntry:
+            EntryLogSheet(
+                selectedDay: selectedDay,
+                selectedDayEntries: selectedDayEntries
+            )
+        case .manualTransit:
+            TransitLogSheet()
+        case .manualVisit:
+            PlaceVisitLogSheet()
+        case .newPlace:
+            AddPlaceSheet()
+        case .newPerson:
+            AddPersonSheet()
         }
     }
 }

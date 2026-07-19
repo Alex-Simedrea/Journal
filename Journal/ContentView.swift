@@ -25,16 +25,19 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var boardingPassImports = BoardingPassImportCoordinator()
     @State private var workoutImports = WorkoutImportCoordinator()
+    @State private var selectedDay = TimelineDayKey.today()
 
     var body: some View {
         TabView {
             Tab("Home", systemImage: "house") {
-                HomeScreen()
-                    .commonToolbar(title: "Home")
+                NavigationStack {
+                    HomeScreen(selectedDay: $selectedDay)
+                }
             }
             Tab("Library", systemImage: "square.stack") {
-                LibraryScreen()
-                    .commonToolbar(title: "Library")
+                NavigationStack {
+                    LibraryScreen(selectedDay: selectedDay)
+                }
             }
             Tab("Settings", systemImage: "gearshape") {
                 SettingsScreen()
@@ -45,6 +48,7 @@ struct ContentView: View {
                 .synchronizeAllContacts(in: modelContext)
             await workoutImports.start(in: modelContext)
             await EntryWeatherService.populateMissing(in: modelContext)
+            await TransitDistanceService.populateMissing(in: modelContext)
             boardingPassImports.loadNextIfNeeded()
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -53,6 +57,9 @@ struct ContentView: View {
                 Task {
                     await workoutImports.synchronize(in: modelContext)
                     await EntryWeatherService.populateMissing(
+                        in: modelContext
+                    )
+                    await TransitDistanceService.populateMissing(
                         in: modelContext
                     )
                 }

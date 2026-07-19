@@ -135,6 +135,47 @@ struct PlaceVisitTests {
         #expect(missing.timeConfidence == .unresolved)
     }
 
+    @Test("Visit time accepts useful history placements and preserves ambiguity review")
+    func historyVisitTimeResolution() {
+        let place = Place(
+            name: "AFI Brașov",
+            location: Location(latitude: 45.65, longitude: 25.61)
+        )
+        let references = EntryPromptReferences(places: [place], people: [])
+        let key = references.placesByKey.first?.key
+
+        let historyOnly = resolve(
+            generatedVisit(
+                placeKey: key,
+                rawTime: nil,
+                start: "2026-07-18T10:15:00+03:00",
+                end: "2026-07-18T10:25:00+03:00",
+                timeNeedsReview: false
+            ),
+            references: references,
+            rawInput: "Stayed at AFI"
+        )
+        #expect(historyOnly.startTime == date("2026-07-18T10:15:00+03:00"))
+        #expect(historyOnly.endTime == date("2026-07-18T10:25:00+03:00"))
+        #expect(historyOnly.timeConfidence == .inferredFromHistory)
+        #expect(historyOnly.fieldReviews.contains { $0.field == .time } == false)
+
+        let ambiguous = resolve(
+            generatedVisit(
+                placeKey: key,
+                rawTime: "for 10 minutes",
+                start: "2026-07-18T18:20:00+03:00",
+                end: "2026-07-18T18:30:00+03:00",
+                timeNeedsReview: true
+            ),
+            references: references,
+            rawInput: "Stayed at AFI for 10 minutes"
+        )
+        #expect(ambiguous.startTime == date("2026-07-18T18:20:00+03:00"))
+        #expect(ambiguous.endTime == date("2026-07-18T18:30:00+03:00"))
+        #expect(ambiguous.fieldReviews.contains { $0.field == .time })
+    }
+
     @Test("Unknown and wrong-role candidate keys require place review")
     func candidateValidation() {
         let result = TransitMapSearchResult(
@@ -463,10 +504,60 @@ struct PlaceVisitTests {
         )
 
         #expect(prompt.contains(#""selectedDayHistory""#))
-        #expect(prompt.contains(#""selectedLocalDate" : "2026-07-18""#))
+        #expect(prompt.contains(#""mode" : "today""#))
+        #expect(
+            prompt.contains(
+                #""entryTimestampISO8601" : "2026-07-18T12:00:00+03:00""#
+            )
+        )
+        #expect(prompt.contains(#""entryLocalDate""#) == false)
+        #expect(prompt.contains(#""selectedLocalDate""#) == false)
         #expect(prompt.contains(#""placeKey" : "afi-brasov""#))
         #expect(prompt.contains(#""startTimeISO8601" : "2026-07-18T10:30:00+03:00""#))
         #expect(prompt.contains(#""endTimeISO8601" : "2026-07-18T11:00:00+03:00""#))
+    }
+
+    @Test("A non-today selected date replaces the current timestamp")
+    func selectedDatePromptContext() {
+        let currentLocation = Location(
+            latitude: 45.66,
+            longitude: 25.60,
+            formattedAddress: "Brașov, Romania",
+            timeZoneIdentifier: "Europe/Bucharest"
+        )
+        let context = EntryPromptContext(
+            places: [],
+            people: [],
+            transitTypes: [],
+            visitStatisticsByPlaceID: [:],
+            selectedDay: TimelineDayKey(year: 2026, month: 7, day: 12),
+            selectedDayEntries: [],
+            currentDate: date("2026-07-19T12:00:00+03:00"),
+            currentLocation: currentLocation
+        )
+
+        let prompt = EntryLanguageModelService.prompt(
+            input: "Coffee at 10",
+            context: context,
+            references: EntryPromptReferences(places: [], people: [])
+        )
+
+        #expect(prompt.contains("ENTRY DATE CONTEXT — AUTHORITATIVE"))
+        #expect(prompt.contains(#""mode" : "selectedDate""#))
+        #expect(prompt.contains(#""entryLocalDate" : "2026-07-12""#))
+        #expect(prompt.contains(#""entryTimestampISO8601""#) == false)
+        #expect(prompt.contains("2026-07-19T12:00:00+03:00") == false)
+    }
+
+    @Test("Instructions use selected-day history for flexible visit placement")
+    func visitHistoryInstructions() {
+        let instructions = EntryLanguageModelService.instructions
+
+        #expect(instructions.contains("Entries do not need to be adjacent"))
+        #expect(instructions.contains("stayed at AFI for 10 minutes"))
+        #expect(instructions.contains("after the Bolt from Home"))
+        #expect(instructions.contains("still return its complete timestamps"))
+        #expect(instructions.contains("Never infer a place-visit time from history") == false)
     }
 
     @Test("A confirmed visit boundary validates transit history inference")

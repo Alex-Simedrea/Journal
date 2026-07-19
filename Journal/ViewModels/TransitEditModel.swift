@@ -85,6 +85,7 @@ final class TransitEditModel {
         details.destinationCandidates = []
         details.unresolvedPeople = []
         details.fieldReviews = []
+        details.distanceMeters = nil
 
         entry.startTime = startTime
         entry.endTime = endTime
@@ -107,6 +108,10 @@ final class TransitEditModel {
                 entry,
                 in: modelContext
             )
+            TransitDistanceService.refreshInBackground(
+                entry,
+                in: modelContext
+            )
             return true
         } catch {
             originalState.restore(entry: entry, details: details)
@@ -121,6 +126,7 @@ private struct TransitEditOriginalState {
     let originPlace: Place?
     let destinationPlace: Place?
     let durationSource: DurationSource
+    let distanceMeters: Double?
     let originCandidates: [PlaceCandidate]
     let destinationCandidates: [PlaceCandidate]
     let unresolvedPeople: [String]
@@ -139,6 +145,7 @@ private struct TransitEditOriginalState {
         originPlace = details.originPlace
         destinationPlace = details.destinationPlace
         durationSource = details.durationSource
+        distanceMeters = details.distanceMeters
         originCandidates = details.originCandidates
         destinationCandidates = details.destinationCandidates
         unresolvedPeople = details.unresolvedPeople
@@ -158,6 +165,7 @@ private struct TransitEditOriginalState {
         details.originPlace = originPlace
         details.destinationPlace = destinationPlace
         details.durationSource = durationSource
+        details.distanceMeters = distanceMeters
         details.originCandidates = originCandidates
         details.destinationCandidates = destinationCandidates
         details.unresolvedPeople = unresolvedPeople

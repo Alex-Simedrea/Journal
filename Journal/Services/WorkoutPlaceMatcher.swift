@@ -6,7 +6,7 @@
 import CoreLocation
 import Foundation
 
-nonisolated struct WorkoutCoordinateSnapshot: Codable, Equatable, Sendable {
+nonisolated struct WorkoutCoordinateSnapshot: Codable, Hashable, Sendable {
     let latitude: Double
     let longitude: Double
     let horizontalAccuracyMeters: Double
@@ -26,6 +26,14 @@ nonisolated struct WorkoutCoordinateSnapshot: Codable, Equatable, Sendable {
             latitude: location.coordinate.latitude,
             longitude: location.coordinate.longitude,
             horizontalAccuracyMeters: location.horizontalAccuracy
+        )
+    }
+
+    init(location: Location) {
+        self.init(
+            latitude: location.latitude,
+            longitude: location.longitude,
+            horizontalAccuracyMeters: 0
         )
     }
 

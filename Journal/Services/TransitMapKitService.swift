@@ -19,6 +19,11 @@ nonisolated struct TransitMapSearchResult: Sendable, Equatable {
 
 }
 
+nonisolated struct TransitRouteMetrics: Sendable, Equatable {
+    let distanceMeters: Double
+    let expectedTravelTime: TimeInterval
+}
+
 nonisolated enum TransitMapKitService {
     static func search(
         query: String,
@@ -127,6 +132,19 @@ nonisolated enum TransitMapKitService {
         to destination: CLLocationCoordinate2D,
         transportType: MKDirectionsTransportType
     ) async throws -> TimeInterval {
+        try await routeMetrics(
+            from: origin,
+            to: destination,
+            transportType: transportType
+        ).expectedTravelTime
+    }
+
+    static func routeMetrics(
+        from origin: CLLocationCoordinate2D,
+        to destination: CLLocationCoordinate2D,
+        transportType: MKDirectionsTransportType,
+        departureDate: Date? = nil
+    ) async throws -> TransitRouteMetrics {
         let request = MKDirections.Request()
         request.source = MKMapItem(
             location: CLLocation(
@@ -143,13 +161,17 @@ nonisolated enum TransitMapKitService {
             address: nil
         )
         request.transportType = transportType
+        request.departureDate = departureDate
 
         let response = try await MKDirections(request: request).calculate()
         guard let route = response.routes.first else {
             throw TransitMapKitError.routeUnavailable
         }
 
-        return route.expectedTravelTime
+        return TransitRouteMetrics(
+            distanceMeters: route.distance,
+            expectedTravelTime: route.expectedTravelTime
+        )
     }
 }
 
