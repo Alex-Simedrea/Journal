@@ -163,6 +163,7 @@ enum SavedPlacePromotionService {
         case .transit: !(entry.transitDetails?.fieldReviews.isEmpty ?? true)
         case .placeVisit: !(entry.placeVisitDetails?.fieldReviews.isEmpty ?? true)
         case .workout: !(entry.workoutDetails?.fieldReviews.isEmpty ?? true)
+        case .wakeUp: false
         }
         entry.needsReview = entry.entryKindReviewReason != nil || hasFieldReviews
     }

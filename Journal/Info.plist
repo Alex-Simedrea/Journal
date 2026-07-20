@@ -36,7 +36,7 @@
 	<key>NSContactsUsageDescription</key>
 	<string>Your contacts are used to import people and display their current names and photos.</string>
 	<key>NSHealthShareUsageDescription</key>
-	<string>Your workouts are imported from Health to add workout entries, routes, distance, and active calories to your journal.</string>
+	<string>Your workouts and sleep are imported from Health to add workout and wake-up entries to your journal.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Your location is used to place locations on the map and resolve transit entries.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

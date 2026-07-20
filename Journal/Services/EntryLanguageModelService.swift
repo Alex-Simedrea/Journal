@@ -844,6 +844,8 @@ struct EntryPromptReferences {
                     rawText: nil
                 ),
             ].compactMap { $0 }
+        case .wakeUp:
+            return []
         }
     }
 
@@ -1139,8 +1141,8 @@ enum EntryLanguageModelService {
           entryKind, entryKindReview, transit, and placeVisit. Do not add, remove, rename,
           flatten, or move properties.
         - entryKind is exactly transit or placeVisit.
-        - workout is never an output entryKind. Workouts are imported from HealthKit and may
-          appear only inside SELECTED DAY HISTORY as trusted temporal/place context.
+        - workout and wakeUp are never output entry kinds. They are imported from HealthKit
+          and may appear only inside SELECTED DAY HISTORY as trusted context.
         - Set exactly one matching payload. For transit, transit is present and placeVisit is
           nil. For placeVisit, placeVisit is present and transit is nil.
         - Every property shown in the mandatory shapes below must be present. Represent an
@@ -1284,6 +1286,10 @@ enum EntryLanguageModelService {
           a moving workout starts at its origin and ends at its destination, while a static
           workout starts and ends at its confirmed place. Ignore any workout endpoint listed
           in reviewedFields.
+        - A wakeUp history row represents the preceding sleep interval. Its endTimeISO8601 is
+          the wake-up time and wakeUp.sleepDurationMinutes is the measured asleep duration.
+          It is a trustworthy time boundary but has no location and must never be used to
+          invent one.
         - A history field is usable only when entryKindNeedsReview is false and its relevant
           field is absent from reviewedFields. For a temporal anchor, time and the relevant
           place endpoint must both be confirmed. Ignore unresolved history fields.
@@ -1943,6 +1949,13 @@ enum EntryLanguageModelService {
                     }
                 )
             }
+            let wakeUp = entry.kind == .wakeUp
+                ? SelectedDayWakeUpPromptContext(
+                    sleepDurationMinutes: entry.sleepDurationSeconds.map {
+                        rounded($0 / 60)
+                    }
+                )
+                : nil
             let reviewedFields: [String]
             switch entry.kind {
             case .transit:
@@ -1957,6 +1970,8 @@ enum EntryLanguageModelService {
                 reviewedFields = entry.workoutDetails?.fieldReviews.map(
                     \.field.rawValue
                 ) ?? []
+            case .wakeUp:
+                reviewedFields = []
             }
 
             return SelectedDayEntryPromptContext(
@@ -1980,6 +1995,7 @@ enum EntryLanguageModelService {
                 transit: transit,
                 placeVisit: visit,
                 workout: workout,
+                wakeUp: wakeUp,
                 peopleKeys: entry.people.compactMap { personKeysByID[$0.id] }.sorted()
             )
         }
@@ -2019,9 +2035,13 @@ enum EntryLanguageModelService {
         for entry: LogEntry,
         selectedDay: TimelineDayKey
     ) -> String {
-        let anchor = entry.startTime ?? entry.endTime ?? entry.createdAt
+        let anchor = entry.kind == .wakeUp
+            ? entry.endTime ?? entry.startTime ?? entry.createdAt
+            : entry.startTime ?? entry.endTime ?? entry.createdAt
         let timeZone = TimeZone(
-            identifier: entry.startTimeZoneIdentifier
+            identifier: entry.kind == .wakeUp
+                ? entry.endTimeZoneIdentifier
+                : entry.startTimeZoneIdentifier
         ) ?? TimeZone(
             identifier: entry.creationTimeZoneIdentifier
         ) ?? .current
@@ -2134,6 +2154,7 @@ private struct SelectedDayEntryPromptContext: Encodable {
     let transit: SelectedDayTransitPromptContext?
     let placeVisit: SelectedDayVisitPromptContext?
     let workout: SelectedDayWorkoutPromptContext?
+    let wakeUp: SelectedDayWakeUpPromptContext?
     let peopleKeys: [String]
 }
 
@@ -2154,6 +2175,10 @@ private struct SelectedDayWorkoutPromptContext: Encodable {
     let origin: SelectedDayLocationPromptContext?
     let destination: SelectedDayLocationPromptContext?
     let distanceKilometers: Double?
+}
+
+private struct SelectedDayWakeUpPromptContext: Encodable {
+    let sleepDurationMinutes: Double?
 }
 
 private struct SelectedDayLocationPromptContext: Encodable {

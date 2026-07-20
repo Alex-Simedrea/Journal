@@ -491,6 +491,8 @@ enum TransitResolutionService {
                     && (details.originLocation ?? details.originPlace?.location) != nil
                 : !reviewedFields.contains(.place)
                     && (details.sourceLocation ?? details.place?.location) != nil
+        case .wakeUp:
+            return false
         }
     }
 
@@ -513,6 +515,8 @@ enum TransitResolutionService {
                     && (details.destinationLocation ?? details.destinationPlace?.location) != nil
                 : !reviewedFields.contains(.place)
                     && (details.sourceLocation ?? details.place?.location) != nil
+        case .wakeUp:
+            return false
         }
     }
 
@@ -532,6 +536,8 @@ enum TransitResolutionService {
                 entry.workoutDetails?.sourceLocation
                     ?? entry.workoutDetails?.place?.location
             }
+        case .wakeUp:
+            nil
         }
     }
 
@@ -551,6 +557,8 @@ enum TransitResolutionService {
                 entry.workoutDetails?.sourceLocation
                     ?? entry.workoutDetails?.place?.location
             }
+        case .wakeUp:
+            nil
         }
     }
 

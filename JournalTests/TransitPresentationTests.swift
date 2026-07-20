@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import Journal
@@ -26,6 +27,16 @@ struct TransitPresentationTests {
             TransitPresentationCatalog.presentation(for: "Teleport")
                 .systemImageName == "arrow.triangle.swap"
         )
+    }
+
+    @Test("Compact durations use hours when needed")
+    func compactDuration() {
+        let style = CompactDurationFormatStyle()
+
+        #expect(style.format(12 * 60) == "12m")
+        #expect(style.format(60 * 60) == "1h")
+        #expect(style.format(92 * 60) == "1h32m")
+        #expect(style.format(152 * 60) == "2h32m")
     }
 
     @Test("Timeline locations display their address instead of model raw text")

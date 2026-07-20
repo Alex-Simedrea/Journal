@@ -45,7 +45,7 @@ final class EntryKindConversionModel {
             destinationPlaceID = entry.placeVisitDetails?.place?.id
             destinationLocation = entry.placeVisitDetails?.location
                 ?? entry.placeVisitDetails?.place?.location
-        case .workout:
+        case .workout, .wakeUp:
             break
         }
     }
@@ -59,7 +59,7 @@ final class EntryKindConversionModel {
                 && (destinationLocation != nil || destinationPlaceID != nil)
         case .placeVisit:
             return visitLocation != nil || visitPlaceID != nil
-        case .workout:
+        case .workout, .wakeUp:
             return false
         }
     }
@@ -69,6 +69,7 @@ final class EntryKindConversionModel {
         case .transit: "Convert to Transit"
         case .placeVisit: "Convert to Visit"
         case .workout: "Workout"
+        case .wakeUp: "Wake up"
         }
     }
 
@@ -157,7 +158,7 @@ final class EntryKindConversionModel {
                 ?? entry.creationTimeZoneIdentifier
             entry.startTimeZoneIdentifier = zone
             entry.endTimeZoneIdentifier = zone
-        case .workout:
+        case .workout, .wakeUp:
             return false
         }
 

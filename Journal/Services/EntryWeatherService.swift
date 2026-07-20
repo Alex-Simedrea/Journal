@@ -162,6 +162,8 @@ enum EntryWeatherService {
                 entry.workoutDetails?.sourceLocation
                     ?? entry.workoutDetails?.place?.location
             }
+        case .wakeUp:
+            nil
         }
     }
 }

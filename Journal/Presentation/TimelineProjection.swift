@@ -80,6 +80,7 @@ enum TimelineOccurrenceRole: String, Hashable, Sendable {
     case intervalDay
     case crossZoneArrival
     case unresolvedReview
+    case wakeUp
 }
 
 struct TimelineOccurrenceID: Hashable, Sendable {
@@ -193,6 +194,7 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
     let workoutPlaceLocation: TimelineLocationSnapshot?
     let workoutRouteStart: WorkoutCoordinateSnapshot?
     let workoutRouteEnd: WorkoutCoordinateSnapshot?
+    let wakeUpSleepDurationSeconds: Double?
 
     init(entry: LogEntry) {
         id = entry.id
@@ -309,6 +311,7 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
         workoutRouteEnd = workout?.destinationLocation.map {
             WorkoutCoordinateSnapshot(location: $0)
         }
+        wakeUpSleepDurationSeconds = entry.sleepDurationSeconds
         reviews = Self.reviewSnapshots(for: entry)
     }
 
@@ -337,7 +340,8 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
         workoutDestination: String = "Destination",
         workoutPlace: String = "Place",
         workoutRouteStart: WorkoutCoordinateSnapshot? = nil,
-        workoutRouteEnd: WorkoutCoordinateSnapshot? = nil
+        workoutRouteEnd: WorkoutCoordinateSnapshot? = nil,
+        wakeUpSleepDurationSeconds: Double? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -379,6 +383,7 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
         workoutPlaceLocation = nil
         self.workoutRouteStart = workoutRouteStart
         self.workoutRouteEnd = workoutRouteEnd
+        self.wakeUpSleepDurationSeconds = wakeUpSleepDurationSeconds
     }
 
     private static func location(
@@ -459,6 +464,8 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
                     reason: $0.reason
                 )
             } ?? [])
+        case .wakeUp:
+            break
         }
         return result
     }
@@ -543,6 +550,9 @@ struct TimelineOccurrence: Hashable, Identifiable, Sendable {
     var workoutOrigin: String { snapshot.workoutOrigin }
     var workoutDestination: String { snapshot.workoutDestination }
     var workoutPlace: String { snapshot.workoutPlace }
+    var wakeUpSleepDurationSeconds: Double? {
+        snapshot.wakeUpSleepDurationSeconds
+    }
 }
 
 enum TimelinePreviousRelationship: Hashable, Sendable {
@@ -594,6 +604,13 @@ struct TimelineProjection: Sendable {
         var reviews: [TimelineOccurrence] = []
 
         for entry in entries {
+            if entry.kind == .wakeUp {
+                if let wakeUp = wakeUpOccurrence(for: entry, on: day) {
+                    occurrences.append(wakeUp)
+                }
+                continue
+            }
+
             guard let startTime = entry.startTime,
                   let endTime = entry.endTime,
                   endTime > startTime else {
@@ -712,6 +729,30 @@ struct TimelineProjection: Sendable {
             sortTime: entry.startTime ?? entry.endTime ?? entry.createdAt,
             visibleStartTime: entry.startTime,
             visibleEndTime: entry.endTime
+        )
+    }
+
+    private static func wakeUpOccurrence(
+        for entry: TimelineEntrySnapshot,
+        on day: TimelineDayKey
+    ) -> TimelineOccurrence? {
+        guard let wakeTime = entry.endTime else { return nil }
+        let wakeTimeZone = timeZone(
+            identifier: entry.endTimeZoneIdentifier,
+            fallbackIdentifier: entry.creationTimeZoneIdentifier
+        )
+        guard TimelineDayKey(date: wakeTime, timeZone: wakeTimeZone) == day else {
+            return nil
+        }
+        return occurrence(
+            entry: entry,
+            day: day,
+            role: .wakeUp,
+            timeZoneIdentifier: wakeTimeZone.identifier,
+            endTimeZoneIdentifier: wakeTimeZone.identifier,
+            sortTime: wakeTime,
+            visibleStartTime: wakeTime,
+            visibleEndTime: wakeTime
         )
     }
 

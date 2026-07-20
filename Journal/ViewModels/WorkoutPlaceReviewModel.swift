@@ -13,12 +13,14 @@ final class WorkoutPlaceReviewModel {
     var selectedPlaceID: UUID?
     var selectedOriginPlaceID: UUID?
     var selectedDestinationPlaceID: UUID?
+    var selectedPeopleIDs: Set<UUID>
     var errorMessage: String?
 
     init(entry: LogEntry) {
         selectedPlaceID = entry.workoutDetails?.place?.id
         selectedOriginPlaceID = entry.workoutDetails?.originPlace?.id
         selectedDestinationPlaceID = entry.workoutDetails?.destinationPlace?.id
+        selectedPeopleIDs = Set(entry.people.map(\.id))
     }
 
     subscript(placeIDFor field: WorkoutReviewField) -> UUID? {
@@ -42,9 +44,18 @@ final class WorkoutPlaceReviewModel {
         self[placeIDFor: field] = place.id
     }
 
+    func togglePerson(_ personID: UUID) {
+        if selectedPeopleIDs.contains(personID) {
+            selectedPeopleIDs.remove(personID)
+        } else {
+            selectedPeopleIDs.insert(personID)
+        }
+    }
+
     func save(
         entry: LogEntry,
         places: [Place],
+        people: [Person],
         in modelContext: ModelContext
     ) -> Bool {
         guard let details = entry.workoutDetails else { return false }
@@ -71,6 +82,7 @@ final class WorkoutPlaceReviewModel {
             )
         }
 
+        entry.people = people.filter { selectedPeopleIDs.contains($0.id) }
         entry.needsReview = !details.fieldReviews.isEmpty
         entry.weather = nil
 

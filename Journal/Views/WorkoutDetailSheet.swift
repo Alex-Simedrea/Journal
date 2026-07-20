@@ -51,6 +51,7 @@ struct WorkoutDetailSheet: View {
                             place: details.destinationPlace,
                             location: details.destinationLocation
                         ),
+                        peopleNames: entry.people.map(\.name),
                         createdAt: entry.createdAt
                     )
                     WorkoutReviewSection(reviews: details.fieldReviews)
@@ -84,7 +85,7 @@ struct WorkoutDetailSheet: View {
                     )
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button(entry.needsReview ? "Review" : "Places") {
+                    Button(entry.needsReview ? "Review" : "Edit") {
                         isPlacesPresented = true
                     }
                 }
@@ -289,6 +290,7 @@ private struct WorkoutSummarySection: View {
     let placeName: String
     let originName: String
     let destinationName: String
+    let peopleNames: [String]
     let createdAt: Date
 
     var body: some View {
@@ -310,6 +312,9 @@ private struct WorkoutSummarySection: View {
                 originName: originName,
                 destinationName: destinationName
             )
+            if !peopleNames.isEmpty {
+                LabeledContent("People", value: peopleNames.formatted())
+            }
             EntryDetailDateRow(
                 title: "Started",
                 date: startTime,

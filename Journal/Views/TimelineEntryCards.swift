@@ -12,6 +12,22 @@ struct TimelineEntryCard: View {
     let onTap: () -> Void
 
     var body: some View {
+        if occurrence.kind == .wakeUp {
+            TimelineWakeUpRow(occurrence: occurrence)
+        } else {
+            TimelineInteractiveEntryCard(
+                occurrence: occurrence,
+                onTap: onTap
+            )
+        }
+    }
+}
+
+private struct TimelineInteractiveEntryCard: View {
+    let occurrence: TimelineOccurrence
+    let onTap: () -> Void
+
+    var body: some View {
         Button(action: onTap) {
             VStack(spacing: 7) {
                 switch occurrence.kind {
@@ -21,6 +37,8 @@ struct TimelineEntryCard: View {
                     TimelinePlaceVisitCard(occurrence: occurrence)
                 case .workout:
                     TimelineWorkoutCard(occurrence: occurrence)
+                case .wakeUp:
+                    TimelineWakeUpRow(occurrence: occurrence)
                 }
 
                 TimelineUnmatchedReviewStrip(occurrence: occurrence)
@@ -34,6 +52,56 @@ struct TimelineEntryCard: View {
         }
         .buttonStyle(.plain)
         .accessibilityHint("Opens entry details")
+    }
+}
+
+private struct TimelineWakeUpRow: View {
+    let occurrence: TimelineOccurrence
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "alarm")
+                .resizable()
+                .scaledToFit()
+                .fontWeight(.semibold)
+                .foregroundStyle(.white)
+                .frame(width: 13, height: 13)
+                .frame(width: 26, height: 26)
+                .background(
+                    .teal.gradient,
+                    in: .circle
+                )
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Wake up")
+                    .font(.headline)
+                TimelineWakeUpDurationLabel(
+                    durationSeconds: occurrence.wakeUpSleepDurationSeconds
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 49, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct TimelineWakeUpDurationLabel: View {
+    let durationSeconds: TimeInterval?
+
+    var body: some View {
+        if let durationSeconds {
+            Text(
+                Duration.seconds(durationSeconds),
+                format: .units(
+                    allowed: [.hours, .minutes],
+                    width: .narrow,
+                    maximumUnitCount: 2,
+                    zeroValueUnits: .hide
+                )
+            )
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+        }
     }
 }
 
@@ -58,7 +126,7 @@ private struct TimelineTransitCard: View {
                 )
             }
         }
-        .frame(height: 60)
+        .frame(height: 50)
     }
 }
 
@@ -77,7 +145,7 @@ private struct TimelineTransitTypeTile: View {
                 weight: .semibold
             )
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 0) {
                 Text(occurrence.transitType)
                     .font(.headline)
                     .lineLimit(1)
@@ -105,9 +173,6 @@ private struct TimelineTransitMetrics: View {
 
     var body: some View {
         HStack(spacing: 3) {
-            if occurrence.snapshot.transitDistanceIsApproximate {
-                Text("≈")
-            }
             if let distance = occurrence.snapshot.transitDistanceMeters {
                 Text(
                     Measurement(value: distance, unit: UnitLength.meters),
@@ -115,13 +180,18 @@ private struct TimelineTransitMetrics: View {
                 )
             }
             if let start = occurrence.startTime,
-               let end = occurrence.endTime,
-               end > start {
+                let end = occurrence.endTime,
+                end > start
+            {
                 Text("•")
-                Text("\(Int((end.timeIntervalSince(start) / 60).rounded())) min")
+                Text(
+                    end.timeIntervalSince(start),
+                    format: .compactDuration
+                )
             }
         }
-        .font(.caption2.weight(.semibold))
+        .font(.footnote.weight(.medium))
+        .opacity(0.8)
         .lineLimit(1)
         .minimumScaleFactor(0.7)
     }
@@ -141,7 +211,8 @@ private struct TimelinePlaceVisitCard: View {
             let totalHeight = rowHeight * 2 + gap
             let hasPhotos = !occurrence.snapshot.photoReferences.isEmpty
             let columnCount: CGFloat = hasPhotos ? 3 : 2
-            let columnWidth = (proxy.size.width - gap * (columnCount - 1))
+            let columnWidth =
+                (proxy.size.width - gap * (columnCount - 1))
                 / columnCount
 
             HStack(spacing: gap) {
@@ -243,21 +314,17 @@ private struct TimelineWorkoutCard: View {
                             TimelineWeatherTile(
                                 weather: occurrence.snapshot.weather,
                                 layout: .compact,
-                                location: occurrence.snapshot.workoutWeatherLocation,
-                                timeZoneIdentifier: occurrence.timeZoneIdentifier
+                                location: occurrence.snapshot
+                                    .workoutWeatherLocation,
+                                timeZoneIdentifier: occurrence
+                                    .timeZoneIdentifier
                             )
                             .frame(width: columnWidth, height: rowHeight)
                         }
                         .frame(height: rowHeight)
 
-                        TimelinePlacesTile(
-                            origin: occurrence.snapshot.workoutOriginLocation,
-                            originName: occurrence.snapshot.workoutOrigin,
-                            destination: occurrence.snapshot.workoutDestinationLocation,
-                            destinationName: occurrence.snapshot.workoutDestination,
-                            needsReview: occurrence.snapshot.reviews.contains {
-                                $0.target == .origin || $0.target == .destination
-                            }
+                        TimelineWorkoutPlacesAndPeopleRow(
+                            occurrence: occurrence
                         )
                         .frame(height: rowHeight)
                     }
@@ -265,9 +332,8 @@ private struct TimelineWorkoutCard: View {
                 }
             } else {
                 let columnCount: CGFloat = hasStaticLocation ? 3 : 2
-                let columnWidth = (
-                    proxy.size.width - 6 * (columnCount - 1)
-                ) / columnCount
+                let columnWidth =
+                    (proxy.size.width - 6 * (columnCount - 1)) / columnCount
                 HStack(spacing: 6) {
                     if hasStaticLocation {
                         TimelineWorkoutMiniMap(occurrence: occurrence)
@@ -275,11 +341,12 @@ private struct TimelineWorkoutCard: View {
                     }
                     TimelineWorkoutTypeTile(occurrence: occurrence)
                         .frame(width: columnWidth, height: totalHeight)
-                    TimelineWeatherTile(
+                    TimelineWorkoutWeatherAndPeopleColumn(
                         weather: occurrence.snapshot.weather,
-                        layout: .large,
                         location: occurrence.snapshot.workoutWeatherLocation,
-                        timeZoneIdentifier: occurrence.timeZoneIdentifier
+                        timeZoneIdentifier: occurrence.timeZoneIdentifier,
+                        people: occurrence.snapshot.people,
+                        rowHeight: rowHeight
                     )
                     .frame(width: columnWidth, height: totalHeight)
                 }
@@ -290,11 +357,63 @@ private struct TimelineWorkoutCard: View {
     }
 }
 
+private struct TimelineWorkoutPlacesAndPeopleRow: View {
+    let occurrence: TimelineOccurrence
+
+    var body: some View {
+        HStack(spacing: 6) {
+            TimelinePlacesTile(
+                origin: occurrence.snapshot.workoutOriginLocation,
+                originName: occurrence.snapshot.workoutOrigin,
+                destination: occurrence.snapshot.workoutDestinationLocation,
+                destinationName: occurrence.snapshot.workoutDestination,
+                needsReview: occurrence.snapshot.reviews.contains {
+                    $0.target == .origin || $0.target == .destination
+                }
+            )
+
+            if !occurrence.snapshot.people.isEmpty {
+                TimelinePeopleTile(
+                    people: occurrence.snapshot.people,
+                    needsReview: false
+                )
+            }
+        }
+    }
+}
+
+private struct TimelineWorkoutWeatherAndPeopleColumn: View {
+    let weather: EntryWeather?
+    let location: TimelineLocationSnapshot?
+    let timeZoneIdentifier: String
+    let people: [TimelinePersonSnapshot]
+    let rowHeight: CGFloat
+
+    var body: some View {
+        VStack(spacing: 6) {
+            TimelineWeatherTile(
+                weather: weather,
+                layout: people.isEmpty ? .large : .compact,
+                location: location,
+                timeZoneIdentifier: timeZoneIdentifier
+            )
+            .frame(
+                height: people.isEmpty ? rowHeight * 2 + 6 : rowHeight
+            )
+
+            if !people.isEmpty {
+                TimelinePeopleTile(people: people, needsReview: false)
+                    .frame(height: rowHeight)
+            }
+        }
+    }
+}
+
 private struct TimelineWorkoutTypeTile: View {
     let occurrence: TimelineOccurrence
 
     var body: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 4) {
             TimelineFixedSymbol(
                 systemName: occurrence.snapshot.workoutSystemImageName,
                 size: 22,
@@ -306,10 +425,15 @@ private struct TimelineWorkoutTypeTile: View {
                     .font(.headline)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
-                if let energy = occurrence.snapshot.workoutActiveEnergyKilocalories {
-                    Text("\(energy, format: .number.precision(.fractionLength(0))) kcal")
-                        .font(.caption2.weight(.semibold))
-                        .lineLimit(1)
+                if let energy = occurrence.snapshot
+                    .workoutActiveEnergyKilocalories
+                {
+                    Text(
+                        "\(energy, format: .number.precision(.fractionLength(0))) kcal"
+                    )
+                    .font(.footnote.weight(.medium))
+                    .opacity(0.8)
+                    .lineLimit(1)
                 }
             }
         }
@@ -360,7 +484,7 @@ private struct TimelinePlaceEndpointRow: View {
         HStack(spacing: 6) {
             TimelineFixedPlaceSymbol(systemImage: systemImage, size: 18)
             Text(name)
-                .font(.caption)
+                .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
@@ -389,7 +513,9 @@ private struct TimelinePlaceMiniMap: View {
                         systemImage: location.systemImage.rawValue,
                         coordinate: location.coordinate
                     )
-                    .tint(PlaceSymbols.symbol(for: location.systemImage).primary)
+                    .tint(
+                        PlaceSymbols.symbol(for: location.systemImage).primary
+                    )
                 }
                 .mapStyle(.standard)
             } else {
@@ -443,7 +569,8 @@ private struct TimelineWorkoutMiniMap: View {
         }
         .task(id: occurrence.snapshot.workoutUUID) {
             guard occurrence.snapshot.workoutMovementKind == .moving,
-                  let workoutUUID = occurrence.snapshot.workoutUUID else { return }
+                let workoutUUID = occurrence.snapshot.workoutUUID
+            else { return }
             await routeModel.load(workoutUUID: workoutUUID)
         }
     }
@@ -477,11 +604,14 @@ private struct TimelineWorkoutMapContent: View {
                             )
                         )
                 } else if let origin = workoutOrigin,
-                          let destination = workoutDestination {
+                    let destination = workoutDestination
+                {
                     MapPolyline(
-                        coordinates: [origin.coordinate, destination.coordinate]
+                        coordinates: [
+                            origin.coordinate, destination.coordinate,
+                        ]
                     )
-                        .stroke(Color(hex: 0xB6FF00), lineWidth: 4)
+                    .stroke(Color(hex: 0xB6FF00), lineWidth: 4)
                 }
 
                 if let origin = workoutOrigin {
@@ -499,7 +629,8 @@ private struct TimelineWorkoutMapContent: View {
                         coordinate: destination.coordinate
                     )
                     .tint(
-                        PlaceSymbols.symbol(for: destination.systemImage).primary
+                        PlaceSymbols.symbol(for: destination.systemImage)
+                            .primary
                     )
                 }
             }
@@ -531,8 +662,10 @@ private struct TimelineWorkoutMapContent: View {
     }
 
     private var workoutOrigin: TimelineWorkoutMapEndpoint? {
-        guard let coordinate = points.first?.coordinate
-            ?? occurrence.snapshot.workoutRouteStart?.coordinate else {
+        guard
+            let coordinate = points.first?.coordinate
+                ?? occurrence.snapshot.workoutRouteStart?.coordinate
+        else {
             return nil
         }
         return TimelineWorkoutMapEndpoint(
@@ -544,22 +677,26 @@ private struct TimelineWorkoutMapContent: View {
     }
 
     private var workoutDestination: TimelineWorkoutMapEndpoint? {
-        guard let coordinate = points.last?.coordinate
-            ?? occurrence.snapshot.workoutRouteEnd?.coordinate else {
+        guard
+            let coordinate = points.last?.coordinate
+                ?? occurrence.snapshot.workoutRouteEnd?.coordinate
+        else {
             return nil
         }
         return TimelineWorkoutMapEndpoint(
             name: occurrence.snapshot.workoutDestination,
             systemImage:
                 occurrence.snapshot.workoutDestinationLocation?.systemImage
-                    ?? .mappin,
+                ?? .mappin,
             coordinate: coordinate
         )
     }
 
     private var workoutPlace: TimelineWorkoutMapEndpoint? {
-        guard let coordinate = occurrence.snapshot.workoutRouteStart?.coordinate
-            ?? occurrence.snapshot.workoutPlaceLocation?.coordinate else {
+        guard
+            let coordinate = occurrence.snapshot.workoutRouteStart?.coordinate
+                ?? occurrence.snapshot.workoutPlaceLocation?.coordinate
+        else {
             return nil
         }
         return TimelineWorkoutMapEndpoint(
@@ -674,9 +811,9 @@ private struct TimelineCompactWeatherContent: View {
 
             VStack(alignment: .leading, spacing: 0) {
                 TimelineTemperatureLabel(celsius: weather.temperatureCelsius)
-                .font(.title3.weight(.medium))
-                .lineLimit(1)
-                .minimumScaleFactor(0.68)
+                    .font(.title2.weight(.medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.68)
 
                 TimelineHumidityLabel(humidity: weather.humidity)
             }
@@ -689,15 +826,15 @@ private struct TimelineLargeWeatherContent: View {
     let weather: EntryWeather
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 0) {
             TimelineWeatherSymbol(symbolName: weather.symbolName, size: 32)
 
             Spacer(minLength: 2)
 
             TimelineTemperatureLabel(celsius: weather.temperatureCelsius)
-            .font(.title3.weight(.medium))
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
+                .font(.title.weight(.medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
 
             TimelineHumidityLabel(humidity: weather.humidity)
         }
@@ -724,7 +861,7 @@ private struct TimelineHumidityLabel: View {
             Text(humidity, format: .percent.precision(.fractionLength(0)))
         }
         .font(.caption.weight(.semibold))
-        .foregroundStyle(.white.opacity(0.82))
+        .foregroundStyle(.white.opacity(0.8))
         .lineLimit(1)
     }
 }
@@ -738,8 +875,8 @@ private struct TimelineUnavailableWeatherContent: View {
                 systemName: "cloud.slash.fill",
                 size: layout == .large ? 30 : 24
             )
-                .symbolRenderingMode(.palette)
-                .foregroundStyle(.white, .cyan)
+            .symbolRenderingMode(.palette)
+            .foregroundStyle(.white, .cyan)
             if layout == .large {
                 Spacer(minLength: 4)
             }
@@ -762,7 +899,11 @@ private struct TimelineWeatherSymbol: View {
             .scaledToFit()
             .symbolVariant(.fill)
             .symbolRenderingMode(.palette)
-            .foregroundStyle(palette.primary, palette.secondary, palette.tertiary)
+            .foregroundStyle(
+                palette.primary,
+                palette.secondary,
+                palette.tertiary
+            )
             .fontWeight(.semibold)
             .frame(width: size, height: size)
     }
@@ -893,8 +1034,10 @@ private struct TimelinePeopleTile: View {
                     TimelineNamedPerson(person: person)
                 }
             } else if let first = people.first {
-                TimelineNamedPerson(person: first)
-                TimelinePeopleSummary(people: Array(people.dropFirst()))
+                TimelinePeopleGroup(
+                    first: first,
+                    remaining: Array(people.dropFirst())
+                )
             }
         }
         .padding(.horizontal, 8)
@@ -911,6 +1054,18 @@ private struct TimelinePeopleTile: View {
     }
 }
 
+private struct TimelinePeopleGroup: View {
+    let first: TimelinePersonSnapshot
+    let remaining: [TimelinePersonSnapshot]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            TimelineNamedPerson(person: first)
+            TimelinePeopleSummary(people: remaining)
+        }
+    }
+}
+
 private struct TimelineNamedPerson: View {
     let person: TimelinePersonSnapshot
 
@@ -919,10 +1074,10 @@ private struct TimelineNamedPerson: View {
             PersonAvatar(
                 name: person.name,
                 contactIdentifier: person.contactIdentifier,
-                size: 24
+                size: 20
             )
             Text(person.name)
-                .font(.caption2.weight(.semibold))
+                .font(.footnote.weight(.medium))
                 .lineLimit(1)
                 .minimumScaleFactor(0.65)
         }
@@ -934,20 +1089,19 @@ private struct TimelinePeopleSummary: View {
     let people: [TimelinePersonSnapshot]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 6) {
             HStack(spacing: -8) {
                 ForEach(people.prefix(3)) { person in
                     PersonAvatar(
                         name: person.name,
                         contactIdentifier: person.contactIdentifier,
-                        size: 22
+                        size: 20
                     )
-                    .overlay { Circle().stroke(.background, lineWidth: 1.5) }
                 }
             }
             Text("\(people.count) more")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .font(.footnote.weight(.medium))
+                .lineLimit(1)
         }
     }
 }
@@ -967,7 +1121,8 @@ private struct TimelinePhotoTile: View {
         } else {
             LazyVGrid(columns: columns, spacing: 4) {
                 ForEach(references.prefix(4).enumerated(), id: \.element.id) {
-                    index, reference in
+                    index,
+                    reference in
                     TimelinePhotoThumbnail(reference: reference)
                         .overlay {
                             if index == 3, references.count > 4 {
@@ -1011,7 +1166,7 @@ private struct TimelinePhotoThumbnail: View {
                     systemName: "photo.badge.exclamationmark",
                     size: 24
                 )
-                    .foregroundStyle(.secondary)
+                .foregroundStyle(.secondary)
             } else {
                 ProgressView()
             }
@@ -1035,12 +1190,16 @@ private struct TimelineUnmatchedReviewStrip: View {
     let occurrence: TimelineOccurrence
 
     private var reviews: [TimelineReviewSnapshot] {
-        let mapped: Set<TimelineReviewTarget> = switch occurrence.kind {
-        case .transit: [.transitType, .origin, .destination, .time]
-        case .placeVisit: [.place, .people, .time]
-        case .workout: [.place, .origin, .destination]
+        let mapped: Set<TimelineReviewTarget> =
+            switch occurrence.kind {
+            case .transit: [.transitType, .origin, .destination, .time]
+            case .placeVisit: [.place, .people, .time]
+            case .workout: [.place, .origin, .destination]
+            case .wakeUp: []
+            }
+        return occurrence.snapshot.reviews.filter {
+            !mapped.contains($0.target)
         }
-        return occurrence.snapshot.reviews.filter { !mapped.contains($0.target) }
     }
 
     var body: some View {
@@ -1058,8 +1217,8 @@ private struct TimelineUnmatchedReviewStrip: View {
     }
 }
 
-private extension TimelineReviewTarget {
-    var title: String {
+extension TimelineReviewTarget {
+    fileprivate var title: String {
         switch self {
         case .entryKind: String(localized: "Entry type needs review")
         case .transitType: String(localized: "Transit type needs review")

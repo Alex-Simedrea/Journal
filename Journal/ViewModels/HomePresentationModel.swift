@@ -88,8 +88,7 @@ final class HomePresentationModel {
             selectedDayEntries = entries
                 .filter { selectedEntryIDs.contains($0.id) }
                 .sorted {
-                    ($0.startTime ?? $0.endTime ?? $0.createdAt)
-                        < ($1.startTime ?? $1.endTime ?? $1.createdAt)
+                    timelineSortTime($0) < timelineSortTime($1)
                 }
             timelineItems = projection.listItems
             timelineRows = projection.rows
@@ -154,5 +153,11 @@ final class HomePresentationModel {
 
     func reloadTimeline(in modelContext: ModelContext) {
         reloadTimeline(for: .today(), in: modelContext)
+    }
+
+    private func timelineSortTime(_ entry: LogEntry) -> Date {
+        entry.kind == .wakeUp
+            ? entry.endTime ?? entry.startTime ?? entry.createdAt
+            : entry.startTime ?? entry.endTime ?? entry.createdAt
     }
 }

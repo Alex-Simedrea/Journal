@@ -33,6 +33,14 @@ enum EntryPromptHistoryService {
                     SortDescriptor(\LogEntry.createdAt),
                 ]
             )
-        )
+        ).sorted {
+            timelineSortTime($0) < timelineSortTime($1)
+        }
+    }
+
+    private static func timelineSortTime(_ entry: LogEntry) -> Date {
+        entry.kind == .wakeUp
+            ? entry.endTime ?? entry.startTime ?? entry.createdAt
+            : entry.startTime ?? entry.endTime ?? entry.createdAt
     }
 }

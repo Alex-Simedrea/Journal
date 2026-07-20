@@ -92,7 +92,7 @@ struct ContentView: View {
             )
         }
         .alert(
-            "Couldn’t Sync Workouts",
+            "Couldn’t Sync Health Data",
             isPresented: Binding(
                 get: { workoutImports.errorMessage != nil },
                 set: { if !$0 { workoutImports.errorMessage = nil } }

@@ -119,6 +119,8 @@ struct TimelineOverviewData: Equatable, Sendable {
                     markersByID: &markersByID,
                     paths: &paths
                 )
+            case .wakeUp:
+                break
             }
         }
 

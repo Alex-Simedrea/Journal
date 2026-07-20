@@ -110,6 +110,45 @@ struct EntryEditingTests {
         #expect(entry.transitDetails?.fieldReviews.isEmpty == true)
     }
 
+    @Test("Workout editing updates people without changing HealthKit data")
+    func editWorkoutPeople() throws {
+        let context = try makeContext()
+        let person = Person(name: "Alex")
+        let entry = LogEntry(
+            kind: .workout,
+            startTime: Date(timeIntervalSince1970: 1_000),
+            endTime: Date(timeIntervalSince1970: 2_000),
+            timeConfidence: .explicit,
+            needsReview: false
+        )
+        entry.workoutDetails = WorkoutDetails(
+            healthKitWorkoutUUID: UUID(),
+            activityTypeRawValue: 20,
+            activityName: "Functional Strength Training",
+            movementKind: .staticWorkout,
+            activeEnergyKilocalories: 180
+        )
+
+        context.insert(person)
+        context.insert(entry)
+        try context.save()
+
+        let model = WorkoutPlaceReviewModel(entry: entry)
+        model.togglePerson(person.id)
+        let didSave = model.save(
+            entry: entry,
+            places: [],
+            people: [person],
+            in: context
+        )
+
+        #expect(didSave)
+        #expect(entry.people.map(\.id) == [person.id])
+        #expect(entry.startTime == Date(timeIntervalSince1970: 1_000))
+        #expect(entry.endTime == Date(timeIntervalSince1970: 2_000))
+        #expect(entry.workoutDetails?.activeEnergyKilocalories == 180)
+    }
+
     private func makeContext() throws -> ModelContext {
         let schema = Schema([
             LogEntry.self,

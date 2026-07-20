@@ -11,12 +11,16 @@ struct TimelineRulerSequence: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            TimelineRulerEndCap()
+
             ForEach(rows) { row in
                 TimelineRulerRow(
                     row: row,
                     onSelect: onSelect
                 )
             }
+
+            TimelineRulerEndCap()
         }
         .overlayPreferenceValue(TimelineCardBoundsKey.self) { anchors in
             TimelineRulerOverlay(cardBounds: anchors)
@@ -25,30 +29,47 @@ struct TimelineRulerSequence: View {
     }
 }
 
+private struct TimelineRulerEndCap: View {
+    var body: some View {
+        Color.clear.frame(height: TimelineRulerMetrics.endCapHeight)
+    }
+}
+
+private struct TimelineRulerActiveBounds {
+    let anchor: Anchor<CGRect>
+    let rangeStyle: TimelineRulerActiveRangeStyle
+}
+
+private enum TimelineRulerActiveRangeStyle {
+    case interval(expansion: CGFloat)
+    case moment(radius: CGFloat)
+}
+
 private struct TimelineCardBoundsKey: PreferenceKey {
-    static let defaultValue: [Anchor<CGRect>] = []
+    static let defaultValue: [TimelineRulerActiveBounds] = []
 
     static func reduce(
-        value: inout [Anchor<CGRect>],
-        nextValue: () -> [Anchor<CGRect>]
+        value: inout [TimelineRulerActiveBounds],
+        nextValue: () -> [TimelineRulerActiveBounds]
     ) {
         value.append(contentsOf: nextValue())
     }
 }
 
 private struct TimelineRulerOverlay: View {
-    let cardBounds: [Anchor<CGRect>]
+    let cardBounds: [TimelineRulerActiveBounds]
 
     var body: some View {
         GeometryReader { proxy in
             TimelineRulerTrack(
-                activeRanges: cardBounds.map { anchor in
-                    let bounds = proxy[anchor]
-                    return (
-                        bounds.minY - TimelineRulerMetrics.activeRangeExpansion
-                    )...(
-                        bounds.maxY + TimelineRulerMetrics.activeRangeExpansion
-                    )
+                activeRanges: cardBounds.map { activeBounds in
+                    let bounds = proxy[activeBounds.anchor]
+                    return switch activeBounds.rangeStyle {
+                    case .interval(let expansion):
+                        (bounds.minY - expansion)...(bounds.maxY + expansion)
+                    case .moment(let radius):
+                        (bounds.midY - radius)...(bounds.midY + radius)
+                    }
                 }
             )
             .frame(width: TimelineRulerMetrics.trackWidth)
@@ -67,6 +88,24 @@ private struct TimelineRulerRow: View {
         VStack(spacing: 0) {
             TimelineRulerGap(relationship: row.relationshipToPrevious)
 
+            if row.occurrence.kind == .wakeUp {
+                TimelineWakeUpRulerContent(occurrence: row.occurrence)
+            } else {
+                TimelineIntervalRulerContent(
+                    row: row,
+                    onSelect: onSelect
+                )
+            }
+        }
+    }
+}
+
+private struct TimelineIntervalRulerContent: View {
+    let row: TimelineRow
+    let onSelect: (UUID) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
             if row.relationshipToPrevious != .contiguous,
                let start = row.occurrence.visibleStartTime {
                 TimelineBoundaryLabel(
@@ -91,7 +130,17 @@ private struct TimelineRulerRow: View {
                 .anchorPreference(
                     key: TimelineCardBoundsKey.self,
                     value: .bounds,
-                    transform: { [$0] }
+                    transform: {
+                        [
+                            TimelineRulerActiveBounds(
+                                anchor: $0,
+                                rangeStyle: .interval(
+                                    expansion: TimelineRulerMetrics
+                                        .activeRangeExpansion
+                                )
+                            )
+                        ]
+                    }
                 )
             }
 
@@ -105,6 +154,44 @@ private struct TimelineRulerRow: View {
                     needsReview: row.occurrence.reviewsTime
                 )
             }
+        }
+    }
+}
+
+private struct TimelineWakeUpRulerContent: View {
+    let occurrence: TimelineOccurrence
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Color.clear
+                .frame(width: TimelineRulerMetrics.trackWidth)
+
+            TimelineTimestampText(
+                date: occurrence.sortTime,
+                timeZoneIdentifier: occurrence.timeZoneIdentifier
+            )
+                .frame(
+                    width: TimelineRulerMetrics.wakeUpTimestampWidth,
+                    alignment: .trailing
+                )
+
+            TimelineEntryCard(occurrence: occurrence, onTap: {})
+                .padding(.leading, TimelineRulerMetrics.wakeUpContentSpacing)
+                .anchorPreference(
+                    key: TimelineCardBoundsKey.self,
+                    value: .bounds,
+                    transform: {
+                        [
+                            TimelineRulerActiveBounds(
+                                anchor: $0,
+                                rangeStyle: .moment(
+                                    radius: TimelineRulerMetrics
+                                        .wakeUpActiveRangeRadius
+                                )
+                            )
+                        ]
+                    }
+                )
         }
     }
 }
@@ -139,12 +226,10 @@ private struct TimelineBoundaryLabel: View {
             Color.clear
                 .frame(width: TimelineRulerMetrics.trackWidth)
 
-            Text(date, format: .dateTime.hour().minute())
-                .environment(
-                    \.timeZone,
-                    TimeZone(identifier: timeZoneIdentifier) ?? .current
-                )
-                .monospacedDigit()
+            TimelineTimestampText(
+                date: date,
+                timeZoneIdentifier: timeZoneIdentifier
+            )
 
             if showsTimeZoneChange {
                 Image(systemName: "globe")
@@ -167,6 +252,25 @@ private struct TimelineBoundaryLabel: View {
         .foregroundStyle(TimelineRulerPalette.timestamp(colorScheme: colorScheme))
         .frame(height: 28)
         .accessibilityElement(children: .combine)
+    }
+}
+
+private struct TimelineTimestampText: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let date: Date
+    let timeZoneIdentifier: String
+
+    var body: some View {
+        Text(date, format: .dateTime.hour().minute())
+            .environment(
+                \.timeZone,
+                TimeZone(identifier: timeZoneIdentifier) ?? .current
+            )
+            .font(.caption)
+            .foregroundStyle(
+                TimelineRulerPalette.timestamp(colorScheme: colorScheme)
+            )
+            .monospacedDigit()
     }
 }
 
@@ -235,7 +339,11 @@ enum TimelineRulerMetrics {
     static let trackWidth: CGFloat = 32
     static let cardSpacing: CGFloat = 9
     static let timestampSpacing: CGFloat = 6
+    static let wakeUpTimestampWidth: CGFloat = 38
+    static let wakeUpContentSpacing: CGFloat = 6
     static let tickPitch: CGFloat = 8
+    static let wakeUpActiveRangeRadius: CGFloat = tickPitch / 2
+    static let endCapHeight: CGFloat = tickPitch * 2
     static let firstTickOffset: CGFloat = 0.5
     static let lineWidth: CGFloat = 1
     static let activeRangeExpansion: CGFloat = 14
@@ -281,6 +389,7 @@ enum TimelineRulerMetrics {
             opacity: 0.23
         )
     }
+
 }
 
 struct TimelineRulerRGB: Equatable {

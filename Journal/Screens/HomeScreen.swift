@@ -286,6 +286,8 @@ private struct EntryDetailSheet: View {
                 PlaceVisitDetailSheet(entry: entry)
             case .workout:
                 WorkoutDetailSheet(entry: entry)
+            case .wakeUp:
+                EmptyView()
             }
         }
     }

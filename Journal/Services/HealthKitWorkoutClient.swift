@@ -58,6 +58,7 @@ actor HealthKitWorkoutClient {
             HKSeriesType.workoutRoute(),
             HKQuantityType(.activeEnergyBurned),
             HKQuantityType(.distanceWalkingRunning),
+            HKCategoryType(.sleepAnalysis),
         ]
         try await healthStore.requestAuthorization(
             toShare: [],
@@ -104,6 +105,44 @@ actor HealthKitWorkoutClient {
         return try await routeLocations(for: workout).map(WorkoutCoordinateSnapshot.init)
     }
 
+    func wakeUps(cutoff: Date) async throws -> [HealthKitWakeUpSnapshot] {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            throw HealthKitWorkoutClientError.healthDataUnavailable
+        }
+
+        let sleepType = HKCategoryType(.sleepAnalysis)
+        let datePredicate = HKQuery.predicateForSamples(
+            withStart: cutoff,
+            end: nil,
+            options: []
+        )
+        let descriptor = HKSampleQueryDescriptor<HKCategorySample>(
+            predicates: [
+                .categorySample(
+                    type: sleepType,
+                    predicate: datePredicate
+                )
+            ],
+            sortDescriptors: [SortDescriptor(\HKCategorySample.startDate)]
+        )
+        let samples = try await descriptor.result(for: healthStore)
+        let asleepValues = HKCategoryValueSleepAnalysis.allAsleepValues
+        let snapshots = samples.map { sample in
+            HealthKitSleepSampleSnapshot(
+                uuid: sample.uuid,
+                startTime: sample.startDate,
+                endTime: sample.endDate,
+                timeZoneIdentifier: Self.metadataTimeZoneIdentifier(
+                    for: sample
+                ),
+                isAsleep: HKCategoryValueSleepAnalysis(
+                    rawValue: sample.value
+                ).map(asleepValues.contains) ?? false
+            )
+        }
+        return HealthKitSleepSessionBuilder.wakeUps(from: snapshots)
+    }
+
     func currentSnapshot(for workoutUUID: UUID) async throws -> HealthKitWorkoutSnapshot {
         guard let workout = try await workout(with: workoutUUID) else {
             throw HealthKitWorkoutClientError.workoutUnavailable
@@ -127,6 +166,7 @@ actor HealthKitWorkoutClient {
         let sampleTypes: [HKSampleType] = [
             HKObjectType.workoutType(),
             HKSeriesType.workoutRoute(),
+            HKCategoryType(.sleepAnalysis),
         ]
         observerQueries = sampleTypes.map { sampleType in
             HKObserverQuery(sampleType: sampleType, predicate: predicate) {
@@ -253,9 +293,9 @@ actor HealthKitWorkoutClient {
     }
 
     nonisolated static func metadataTimeZoneIdentifier(
-        for workout: HKWorkout
+        for sample: HKSample
     ) -> String? {
-        let value = workout.metadata?[HKMetadataKeyTimeZone]
+        let value = sample.metadata?[HKMetadataKeyTimeZone]
         if let timeZone = value as? TimeZone {
             return timeZone.identifier
         }

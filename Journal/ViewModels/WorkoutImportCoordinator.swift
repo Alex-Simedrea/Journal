@@ -31,7 +31,7 @@ final class WorkoutImportCoordinator {
             await startObserving(in: modelContext)
         } catch {
             errorMessage = error.localizedDescription
-            print("HealthKit workout authorization failed: \(error)")
+            print("HealthKit authorization failed: \(error)")
         }
     }
 
@@ -51,6 +51,7 @@ final class WorkoutImportCoordinator {
                 since: WorkoutImportPreferences.anchor(),
                 cutoff: cutoff
             )
+            let wakeUps = try await client.wakeUps(cutoff: cutoff)
             let retriedSnapshots = await retryableSnapshots(
                 from: existingEntries,
                 excluding: Set(changeSet.workouts.map(\.uuid))
@@ -58,6 +59,7 @@ final class WorkoutImportCoordinator {
             )
             try await apply(
                 changeSet,
+                wakeUps: wakeUps,
                 retriedSnapshots: retriedSnapshots,
                 existingEntries: existingEntries,
                 in: modelContext
@@ -68,7 +70,7 @@ final class WorkoutImportCoordinator {
         } catch {
             modelContext.rollback()
             errorMessage = error.localizedDescription
-            print("HealthKit workout synchronization failed: \(error)")
+            print("HealthKit synchronization failed: \(error)")
         }
     }
 
@@ -84,6 +86,7 @@ final class WorkoutImportCoordinator {
 
     private func apply(
         _ changeSet: HealthKitWorkoutChangeSet,
+        wakeUps: [HealthKitWakeUpSnapshot],
         retriedSnapshots: [HealthKitWorkoutSnapshot],
         existingEntries: [LogEntry],
         in modelContext: ModelContext
@@ -124,6 +127,11 @@ final class WorkoutImportCoordinator {
             )
             entriesByWorkoutUUID[snapshot.uuid] = entry
         }
+
+        try WakeUpEntryStore.synchronize(
+            snapshots: wakeUps,
+            in: modelContext
+        )
 
         try modelContext.save()
     }

@@ -443,7 +443,7 @@ struct WorkoutTests {
         #expect(prompt.contains(#""distanceKilometers" : 3.2"#))
         #expect(
             EntryLanguageModelService.instructions.contains(
-                "workout is never an output entryKind"
+                "workout and wakeUp are never output entry kinds"
             )
         )
     }

@@ -12,6 +12,7 @@ enum LogKind: String, Codable, Hashable, Sendable {
     case transit
     case placeVisit
     case workout
+    case wakeUp
 }
 
 enum TimeConfidence: String, Codable, Hashable, Sendable {
@@ -43,6 +44,8 @@ final class LogEntry {
     var entryKindReviewReason: String?
     var photoReferences: [PhotoReference] = []
     var weather: EntryWeather?
+    var wakeUpSourceSampleUUID: UUID?
+    var sleepDurationSeconds: Double?
 
     @Relationship(deleteRule: .cascade) var transitDetails: TransitDetails?
     @Relationship(deleteRule: .cascade) var placeVisitDetails: PlaceVisitDetails?
@@ -67,6 +70,8 @@ final class LogEntry {
         modelResponse: String? = nil,
         photoReferences: [PhotoReference] = [],
         weather: EntryWeather? = nil,
+        wakeUpSourceSampleUUID: UUID? = nil,
+        sleepDurationSeconds: Double? = nil,
         entryKindReviewReason: String? = nil,
         needsReview: Bool
     ) {
@@ -88,6 +93,8 @@ final class LogEntry {
         self.modelResponse = modelResponse
         self.photoReferences = photoReferences
         self.weather = weather
+        self.wakeUpSourceSampleUUID = wakeUpSourceSampleUUID
+        self.sleepDurationSeconds = sleepDurationSeconds
         self.entryKindReviewReason = entryKindReviewReason
         self.needsReview = needsReview
     }
@@ -107,6 +114,8 @@ final class LogEntry {
         modelResponse: String? = nil,
         photoReferences: [PhotoReference] = [],
         weather: EntryWeather? = nil,
+        wakeUpSourceSampleUUID: UUID? = nil,
+        sleepDurationSeconds: Double? = nil,
         entryKindReviewReason: String? = nil,
         needsReview: Bool
     ) {
@@ -127,6 +136,8 @@ final class LogEntry {
             modelResponse: modelResponse,
             photoReferences: photoReferences,
             weather: weather,
+            wakeUpSourceSampleUUID: wakeUpSourceSampleUUID,
+            sleepDurationSeconds: sleepDurationSeconds,
             entryKindReviewReason: entryKindReviewReason,
             needsReview: needsReview
         )

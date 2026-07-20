@@ -11,6 +11,7 @@ struct WorkoutPlaceReviewSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Place.name) private var places: [Place]
+    @Query(sort: \Person.name) private var people: [Person]
 
     let entry: LogEntry
     @State private var model: WorkoutPlaceReviewModel
@@ -41,9 +42,14 @@ struct WorkoutPlaceReviewSheet: View {
                             )
                         }
                     )
+                    EntryPeopleSelectionSection(
+                        people: people,
+                        selectedIDs: model.selectedPeopleIDs,
+                        onToggle: model.togglePerson
+                    )
                 }
             }
-            .navigationTitle("Workout Places")
+            .navigationTitle("Edit Workout")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -54,6 +60,7 @@ struct WorkoutPlaceReviewSheet: View {
                         if model.save(
                             entry: entry,
                             places: places,
+                            people: people,
                             in: modelContext
                         ) {
                             dismiss()
@@ -71,7 +78,7 @@ struct WorkoutPlaceReviewSheet: View {
                 )
             }
             .alert(
-                "Couldn’t Save Workout Places",
+                "Couldn’t Save Workout",
                 isPresented: Binding(
                     get: { model.errorMessage != nil },
                     set: { if !$0 { model.errorMessage = nil } }

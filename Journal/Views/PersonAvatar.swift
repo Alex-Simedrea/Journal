@@ -44,8 +44,22 @@ struct PersonAvatarImage: View {
                 .font(.system(size: size * 0.38, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: size, height: size)
-                .background(.blue.gradient, in: .circle)
+                .background(PersonMonogramBackground())
+                .clipShape(.circle)
                 .accessibilityLabel("Monogram for \(name)")
         }
+    }
+}
+
+private struct PersonMonogramBackground: View {
+    var body: some View {
+        LinearGradient(
+            colors: [
+                Color(red: 197 / 255, green: 213 / 255, blue: 233 / 255),
+                Color(red: 155 / 255, green: 166 / 255, blue: 205 / 255),
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
     }
 }
