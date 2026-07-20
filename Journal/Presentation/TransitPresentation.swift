@@ -31,8 +31,15 @@ extension FormatStyle where Self == CompactDurationFormatStyle {
 
 struct TransitPresentation {
     let systemImageName: String
+    let brandImage: TransitBrandImage?
     let color: Color
     let foregroundColor: Color
+}
+
+enum TransitBrandImage: String {
+    case uber = "TransitBrandUber"
+    case bolt = "TransitBrandBolt"
+    case lyft = "TransitBrandLyft"
 }
 
 enum TransitPresentationCatalog {
@@ -45,11 +52,11 @@ enum TransitPresentationCatalog {
         case "car": item("car.fill", 0x0A84FF)
         case "taxi": item("car.side.fill", 0xFFD60A, foreground: .black)
         case "ride share": item("person.2.fill", 0x5E5CE6)
-        case "uber": item("car.fill", 0x000000)
-        case "bolt": item("car.fill", 0x34BB78)
-        case "lyft": item("car.fill", 0xFF00BF)
+        case "uber": item("car.fill", 0x000000, brandImage: .uber)
+        case "bolt": item("car.fill", 0x34BB78, brandImage: .bolt)
+        case "lyft": item("car.fill", 0xFF00BF, brandImage: .lyft)
         case "bus": item("bus.fill", 0x30D158)
-        case "train": item("train.side.front.car", 0xAF52DE)
+        case "train": item("train.side.front.car", 0x2D59B3)
         case "metro": item("tram.fill.tunnel", 0xFF453A)
         case "tram": item("tram.fill", 0xFF9F0A)
         case "ferry": item("ferry.fill", 0x64D2FF, foreground: .black)
@@ -70,10 +77,12 @@ enum TransitPresentationCatalog {
     private static func item(
         _ systemImageName: String,
         _ hex: UInt32,
-        foreground: Color = .white
+        foreground: Color = .white,
+        brandImage: TransitBrandImage? = nil
     ) -> TransitPresentation {
         TransitPresentation(
             systemImageName: systemImageName,
+            brandImage: brandImage,
             color: Color(hex: hex),
             foregroundColor: foreground
         )

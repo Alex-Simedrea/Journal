@@ -449,7 +449,10 @@ struct TimelineUnplacedSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("Unplaced Entries", systemImage: "exclamationmark.clock")
+            Label(
+                "Unplaced Entries",
+                systemImage: "clock.badge.exclamationmark"
+            )
                 .font(.headline)
                 .foregroundStyle(.secondary)
 

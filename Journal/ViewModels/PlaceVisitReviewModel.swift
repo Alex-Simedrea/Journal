@@ -134,6 +134,7 @@ final class PlaceVisitReviewModel {
         entry.entryKindReviewReason = nil
         entry.needsReview = false
         entry.weather = nil
+        entry.endWeather = nil
 
         do {
             try modelContext.save()

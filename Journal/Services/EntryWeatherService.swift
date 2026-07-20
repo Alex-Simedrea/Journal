@@ -14,6 +14,11 @@ struct EntryWeatherRequest: Hashable, Sendable {
     let longitude: Double
 }
 
+enum EntryWeatherEndpoint: String, CaseIterable, Hashable, Sendable {
+    case start
+    case end
+}
+
 struct EntryWeatherAttribution: Equatable, Sendable {
     let lightMarkURL: URL
     let darkMarkURL: URL
@@ -84,8 +89,19 @@ actor WeatherKitEntryClient {
 @MainActor
 enum EntryWeatherService {
     static func request(for entry: LogEntry) -> EntryWeatherRequest? {
-        guard let date = entry.startTime,
-              let location = resolvedLocation(for: entry) else {
+        request(for: entry, endpoint: .start)
+    }
+
+    static func request(
+        for entry: LogEntry,
+        endpoint: EntryWeatherEndpoint
+    ) -> EntryWeatherRequest? {
+        let date = switch endpoint {
+        case .start: entry.startTime
+        case .end: entry.endTime
+        }
+        guard let date,
+              let location = resolvedLocation(for: entry, endpoint: endpoint) else {
             return nil
         }
 
@@ -100,19 +116,50 @@ enum EntryWeatherService {
     static func populate(
         _ entry: LogEntry,
         in modelContext: ModelContext,
-        force: Bool = false
+        force: Bool = false,
+        endpoint: EntryWeatherEndpoint = .start
     ) async throws -> Bool {
-        guard force || entry.weather == nil else { return true }
-        guard let request = request(for: entry) else { return false }
+        let existingWeather = switch endpoint {
+        case .start: entry.weather
+        case .end: entry.endWeather
+        }
+        guard force || existingWeather == nil else { return true }
+        guard let request = request(for: entry, endpoint: endpoint) else {
+            return false
+        }
 
         let weather = try await WeatherKitEntryClient.shared.weather(
             for: request
         )
 
-        guard request == self.request(for: entry) else { return false }
-        entry.weather = weather
+        guard request == self.request(for: entry, endpoint: endpoint) else {
+            return false
+        }
+        switch endpoint {
+        case .start: entry.weather = weather
+        case .end: entry.endWeather = weather
+        }
         try modelContext.save()
         return true
+    }
+
+    static func populateEndpoints(
+        _ entry: LogEntry,
+        in modelContext: ModelContext,
+        force: Bool = false
+    ) async {
+        for endpoint in EntryWeatherEndpoint.allCases {
+            do {
+                _ = try await populate(
+                    entry,
+                    in: modelContext,
+                    force: force,
+                    endpoint: endpoint
+                )
+            } catch {
+                print("WeatherKit \(endpoint.rawValue) lookup failed: \(error)")
+            }
+        }
     }
 
     static func refreshInBackground(
@@ -120,11 +167,7 @@ enum EntryWeatherService {
         in modelContext: ModelContext
     ) {
         Task {
-            do {
-                try await populate(entry, in: modelContext, force: true)
-            } catch {
-                print("WeatherKit entry lookup failed: \(error)")
-            }
+            await populateEndpoints(entry, in: modelContext, force: true)
         }
     }
 
@@ -137,27 +180,39 @@ enum EntryWeatherService {
             return
         }
 
-        for entry in entries where entry.weather == nil {
-            do {
-                try await populate(entry, in: modelContext)
-            } catch {
-                print("WeatherKit entry lookup failed: \(error)")
-            }
+        for entry in entries
+        where entry.weather == nil || entry.endWeather == nil {
+            await populateEndpoints(entry, in: modelContext)
         }
     }
 
-    private static func resolvedLocation(for entry: LogEntry) -> Location? {
+    private static func resolvedLocation(
+        for entry: LogEntry,
+        endpoint: EntryWeatherEndpoint
+    ) -> Location? {
         switch entry.kind {
         case .transit:
-            entry.transitDetails?.originLocation
-                ?? entry.transitDetails?.originPlace?.location
+            switch endpoint {
+            case .start:
+                entry.transitDetails?.originLocation
+                    ?? entry.transitDetails?.originPlace?.location
+            case .end:
+                entry.transitDetails?.destinationLocation
+                    ?? entry.transitDetails?.destinationPlace?.location
+            }
         case .placeVisit:
             entry.placeVisitDetails?.location
                 ?? entry.placeVisitDetails?.place?.location
         case .workout:
             if entry.workoutDetails?.movementKind == .moving {
-                entry.workoutDetails?.originLocation
-                    ?? entry.workoutDetails?.originPlace?.location
+                switch endpoint {
+                case .start:
+                    entry.workoutDetails?.originLocation
+                        ?? entry.workoutDetails?.originPlace?.location
+                case .end:
+                    entry.workoutDetails?.destinationLocation
+                        ?? entry.workoutDetails?.destinationPlace?.location
+                }
             } else {
                 entry.workoutDetails?.sourceLocation
                     ?? entry.workoutDetails?.place?.location

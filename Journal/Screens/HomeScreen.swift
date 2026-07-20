@@ -274,25 +274,6 @@ private struct HomeDetailSheetContent: View {
     }
 }
 
-private struct EntryDetailSheet: View {
-    let entry: LogEntry
-
-    var body: some View {
-        VStack {
-            switch entry.kind {
-            case .transit:
-                TransitDetailSheet(entry: entry)
-            case .placeVisit:
-                PlaceVisitDetailSheet(entry: entry)
-            case .workout:
-                WorkoutDetailSheet(entry: entry)
-            case .wakeUp:
-                EmptyView()
-            }
-        }
-    }
-}
-
 #Preview {
     @Previewable @State var selectedDay = TimelineDayKey.today()
     NavigationStack {

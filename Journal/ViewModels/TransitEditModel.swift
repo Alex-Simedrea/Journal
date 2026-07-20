@@ -123,6 +123,7 @@ final class TransitEditModel {
             details.durationSource = .manualOverride
         }
         entry.weather = nil
+        entry.endWeather = nil
 
         do {
             try modelContext.save()
@@ -163,6 +164,7 @@ private struct TransitEditOriginalState {
     let people: [Person]
     let needsReview: Bool
     let weather: EntryWeather?
+    let endWeather: EntryWeather?
 
     init(entry: LogEntry, details: TransitDetails) {
         transitType = details.type
@@ -184,6 +186,7 @@ private struct TransitEditOriginalState {
         people = entry.people
         needsReview = entry.needsReview
         weather = entry.weather
+        endWeather = entry.endWeather
     }
 
     func restore(entry: LogEntry, details: TransitDetails) {
@@ -206,5 +209,6 @@ private struct TransitEditOriginalState {
         entry.people = people
         entry.needsReview = needsReview
         entry.weather = weather
+        entry.endWeather = endWeather
     }
 }

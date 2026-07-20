@@ -29,6 +29,26 @@ struct TransitPresentationTests {
         )
     }
 
+    @Test("Ride-share brands use their wordmark assets")
+    func rideShareBrandAssets() {
+        #expect(
+            TransitPresentationCatalog.presentation(for: "Uber").brandImage
+                == .uber
+        )
+        #expect(
+            TransitPresentationCatalog.presentation(for: "Bolt").brandImage
+                == .bolt
+        )
+        #expect(
+            TransitPresentationCatalog.presentation(for: "Lyft").brandImage
+                == .lyft
+        )
+        #expect(
+            TransitPresentationCatalog.presentation(for: "Ride share")
+                .brandImage == nil
+        )
+    }
+
     @Test("Compact durations use hours when needed")
     func compactDuration() {
         let style = CompactDurationFormatStyle()

@@ -74,6 +74,7 @@ final class PlaceVisitEditModel {
         entry.people = people.filter { selectedPeopleIDs.contains($0.id) }
         entry.needsReview = entry.entryKindReviewReason != nil
         entry.weather = nil
+        entry.endWeather = nil
 
         do {
             try modelContext.save()

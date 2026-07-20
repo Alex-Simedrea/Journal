@@ -44,6 +44,7 @@ final class LogEntry {
     var entryKindReviewReason: String?
     var photoReferences: [PhotoReference] = []
     var weather: EntryWeather?
+    var endWeather: EntryWeather?
     var wakeUpSourceSampleUUID: UUID?
     var sleepDurationSeconds: Double?
 
@@ -70,6 +71,7 @@ final class LogEntry {
         modelResponse: String? = nil,
         photoReferences: [PhotoReference] = [],
         weather: EntryWeather? = nil,
+        endWeather: EntryWeather? = nil,
         wakeUpSourceSampleUUID: UUID? = nil,
         sleepDurationSeconds: Double? = nil,
         entryKindReviewReason: String? = nil,
@@ -93,6 +95,7 @@ final class LogEntry {
         self.modelResponse = modelResponse
         self.photoReferences = photoReferences
         self.weather = weather
+        self.endWeather = endWeather
         self.wakeUpSourceSampleUUID = wakeUpSourceSampleUUID
         self.sleepDurationSeconds = sleepDurationSeconds
         self.entryKindReviewReason = entryKindReviewReason
@@ -114,6 +117,7 @@ final class LogEntry {
         modelResponse: String? = nil,
         photoReferences: [PhotoReference] = [],
         weather: EntryWeather? = nil,
+        endWeather: EntryWeather? = nil,
         wakeUpSourceSampleUUID: UUID? = nil,
         sleepDurationSeconds: Double? = nil,
         entryKindReviewReason: String? = nil,
@@ -136,6 +140,7 @@ final class LogEntry {
             modelResponse: modelResponse,
             photoReferences: photoReferences,
             weather: weather,
+            endWeather: endWeather,
             wakeUpSourceSampleUUID: wakeUpSourceSampleUUID,
             sleepDurationSeconds: sleepDurationSeconds,
             entryKindReviewReason: entryKindReviewReason,

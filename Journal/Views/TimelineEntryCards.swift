@@ -139,8 +139,8 @@ private struct TimelineTransitTypeTile: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            TimelineFixedSymbol(
-                systemName: presentation.systemImageName,
+            TransitPresentationIcon(
+                presentation: presentation,
                 size: 22,
                 weight: .semibold
             )
@@ -888,7 +888,7 @@ private struct TimelineUnavailableWeatherContent: View {
     }
 }
 
-private struct TimelineWeatherSymbol: View {
+struct TimelineWeatherSymbol: View {
     let symbolName: String
     let size: CGFloat
 
@@ -909,7 +909,7 @@ private struct TimelineWeatherSymbol: View {
     }
 }
 
-private enum TimelineWeatherSymbolPalette {
+enum TimelineWeatherSymbolPalette {
     static func colors(
         for symbolName: String
     ) -> (primary: Color, secondary: Color, tertiary: Color) {
@@ -935,7 +935,7 @@ private enum TimelineWeatherSymbolPalette {
     }
 }
 
-private enum TimelineWeatherGradient {
+enum TimelineWeatherGradient {
     static func gradient(
         weather: EntryWeather?,
         location: TimelineLocationSnapshot?,
@@ -972,7 +972,7 @@ private enum TimelineWeatherGradient {
     }
 }
 
-private struct TimelineFixedSymbol: View {
+struct TimelineFixedSymbol: View {
     let systemName: String
     let size: CGFloat
     let weight: Font.Weight
@@ -996,7 +996,7 @@ private struct TimelineFixedSymbol: View {
     }
 }
 
-private struct TimelineFixedPlaceSymbol: View {
+struct TimelineFixedPlaceSymbol: View {
     let systemImage: PlaceSystemImage
     let size: CGFloat
 
@@ -1030,8 +1030,10 @@ private struct TimelinePeopleTile: View {
                     .font(.caption2.weight(.semibold))
                     .lineLimit(2)
             } else if people.count <= 2 {
-                ForEach(people) { person in
-                    TimelineNamedPerson(person: person)
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(people) { person in
+                        TimelineNamedPerson(person: person)
+                    }
                 }
             } else if let first = people.first {
                 TimelinePeopleGroup(
@@ -1109,41 +1111,51 @@ private struct TimelinePeopleSummary: View {
 private struct TimelinePhotoTile: View {
     let references: [PhotoReference]
 
-    private let columns = [
-        GridItem(.flexible(), spacing: 4),
-        GridItem(.flexible(), spacing: 4),
-    ]
-
     var body: some View {
         if references.count == 1, let reference = references.first {
             TimelinePhotoThumbnail(reference: reference)
                 .clipShape(.rect(cornerRadius: 16))
         } else {
-            LazyVGrid(columns: columns, spacing: 4) {
-                ForEach(references.prefix(4).enumerated(), id: \.element.id) {
-                    index,
-                    reference in
-                    TimelinePhotoThumbnail(reference: reference)
-                        .overlay {
-                            if index == 3, references.count > 4 {
-                                ZStack {
-                                    Color.black.opacity(0.52)
-                                    Text("+\(references.count - 4)")
-                                        .font(.headline)
-                                        .foregroundStyle(.white)
+            GeometryReader { proxy in
+                let visibleReferences = references.prefix(4)
+                let rowCount: CGFloat = visibleReferences.count > 2 ? 2 : 1
+                let gap: CGFloat = 6
+                let cellWidth = (proxy.size.width - gap) / 2
+                let rowHeight =
+                    (proxy.size.height - gap * (rowCount - 1)) / rowCount
+
+                ZStack(alignment: .topLeading) {
+                    ForEach(
+                        visibleReferences.enumerated(),
+                        id: \.element.id
+                    ) { index, reference in
+                        TimelinePhotoThumbnail(reference: reference)
+                            .overlay {
+                                if index == 3, references.count > 4 {
+                                    ZStack {
+                                        Color.black.opacity(0.52)
+                                        Text("+\(references.count - 4)")
+                                            .font(.headline)
+                                            .foregroundStyle(.white)
+                                    }
                                 }
                             }
-                        }
-                        .clipShape(.rect(cornerRadius: 9))
-                        .aspectRatio(1, contentMode: .fit)
+                            .frame(width: cellWidth, height: rowHeight)
+                            .clipShape(.rect(cornerRadius: 9))
+                            .offset(
+                                x: index.isMultiple(of: 2)
+                                    ? 0
+                                    : cellWidth + gap,
+                                y: index < 2 ? 0 : rowHeight + gap
+                            )
+                    }
                 }
+                .frame(
+                    width: proxy.size.width,
+                    height: proxy.size.height,
+                    alignment: .topLeading
+                )
             }
-            .padding(4)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(
-                Color(uiColor: .tertiarySystemGroupedBackground),
-                in: .rect(cornerRadius: 16)
-            )
         }
     }
 }

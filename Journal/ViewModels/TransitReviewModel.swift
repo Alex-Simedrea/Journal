@@ -243,6 +243,7 @@ final class TransitReviewModel {
         entry.needsReview = false
         let originalWeather = entry.weather
         entry.weather = nil
+        entry.endWeather = nil
 
         do {
             try modelContext.save()

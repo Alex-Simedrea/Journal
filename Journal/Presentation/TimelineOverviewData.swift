@@ -183,7 +183,7 @@ struct TimelineOverviewData: Equatable, Sendable {
         }
     }
 
-    private static func curvedCoordinates(
+    static func curvedCoordinates(
         from origin: CLLocationCoordinate2D,
         to destination: CLLocationCoordinate2D,
         bendPositive: Bool

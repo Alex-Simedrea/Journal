@@ -78,6 +78,7 @@ enum WorkoutEntryStore {
             fallbackIdentifier: creationTimeZoneIdentifier
         )
         entry.weather = nil
+        entry.endWeather = nil
         entry.workoutDetails = details
 
         if existingEntry == nil {

@@ -85,6 +85,7 @@ final class WorkoutPlaceReviewModel {
         entry.people = people.filter { selectedPeopleIDs.contains($0.id) }
         entry.needsReview = !details.fieldReviews.isEmpty
         entry.weather = nil
+        entry.endWeather = nil
 
         do {
             try modelContext.save()

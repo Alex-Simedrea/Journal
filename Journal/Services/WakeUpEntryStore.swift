@@ -57,6 +57,7 @@ enum WakeUpEntryStore {
             entry.wakeUpSourceSampleUUID = snapshot.sourceSampleUUID
             entry.sleepDurationSeconds = snapshot.sleepDurationSeconds
             entry.weather = nil
+            entry.endWeather = nil
             entry.photoReferences = []
             entry.people = []
 
