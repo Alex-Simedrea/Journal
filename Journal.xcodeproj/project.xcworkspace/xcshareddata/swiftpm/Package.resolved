@@ -1,5 +1,5 @@
 {
-  "originHash" : "d33a7a9cc526f6cdd40fab7bae5cf604eb54c0aecb26db484ff3b1a451e38a2e",
+  "originHash" : "8fed4e1b58127b22b69285cd60f1be48060831f6d062c9777be150a7f05f6aa3",
   "pins" : [
     {
       "identity" : "anylanguagemodel",
@@ -89,6 +89,15 @@
       "state" : {
         "revision" : "b5544ba79a70a0cb3563e75bf26dc198d6b40ed3",
         "version" : "1.7.4"
+      }
+    },
+    {
+      "identity" : "variablur",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/daprice/Variablur",
+      "state" : {
+        "revision" : "3fb45923b000353f6391a6f7ff64c68d2ded3e91",
+        "version" : "1.1.0"
       }
     },
     {

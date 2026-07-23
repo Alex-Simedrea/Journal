@@ -21,6 +21,8 @@ class Person {
     var lastMetAt: Date?
     var lastMetPlace: Place?
 
+    var entries: [LogEntry] = []
+
     init(
         id: UUID,
         name: String,

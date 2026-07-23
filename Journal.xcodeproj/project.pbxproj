@@ -12,6 +12,7 @@
 		A11C00000000000000000003 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = A11C00000000000000000002 /* ZIPFoundation */; };
 		A11C00000000000000000004 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = A11C00000000000000000005 /* ZIPFoundation */; };
 		B0A000000000000000000001 /* BoardingPassShareExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = B0A000000000000000000002 /* BoardingPassShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		FA0A157B30125E9C00DFA155 /* Variablur in Frameworks */ = {isa = PBXBuildFile; productRef = FA0A157A30125E9C00DFA155 /* Variablur */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -100,6 +101,7 @@
 			isa = PBXFrameworksBuildPhase;
 			files = (
 				A11A00000000000000000003 /* AnyLanguageModel in Frameworks */,
+				FA0A157B30125E9C00DFA155 /* Variablur in Frameworks */,
 				A11B00000000000000000003 /* KeychainSwift in Frameworks */,
 				A11C00000000000000000003 /* ZIPFoundation in Frameworks */,
 			);
@@ -165,6 +167,7 @@
 				A11A00000000000000000002 /* AnyLanguageModel */,
 				A11B00000000000000000002 /* KeychainSwift */,
 				A11C00000000000000000002 /* ZIPFoundation */,
+				FA0A157A30125E9C00DFA155 /* Variablur */,
 			);
 			productName = MyApp;
 			productReference = 000000000000000000000120 /* Journal.app */;
@@ -256,6 +259,7 @@
 				A11A00000000000000000001 /* XCRemoteSwiftPackageReference "AnyLanguageModel" */,
 				A11B00000000000000000001 /* XCRemoteSwiftPackageReference "keychain-swift" */,
 				A11C00000000000000000001 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
+				FA0A157930125E9C00DFA155 /* XCRemoteSwiftPackageReference "Variablur" */,
 			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
@@ -715,6 +719,14 @@
 				minimumVersion = 0.9.20;
 			};
 		};
+		FA0A157930125E9C00DFA155 /* XCRemoteSwiftPackageReference "Variablur" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/daprice/Variablur";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -737,6 +749,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A11C00000000000000000001 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
 			productName = ZIPFoundation;
+		};
+		FA0A157A30125E9C00DFA155 /* Variablur */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FA0A157930125E9C00DFA155 /* XCRemoteSwiftPackageReference "Variablur" */;
+			productName = Variablur;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
