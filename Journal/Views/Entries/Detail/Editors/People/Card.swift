@@ -32,13 +32,13 @@ struct EntryDetailPeopleCard: View {
         .frame(maxHeight: .infinity)
         .background(.background, in: .rect(cornerRadius: 22))
         .overlay(alignment: .topTrailing) {
-            EntryDetailChevron()
+            DisclosureChevron()
                 .padding(.top, 9)
                 .padding(.trailing, 12)
         }
         .overlay(alignment: .bottomTrailing) {
             if needsReview {
-                EntryDetailReviewBadge().padding(8)
+                ReviewBadge().padding(8)
             }
         }
     }
@@ -60,7 +60,7 @@ struct EntryDetailPeoplePresentation {
 private struct EntryDetailEmptyPeopleContent: View {
     var body: some View {
         VStack(spacing: 2) {
-            TimelineFixedSymbol(
+            FixedSizeSymbol(
                 systemName: "person.3.fill",
                 size: 38,
                 weight: .semibold

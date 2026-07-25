@@ -35,14 +35,14 @@ struct EntryDetailTimeCard: View {
         .background(.background, in: .rect(cornerRadius: 22))
         .overlay(alignment: .topTrailing) {
             if editable {
-                EntryDetailChevron()
+                DisclosureChevron()
                     .padding(.top, 9)
                     .padding(.trailing, 12)
             }
         }
         .overlay(alignment: .bottomTrailing) {
             if needsReview {
-                EntryDetailReviewBadge().padding(8)
+                ReviewBadge().padding(8)
             }
         }
     }

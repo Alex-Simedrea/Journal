@@ -134,7 +134,7 @@ struct TimelineWorkoutTypeTile: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            TimelineFixedSymbol(
+            FixedSizeSymbol(
                 systemName: occurrence.snapshot.workoutSystemImageName,
                 size: 22,
                 weight: .semibold
@@ -190,7 +190,7 @@ struct TimelinePlacesTile: View {
         )
         .overlay(alignment: .topTrailing) {
             if needsReview {
-                TimelineReviewBadge().padding(5)
+                ReviewBadge(size: 17).padding(5)
             }
         }
     }
@@ -202,7 +202,7 @@ struct TimelinePlaceEndpointRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            TimelineFixedPlaceSymbol(systemImage: systemImage, size: 18)
+            FixedSizePlaceSymbol(systemImage: systemImage, size: 18)
             Text(name)
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)

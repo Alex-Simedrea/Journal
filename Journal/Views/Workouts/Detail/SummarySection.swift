@@ -40,12 +40,12 @@ struct WorkoutSummarySection: View {
             if !peopleNames.isEmpty {
                 LabeledContent("People", value: peopleNames.formatted())
             }
-            EntryDetailDateRow(
+            ZonedDateRow(
                 title: "Started",
                 date: startTime,
                 timeZoneIdentifier: startTimeZoneIdentifier
             )
-            EntryDetailDateRow(
+            ZonedDateRow(
                 title: "Ended",
                 date: endTime,
                 timeZoneIdentifier: endTimeZoneIdentifier

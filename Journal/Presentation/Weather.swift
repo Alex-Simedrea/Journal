@@ -1,18 +1,18 @@
 //
-//  TimelineWeatherPresentation.swift
+//  WeatherPresentation.swift
 //  Journal
 //
 
 import Foundation
 
-enum TimelineWeatherSkyPhase: Equatable, Sendable {
+enum WeatherSkyPhase: Equatable, Sendable {
     case dawn
     case day
     case dusk
     case night
 }
 
-enum TimelineWeatherConditionFamily: Equatable, Sendable {
+enum WeatherConditionFamily: Equatable, Sendable {
     case clear
     case cloud
     case rain
@@ -21,14 +21,14 @@ enum TimelineWeatherConditionFamily: Equatable, Sendable {
     case wind
 }
 
-enum TimelineWeatherPresentation {
+enum WeatherPresentation {
     static func skyPhase(
         date: Date,
         latitude: Double?,
         longitude: Double?,
         symbolName: String,
         timeZone: TimeZone
-    ) -> TimelineWeatherSkyPhase {
+    ) -> WeatherSkyPhase {
         if let latitude,
            let longitude,
            (-90...90).contains(latitude),
@@ -62,7 +62,7 @@ enum TimelineWeatherPresentation {
 
     static func conditionFamily(
         symbolName: String
-    ) -> TimelineWeatherConditionFamily {
+    ) -> WeatherConditionFamily {
         if symbolName.contains("bolt") || symbolName.contains("storm") {
             return .storm
         }
@@ -83,7 +83,7 @@ enum TimelineWeatherPresentation {
 
     static func gradientHexes(
         symbolName: String,
-        phase: TimelineWeatherSkyPhase
+        phase: WeatherSkyPhase
     ) -> [UInt32] {
         let family = conditionFamily(symbolName: symbolName)
         switch phase {

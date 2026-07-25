@@ -11,14 +11,14 @@ struct EntryDetailTimeEditor: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            EntryEditorSection(title: "Start") {
+            EditorCardSection(title: "Start") {
                 DatePicker("Started", selection: $session.startTime)
                 EntryTimeZonePicker(
                     title: "Time zone",
                     selection: $session.startTimeZoneIdentifier
                 )
             }
-            EntryEditorSection(title: "End") {
+            EditorCardSection(title: "End") {
                 DatePicker(
                     "Ended",
                     selection: $session.endTime,

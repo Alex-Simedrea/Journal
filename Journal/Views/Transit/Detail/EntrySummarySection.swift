@@ -29,12 +29,12 @@ struct TransitEntrySummarySection: View {
             }
             LabeledContent("Origin", value: origin ?? "Unresolved")
             LabeledContent("Destination", value: destination ?? "Unresolved")
-            EntryDetailDateRow(
+            ZonedDateRow(
                 title: "Started",
                 date: startTime,
                 timeZoneIdentifier: startTimeZoneIdentifier
             )
-            EntryDetailDateRow(
+            ZonedDateRow(
                 title: "Ended",
                 date: endTime,
                 timeZoneIdentifier: endTimeZoneIdentifier
@@ -111,41 +111,6 @@ private extension TransitReviewField {
         case .time: "Time needs review"
         case .people: "People need review"
         }
-    }
-}
-
-struct EntryDetailDateRow: View {
-    let title: LocalizedStringResource
-    let date: Date?
-    let timeZoneIdentifier: String
-
-    var body: some View {
-        LabeledContent(title) {
-            if let date {
-                HStack(spacing: 5) {
-                    Text(
-                        date,
-                        format: .dateTime
-                            .day()
-                            .month(.abbreviated)
-                            .year()
-                            .hour()
-                            .minute()
-                    )
-                    if timeZoneIdentifier != TimeZone.current.identifier {
-                        Text(timeZone.abbreviation(for: date) ?? timeZone.identifier)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .environment(\.timeZone, timeZone)
-            } else {
-                Text("Unresolved")
-            }
-        }
-    }
-
-    private var timeZone: TimeZone {
-        TimeZone(identifier: timeZoneIdentifier) ?? .current
     }
 }
 

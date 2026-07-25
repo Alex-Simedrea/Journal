@@ -24,7 +24,7 @@ struct EntryDetailLocationEditor: View {
                 }
             }
 
-            EntryEditorSection(title: "Search") {
+            EditorCardSection(title: "Search") {
                 LocationSearchField(
                     service: model.search,
                     isResolving: model.isResolving
@@ -55,7 +55,7 @@ struct EntryDetailLocationEditor: View {
                 .disabled(model.isResolving)
             }
 
-            EntryEditorSection(title: "Saved Places") {
+            EditorCardSection(title: "Saved Places") {
                 if places.isEmpty {
                     Text("No saved places")
                         .foregroundStyle(.secondary)
@@ -68,7 +68,7 @@ struct EntryDetailLocationEditor: View {
                             )
                         } label: {
                             HStack(spacing: 10) {
-                                TimelineFixedPlaceSymbol(
+                                FixedSizePlaceSymbol(
                                     systemImage: place.systemImage,
                                     size: 24
                                 )
@@ -93,7 +93,7 @@ struct EntrySelectedLocationCard: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            TimelineFixedPlaceSymbol(
+            FixedSizePlaceSymbol(
                 systemImage: selection.systemImage,
                 size: 30
             )

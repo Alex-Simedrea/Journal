@@ -58,14 +58,14 @@ struct EntryDetailTransitCard: View {
         .frame(maxHeight: .infinity)
         .background(presentation.color, in: .rect(cornerRadius: 22))
         .overlay(alignment: .topTrailing) {
-            EntryDetailChevron()
+            DisclosureChevron()
                 .foregroundStyle(presentation.foregroundColor)
                 .padding(.top, 11)
                 .padding(.trailing, 12)
         }
         .overlay(alignment: .bottomTrailing) {
             if needsReview {
-                EntryDetailReviewBadge().padding(8)
+                ReviewBadge().padding(8)
             }
         }
     }

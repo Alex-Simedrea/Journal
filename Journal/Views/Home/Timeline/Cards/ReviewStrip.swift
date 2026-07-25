@@ -21,7 +21,7 @@ struct TimelineUnmatchedReviewStrip: View {
     var body: some View {
         if !reviews.isEmpty {
             HStack(spacing: 6) {
-                TimelineReviewBadge()
+                ReviewBadge(size: 17)
                 Text(reviews.map(\.target.title).formatted())
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.orange)

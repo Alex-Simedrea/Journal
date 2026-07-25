@@ -9,7 +9,12 @@ struct TimelineRulerMetricsTests {
         #expect(TimelineRulerMetrics.timestampSpacing == 6)
         #expect(TimelineRulerMetrics.wakeUpTimestampWidth == 38)
         #expect(TimelineRulerMetrics.wakeUpContentSpacing == 6)
+        #expect(TimelineRulerMetrics.compactEntryHeight == 28)
+        #expect(TimelineRulerMetrics.compactEntryBadgeSize == 26)
+        #expect(TimelineRulerMetrics.compactEntryIconSize == 13)
+        #expect(TimelineRulerMetrics.compactEntryContentSpacing == 8)
         #expect(TimelineRulerMetrics.tickPitch == 8)
+        #expect(TimelineRulerMetrics.orphanBoundaryActiveTickCount == 5)
         #expect(TimelineRulerMetrics.wakeUpActiveRangeRadius == 4)
         #expect(TimelineRulerMetrics.endCapHeight == 16)
         #expect(TimelineRulerMetrics.firstTickOffset == 0.5)
@@ -50,6 +55,39 @@ struct TimelineRulerMetricsTests {
         )
     }
 
+    @Test func orphanPseudoPlaceEmphasisAlwaysContainsFiveTicks() {
+        let combinedBounds = CGRect(x: 0, y: 100, width: 200, height: 56)
+        let shiftedBounds = CGRect(x: 0, y: 108, width: 200, height: 56)
+        let standaloneBounds = CGRect(x: 0, y: 100, width: 200, height: 28)
+
+        let combinedRange = TimelineRulerMetrics.boundaryConnectionRange(
+            in: combinedBounds
+        )
+        let shiftedRange = TimelineRulerMetrics.boundaryConnectionRange(
+            in: shiftedBounds
+        )
+
+        #expect(combinedRange == 112.5...144.5)
+        #expect(shiftedRange == 120.5...152.5)
+        #expect(activeTickCount(in: combinedRange) == 5)
+        #expect(activeTickCount(in: shiftedRange) == 5)
+        #expect(
+            TimelineRulerMetrics.previousBoundaryConnectionRange(
+                in: standaloneBounds
+            ) == 86...114
+        )
+    }
+
+    @Test func sharedPlaceGeometryIsBalancedAndFullyAccentuated() {
+        let bounds = CGRect(x: 0, y: 100, width: 200, height: 84)
+
+        #expect(
+            TimelineRulerMetrics.sharedBoundaryConnectionRange(
+                in: bounds
+            ) == 110...174
+        )
+    }
+
     @Test func separateEntryGapsStayOnTheRulerCadence() {
         #expect(TimelineRulerMetrics.separateEntryGap(duration: 0) == 8)
         #expect(TimelineRulerMetrics.separateEntryGap(duration: 30 * 60) == 8)
@@ -71,23 +109,37 @@ struct TimelineRulerMetricsTests {
     @Test func measuredLightModeColorsRemainExact() {
         #expect(
             TimelineRulerPalette.lightLine(level: .active)
-                == TimelineRulerRGB(red: 96, green: 96, blue: 103)
+                == RGBColor(red: 96, green: 96, blue: 103)
         )
         #expect(
             TimelineRulerPalette.lightLine(level: .shoulder)
-                == TimelineRulerRGB(red: 151, green: 151, blue: 157)
+                == RGBColor(red: 151, green: 151, blue: 157)
         )
         #expect(
             TimelineRulerPalette.lightLine(level: .middle)
-                == TimelineRulerRGB(red: 187, green: 187, blue: 193)
+                == RGBColor(red: 187, green: 187, blue: 193)
         )
         #expect(
             TimelineRulerPalette.lightLine(level: .quiet)
-                == TimelineRulerRGB(red: 187, green: 187, blue: 193)
+                == RGBColor(red: 187, green: 187, blue: 193)
         )
         #expect(
             TimelineRulerPalette.lightTimestamp
-                == TimelineRulerRGB(red: 121, green: 121, blue: 124)
+                == RGBColor(red: 121, green: 121, blue: 124)
         )
+    }
+
+    private func activeTickCount(
+        in range: ClosedRange<CGFloat>
+    ) -> Int {
+        var count = 0
+        var y = TimelineRulerMetrics.firstTickOffset
+        while y <= range.upperBound {
+            if range.contains(y) {
+                count += 1
+            }
+            y += TimelineRulerMetrics.tickPitch
+        }
+        return count
     }
 }

@@ -43,6 +43,9 @@ private struct TimelineRulerActiveBounds {
 private enum TimelineRulerActiveRangeStyle {
     case interval(expansion: CGFloat)
     case moment(radius: CGFloat)
+    case boundaryConnection
+    case sharedBoundaryConnection
+    case previousBoundaryConnection
 }
 
 private struct TimelineCardBoundsKey: PreferenceKey {
@@ -69,6 +72,16 @@ private struct TimelineRulerOverlay: View {
                         (bounds.minY - expansion)...(bounds.maxY + expansion)
                     case .moment(let radius):
                         (bounds.midY - radius)...(bounds.midY + radius)
+                    case .boundaryConnection:
+                        TimelineRulerMetrics.boundaryConnectionRange(in: bounds)
+                    case .sharedBoundaryConnection:
+                        TimelineRulerMetrics.sharedBoundaryConnectionRange(
+                            in: bounds
+                        )
+                    case .previousBoundaryConnection:
+                        TimelineRulerMetrics.previousBoundaryConnectionRange(
+                            in: bounds
+                        )
                     }
                 }
             )
@@ -86,16 +99,239 @@ private struct TimelineRulerRow: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            TimelineRulerGap(relationship: row.relationshipToPrevious)
+            if !row.startBoundaryRenderedByPrevious {
+                TimelineRulerGap(relationship: row.relationshipToPrevious)
+            }
 
-            if row.occurrence.kind == .wakeUp {
+            switch row.occurrence.kind {
+            case .wakeUp:
                 TimelineWakeUpRulerContent(occurrence: row.occurrence)
-            } else {
+            case .transit:
+                if let presentation = row.transitPresentation {
+                    TimelineTransitRulerContent(
+                        row: row,
+                        presentation: presentation,
+                        onSelect: onSelect
+                    )
+                }
+            case .placeVisit, .workout:
                 TimelineIntervalRulerContent(
                     row: row,
                     onSelect: onSelect
                 )
             }
+        }
+    }
+}
+
+private struct TimelineTransitRulerContent: View {
+    let row: TimelineRow
+    let presentation: TimelineTransitRowPresentation
+    let onSelect: (UUID) -> Void
+
+    private var showsStartLabel: Bool {
+        !row.startBoundaryRenderedByPrevious
+            && row.relationshipToPrevious != .contiguous
+            && row.occurrence.visibleStartTime != nil
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if presentation.origin.showsPseudoEntry {
+                if showsStartLabel,
+                   let start = row.occurrence.visibleStartTime {
+                    TimelineTransitOriginBoundaryBlock(
+                        boundary: presentation.origin,
+                        date: start,
+                        timeZoneIdentifier: row.occurrence.timeZoneIdentifier,
+                        needsTimeReview: row.occurrence.reviewsTime
+                    )
+                } else {
+                    TimelineTransitPseudoRulerRow(
+                        boundary: presentation.origin
+                    )
+                    .anchorPreference(
+                        key: TimelineCardBoundsKey.self,
+                        value: .bounds,
+                        transform: {
+                            [
+                                TimelineRulerActiveBounds(
+                                    anchor: $0,
+                                    rangeStyle: row.relationshipToPrevious
+                                        == .contiguous
+                                        ? .previousBoundaryConnection
+                                        : .interval(expansion: 0)
+                                )
+                            ]
+                        }
+                    )
+                }
+            } else if showsStartLabel,
+                      let start = row.occurrence.visibleStartTime {
+                TimelineBoundaryLabel(
+                    date: start,
+                    timeZoneIdentifier: row.occurrence.timeZoneIdentifier,
+                    showsTimeZoneChange: false,
+                    needsReview: row.occurrence.reviewsTime
+                )
+            }
+
+            TimelineCompactTransitRulerRow(
+                occurrence: row.occurrence,
+                showsReviewBadge: presentation.showsReviewBadge,
+                onTap: selectTransit
+            )
+
+            if let end = row.occurrence.visibleEndTime {
+                if presentation.destination.showsPseudoEntry {
+                    TimelineTransitDestinationBoundaryBlock(
+                        boundary: presentation.destination,
+                        date: end,
+                        timeZoneIdentifier: row.occurrence.changesTimeZone
+                            ? row.occurrence.endTimeZoneIdentifier
+                            : row.occurrence.timeZoneIdentifier,
+                        showsTimeZoneChange: row.occurrence.changesTimeZone,
+                        needsTimeReview: row.endBoundaryNeedsReview
+                    )
+                } else {
+                    TimelineBoundaryLabel(
+                        date: end,
+                        timeZoneIdentifier: row.occurrence.changesTimeZone
+                            ? row.occurrence.endTimeZoneIdentifier
+                            : row.occurrence.timeZoneIdentifier,
+                        showsTimeZoneChange: row.occurrence.changesTimeZone,
+                        needsReview: row.endBoundaryNeedsReview
+                    )
+                }
+            }
+        }
+    }
+
+    private func selectTransit() {
+        onSelect(row.occurrence.entryID)
+    }
+}
+
+private struct TimelineTransitOriginBoundaryBlock: View {
+    let boundary: TimelineTransitBoundaryPresentation
+    let date: Date
+    let timeZoneIdentifier: String
+    let needsTimeReview: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+            TimelineTransitPseudoRulerRow(boundary: boundary)
+            TimelineBoundaryLabel(
+                date: date,
+                timeZoneIdentifier: timeZoneIdentifier,
+                showsTimeZoneChange: false,
+                needsReview: needsTimeReview
+            )
+        }
+        .anchorPreference(
+            key: TimelineCardBoundsKey.self,
+            value: .bounds,
+            transform: {
+                [
+                    TimelineRulerActiveBounds(
+                        anchor: $0,
+                        rangeStyle: .boundaryConnection
+                    )
+                ]
+            }
+        )
+    }
+}
+
+private struct TimelineTransitDestinationBoundaryBlock: View {
+    let boundary: TimelineTransitBoundaryPresentation
+    let date: Date
+    let timeZoneIdentifier: String
+    let showsTimeZoneChange: Bool
+    let needsTimeReview: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+            TimelineBoundaryLabel(
+                date: date,
+                timeZoneIdentifier: timeZoneIdentifier,
+                showsTimeZoneChange: showsTimeZoneChange,
+                needsReview: needsTimeReview
+            )
+
+            if let followingStart = boundary.followingTransitStart {
+                TimelineTransitPseudoRulerRow(boundary: boundary)
+                TimelineBoundaryLabel(
+                    date: followingStart.date,
+                    timeZoneIdentifier: followingStart.timeZoneIdentifier,
+                    showsTimeZoneChange: false,
+                    needsReview: followingStart.needsReview
+                )
+            } else {
+                TimelineTransitPseudoRulerRow(boundary: boundary)
+            }
+        }
+        .anchorPreference(
+            key: TimelineCardBoundsKey.self,
+            value: .bounds,
+            transform: {
+                [
+                    TimelineRulerActiveBounds(
+                        anchor: $0,
+                        rangeStyle: boundary.followingTransitStart == nil
+                            ? .boundaryConnection
+                            : .sharedBoundaryConnection
+                    )
+                ]
+            }
+        )
+    }
+}
+
+private struct TimelineTransitPseudoRulerRow: View {
+    let boundary: TimelineTransitBoundaryPresentation
+
+    var body: some View {
+        HStack(
+            spacing: TimelineRulerMetrics.cardSpacing
+        ) {
+            Color.clear
+                .frame(width: TimelineRulerMetrics.trackWidth)
+
+            TimelineTransitPseudoPlaceRow(
+                name: boundary.name,
+                systemImage: boundary.systemImage,
+                needsReview: boundary.needsReview
+            )
+        }
+    }
+}
+
+private struct TimelineCompactTransitRulerRow: View {
+    let occurrence: TimelineOccurrence
+    let showsReviewBadge: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        HStack(
+            spacing: TimelineRulerMetrics.cardSpacing
+        ) {
+            Color.clear
+                .frame(width: TimelineRulerMetrics.trackWidth)
+
+            TimelineCompactTransitRow(
+                transitType: occurrence.transitType,
+                organizationName: occurrence.snapshot
+                    .transitSourceOrganizationName,
+                serviceIdentifier: occurrence.snapshot
+                    .transitSourceServiceIdentifier,
+                distanceMeters: occurrence.snapshot.transitDistanceMeters,
+                startTime: occurrence.startTime,
+                endTime: occurrence.endTime,
+                people: occurrence.snapshot.people,
+                showsReviewBadge: showsReviewBadge,
+                onTap: onTap
+            )
         }
     }
 }
@@ -151,7 +387,7 @@ private struct TimelineIntervalRulerContent: View {
                         ? row.occurrence.endTimeZoneIdentifier
                         : row.occurrence.timeZoneIdentifier,
                     showsTimeZoneChange: row.occurrence.changesTimeZone,
-                    needsReview: row.occurrence.reviewsTime
+                    needsReview: row.endBoundaryNeedsReview
                 )
             }
         }
@@ -243,7 +479,7 @@ private struct TimelineBoundaryLabel: View {
             }
 
             if needsReview {
-                TimelineReviewBadge()
+                ReviewBadge(size: 17)
             }
 
             Spacer()

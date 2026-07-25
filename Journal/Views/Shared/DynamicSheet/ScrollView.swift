@@ -95,7 +95,7 @@ struct DynamicSheetScrollView<Content: View>: View {
     }
 
     private var maximumViewportHeight: CGFloat {
-        max(260, DynamicSheetWindowMetrics.availableHeight - 130)
+        DynamicSheetWindowMetrics.maximumContentHeight
     }
 
     private var fittedContentHeight: CGFloat {

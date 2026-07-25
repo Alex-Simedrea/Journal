@@ -265,7 +265,7 @@ struct WorkoutTests {
         #expect(entry.workoutDetails?.fieldReviews.isEmpty == true)
         #expect(
             TimelineEntrySnapshot(entry: entry).workoutPlace
-                == "Strada Test, Brașov"
+                == "Strada Test"
         )
     }
 

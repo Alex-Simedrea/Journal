@@ -5,7 +5,7 @@ struct EntryDetailAddPersonEditor: View {
     @Bindable var session: EntryDetailEditSession
 
     var body: some View {
-        EntryEditorSection(title: "Details") {
+        EditorCardSection(title: "Details") {
             TextField("Name", text: $session.newPersonName)
                 .textInputAutocapitalization(.words)
                 .submitLabel(.done)
@@ -22,7 +22,7 @@ struct EntryDetailAddPlaceEditor: View {
             if let selection = session.selection(for: role) {
                 EntrySelectedLocationCard(selection: selection)
             }
-            EntryEditorSection(title: "Details") {
+            EditorCardSection(title: "Details") {
                 TextField("Name", text: $session.newPlaceName)
                     .textInputAutocapitalization(.words)
                 Picker("Symbol", selection: $session.newPlaceSystemImage) {

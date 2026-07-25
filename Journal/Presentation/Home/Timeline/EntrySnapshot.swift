@@ -14,6 +14,8 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
     let kind: LogKind
 
     let transitType: String
+    let transitSourceOrganizationName: String?
+    let transitSourceServiceIdentifier: String?
     let transitDistanceMeters: Double?
     let transitDistanceIsApproximate: Bool
     let origin: String
@@ -69,12 +71,20 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
 
         let transit = entry.transitDetails
         transitType = transit?.type ?? "Transit"
+        transitSourceOrganizationName = transit?.sourceOrganizationName
+        transitSourceServiceIdentifier = transit?.sourceServiceIdentifier
         origin = transit?.originPlace?.name
             ?? transit?.originLocation?.timelineAddress
-            ?? "Unknown origin"
+            ?? String(
+                localized: "Unknown origin",
+                comment: "Fallback name for a transit origin without a location"
+            )
         destination = transit?.destinationPlace?.name
             ?? transit?.destinationLocation?.timelineAddress
-            ?? "Unknown destination"
+            ?? String(
+                localized: "Unknown destination",
+                comment: "Fallback name for a transit destination without a location"
+            )
         originLocation = Self.location(
             place: transit?.originPlace,
             fallbackName: origin,
@@ -177,10 +187,16 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
         needsReview: Bool = false,
         kind: LogKind = .transit,
         transitType: String = "Transit",
+        transitSourceOrganizationName: String? = nil,
+        transitSourceServiceIdentifier: String? = nil,
+        transitDistanceMeters: Double? = nil,
         origin: String = "Origin",
         destination: String = "Destination",
+        originLocation: TimelineLocationSnapshot? = nil,
+        destinationLocation: TimelineLocationSnapshot? = nil,
         visitPlace: String = "Place",
         visitSystemImage: PlaceSystemImage = .mappin,
+        visitLocation: TimelineLocationSnapshot? = nil,
         workoutActivityName: String = "Workout",
         workoutSystemImageName: String = "figure.mixed.cardio",
         workoutMovementKind: WorkoutMovementKind? = nil,
@@ -189,9 +205,13 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
         workoutOrigin: String = "Origin",
         workoutDestination: String = "Destination",
         workoutPlace: String = "Place",
+        workoutOriginLocation: TimelineLocationSnapshot? = nil,
+        workoutDestinationLocation: TimelineLocationSnapshot? = nil,
+        workoutPlaceLocation: TimelineLocationSnapshot? = nil,
         workoutRouteStart: WorkoutCoordinateSnapshot? = nil,
         workoutRouteEnd: WorkoutCoordinateSnapshot? = nil,
-        wakeUpSleepDurationSeconds: Double? = nil
+        wakeUpSleepDurationSeconds: Double? = nil,
+        reviews: [TimelineReviewSnapshot]? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -204,21 +224,23 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
         self.needsReview = needsReview
         self.kind = kind
         self.transitType = transitType
-        transitDistanceMeters = nil
+        self.transitSourceOrganizationName = transitSourceOrganizationName
+        self.transitSourceServiceIdentifier = transitSourceServiceIdentifier
+        self.transitDistanceMeters = transitDistanceMeters
         transitDistanceIsApproximate = false
         self.origin = origin
         self.destination = destination
-        originLocation = nil
-        destinationLocation = nil
+        self.originLocation = originLocation
+        self.destinationLocation = destinationLocation
         self.visitPlace = visitPlace
         self.visitSystemImage = visitSystemImage
-        visitLocation = nil
+        self.visitLocation = visitLocation
         people = []
         photoReferences = []
         weather = nil
-        reviews = needsReview
+        self.reviews = reviews ?? (needsReview
             ? [TimelineReviewSnapshot(target: .time, reason: "Time needs review")]
-            : []
+            : [])
         workoutUUID = nil
         self.workoutActivityName = workoutActivityName
         self.workoutSystemImageName = workoutSystemImageName
@@ -228,9 +250,9 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
         self.workoutOrigin = workoutOrigin
         self.workoutDestination = workoutDestination
         self.workoutPlace = workoutPlace
-        workoutOriginLocation = nil
-        workoutDestinationLocation = nil
-        workoutPlaceLocation = nil
+        self.workoutOriginLocation = workoutOriginLocation
+        self.workoutDestinationLocation = workoutDestinationLocation
+        self.workoutPlaceLocation = workoutPlaceLocation
         self.workoutRouteStart = workoutRouteStart
         self.workoutRouteEnd = workoutRouteEnd
         self.wakeUpSleepDurationSeconds = wakeUpSleepDurationSeconds

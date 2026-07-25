@@ -13,7 +13,7 @@ struct EntryDetailKindEditor: View {
                     .foregroundStyle(.orange)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            EntryEditorSection(title: "Entry Type") {
+            EditorCardSection(title: "Entry Type") {
                 Picker("Type", selection: $session.targetKind) {
                     Text("Transit").tag(LogKind.transit)
                     Text("Place").tag(LogKind.placeVisit)

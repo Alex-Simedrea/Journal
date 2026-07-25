@@ -28,7 +28,7 @@ struct TransitPresentationIcon: View {
                     .scaledToFit()
                     .accessibilityHidden(true)
             } else {
-                TimelineFixedSymbol(
+                FixedSizeSymbol(
                     systemName: presentation.systemImageName,
                     size: size,
                     weight: weight

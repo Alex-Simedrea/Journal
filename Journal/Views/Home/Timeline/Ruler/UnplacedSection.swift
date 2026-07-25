@@ -24,17 +24,3 @@ struct TimelineUnplacedSection: View {
         .padding(.top, 28)
     }
 }
-
-struct TimelineReviewBadge: View {
-    var body: some View {
-        Image(systemName: "exclamationmark")
-            .resizable()
-            .scaledToFit()
-            .fontWeight(.black)
-            .foregroundStyle(.white)
-            .frame(width: 3, height: 9)
-            .frame(width: 17, height: 17)
-            .background(.orange, in: .circle)
-            .accessibilityLabel("Needs review")
-    }
-}

@@ -19,7 +19,12 @@ enum TimelineRulerMetrics {
     static let timestampSpacing: CGFloat = 6
     static let wakeUpTimestampWidth: CGFloat = 38
     static let wakeUpContentSpacing: CGFloat = 6
+    static let compactEntryHeight: CGFloat = 28
+    static let compactEntryBadgeSize: CGFloat = 26
+    static let compactEntryIconSize: CGFloat = 13
+    static let compactEntryContentSpacing: CGFloat = 8
     static let tickPitch: CGFloat = 8
+    static let orphanBoundaryActiveTickCount = 5
     static let wakeUpActiveRangeRadius: CGFloat = tickPitch / 2
     static let endCapHeight: CGFloat = tickPitch * 2
     static let firstTickOffset: CGFloat = 0.5
@@ -27,6 +32,42 @@ enum TimelineRulerMetrics {
     static let activeRangeExpansion: CGFloat = 14
     static let minimumSeparateEntryGap: CGFloat = 8
     static let maximumSeparateEntryGap: CGFloat = 112
+
+    static func boundaryConnectionRange(
+        in bounds: CGRect
+    ) -> ClosedRange<CGFloat> {
+        let nearestTickIndex = (
+            (bounds.midY - firstTickOffset) / tickPitch
+        ).rounded()
+        let nearestTick = firstTickOffset + nearestTickIndex * tickPitch
+        let radius = tickPitch
+            * CGFloat((orphanBoundaryActiveTickCount - 1) / 2)
+        return (nearestTick - radius)...(nearestTick + radius)
+    }
+
+    private static func boundaryCentersRange(
+        in bounds: CGRect
+    ) -> ClosedRange<CGFloat> {
+        let inset = compactEntryHeight / 2
+        return (bounds.minY + inset)...(bounds.maxY - inset)
+    }
+
+    static func sharedBoundaryConnectionRange(
+        in bounds: CGRect
+    ) -> ClosedRange<CGFloat> {
+        let base = boundaryCentersRange(in: bounds)
+        let samplingAllowance = tickPitch / 2
+        let lowerBound = base.lowerBound - samplingAllowance
+        let upperBound = base.upperBound + samplingAllowance
+        return lowerBound...upperBound
+    }
+
+    static func previousBoundaryConnectionRange(
+        in bounds: CGRect
+    ) -> ClosedRange<CGFloat> {
+        let halfHeight = compactEntryHeight / 2
+        return (bounds.minY - halfHeight)...(bounds.minY + halfHeight)
+    }
 
     static func separateEntryGap(duration: TimeInterval) -> CGFloat {
         let scaled = max(
@@ -70,20 +111,6 @@ enum TimelineRulerMetrics {
 
 }
 
-struct TimelineRulerRGB: Equatable {
-    let red: Int
-    let green: Int
-    let blue: Int
-
-    var color: Color {
-        Color(
-            red: Double(red) / 255,
-            green: Double(green) / 255,
-            blue: Double(blue) / 255
-        )
-    }
-}
-
 enum TimelineRulerPalette {
     static func line(
         level: TimelineRulerTickLevel,
@@ -99,12 +126,12 @@ enum TimelineRulerPalette {
         return lightLine(level: level).color
     }
 
-    static func lightLine(level: TimelineRulerTickLevel) -> TimelineRulerRGB {
+    static func lightLine(level: TimelineRulerTickLevel) -> RGBColor {
         switch level {
-        case .active: TimelineRulerRGB(red: 96, green: 96, blue: 103)
-        case .shoulder: TimelineRulerRGB(red: 151, green: 151, blue: 157)
+        case .active: RGBColor(red: 96, green: 96, blue: 103)
+        case .shoulder: RGBColor(red: 151, green: 151, blue: 157)
         case .middle, .quiet:
-            TimelineRulerRGB(red: 187, green: 187, blue: 193)
+            RGBColor(red: 187, green: 187, blue: 193)
         }
     }
 
@@ -114,7 +141,7 @@ enum TimelineRulerPalette {
             : lightTimestamp.color
     }
 
-    static let lightTimestamp = TimelineRulerRGB(
+    static let lightTimestamp = RGBColor(
         red: 121,
         green: 121,
         blue: 124

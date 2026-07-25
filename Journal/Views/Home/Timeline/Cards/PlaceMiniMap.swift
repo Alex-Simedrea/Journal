@@ -38,7 +38,7 @@ struct TimelinePlaceMiniMap: View {
         .clipShape(.rect(cornerRadius: 16))
         .overlay(alignment: .topTrailing) {
             if needsReview {
-                TimelineReviewBadge().padding(5)
+                ReviewBadge(size: 17).padding(5)
             }
         }
     }

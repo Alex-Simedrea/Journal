@@ -92,6 +92,7 @@ struct TimelineOccurrenceID: Hashable, Sendable {
 
 struct TimelineLocationSnapshot: Hashable, Identifiable, Sendable {
     let id: String
+    let savedPlaceID: UUID?
     let name: String
     let latitude: Double
     let longitude: Double
@@ -107,6 +108,7 @@ struct TimelineLocationSnapshot: Hashable, Identifiable, Sendable {
         fallbackSystemImage: PlaceSystemImage = .mappin
     ) {
         let location = fallbackLocation ?? place?.location
+        savedPlaceID = place?.id
         name = place?.name ?? fallbackName
         latitude = location?.latitude ?? 0
         longitude = location?.longitude ?? 0
@@ -120,6 +122,33 @@ struct TimelineLocationSnapshot: Hashable, Identifiable, Sendable {
             id = "\(fallbackName)-\(location.latitude)-\(location.longitude)"
         } else {
             id = "unresolved-\(fallbackName)"
+        }
+    }
+
+    init(
+        savedPlaceID: UUID? = nil,
+        name: String,
+        latitude: Double = 0,
+        longitude: Double = 0,
+        systemImage: PlaceSystemImage = .mappin,
+        accuracyRadiusMeters: Double = 0,
+        radiusCenterLatitude: Double? = nil,
+        radiusCenterLongitude: Double? = nil
+    ) {
+        self.savedPlaceID = savedPlaceID
+        self.name = name
+        self.latitude = latitude
+        self.longitude = longitude
+        self.systemImage = systemImage
+        self.accuracyRadiusMeters = max(accuracyRadiusMeters, 0)
+        self.radiusCenterLatitude = radiusCenterLatitude
+        self.radiusCenterLongitude = radiusCenterLongitude
+        if let savedPlaceID {
+            id = savedPlaceID.uuidString
+        } else if latitude != 0 || longitude != 0 {
+            id = "\(name)-\(latitude)-\(longitude)"
+        } else {
+            id = "unresolved-\(name)"
         }
     }
 

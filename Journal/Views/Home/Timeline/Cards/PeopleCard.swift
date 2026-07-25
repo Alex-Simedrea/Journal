@@ -9,7 +9,7 @@ struct TimelinePeopleTile: View {
     var body: some View {
         HStack(spacing: 7) {
             if people.isEmpty {
-                TimelineFixedSymbol(
+                FixedSizeSymbol(
                     systemName: "person.crop.circle.badge.questionmark",
                     size: 22
                 )
@@ -37,7 +37,7 @@ struct TimelinePeopleTile: View {
         )
         .overlay(alignment: .topTrailing) {
             if needsReview {
-                TimelineReviewBadge().padding(5)
+                ReviewBadge(size: 17).padding(5)
             }
         }
     }
@@ -79,18 +79,28 @@ struct TimelinePeopleSummary: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            HStack(spacing: -8) {
-                ForEach(people.prefix(3)) { person in
-                    PersonAvatar(
-                        name: person.name,
-                        contactIdentifier: person.contactIdentifier,
-                        size: 20
-                    )
-                }
-            }
+            TimelinePeopleAvatarStack(
+                people: Array(people.prefix(3))
+            )
             Text("\(people.count) more")
                 .font(.footnote.weight(.medium))
                 .lineLimit(1)
+        }
+    }
+}
+
+struct TimelinePeopleAvatarStack: View {
+    let people: [TimelinePersonSnapshot]
+
+    var body: some View {
+        HStack(spacing: -8) {
+            ForEach(people) { person in
+                PersonAvatar(
+                    name: person.name,
+                    contactIdentifier: person.contactIdentifier,
+                    size: 20
+                )
+            }
         }
     }
 }

@@ -172,12 +172,12 @@ private struct PlaceVisitSummarySection: View {
     var body: some View {
         Section("Details") {
             LabeledContent("Place", value: placeName ?? "Unresolved")
-            EntryDetailDateRow(
+            ZonedDateRow(
                 title: "Started",
                 date: startTime,
                 timeZoneIdentifier: timeZoneIdentifier
             )
-            EntryDetailDateRow(
+            ZonedDateRow(
                 title: "Ended",
                 date: endTime,
                 timeZoneIdentifier: timeZoneIdentifier

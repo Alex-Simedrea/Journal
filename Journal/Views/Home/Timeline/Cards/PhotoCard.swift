@@ -68,7 +68,7 @@ struct TimelinePhotoThumbnail: View {
                     .resizable()
                     .scaledToFill()
             } else if didFinishLoading {
-                TimelineFixedSymbol(
+                FixedSizeSymbol(
                     systemName: "photo.badge.exclamationmark",
                     size: 24
                 )

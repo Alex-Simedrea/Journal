@@ -40,12 +40,12 @@ private struct EntryLocationHubButton: View {
         Button { onSelect(role) } label: {
             HStack(spacing: 12) {
                 if let selection {
-                    TimelineFixedPlaceSymbol(
+                    FixedSizePlaceSymbol(
                         systemImage: selection.systemImage,
                         size: 28
                     )
                 } else {
-                    TimelineFixedSymbol(
+                    FixedSizeSymbol(
                         systemName: "mappin.slash",
                         size: 28
                     )
@@ -58,7 +58,7 @@ private struct EntryLocationHubButton: View {
                         .lineLimit(1)
                 }
                 Spacer()
-                EntryDetailChevron()
+                DisclosureChevron()
             }
             .padding()
             .background(.background, in: .rect(cornerRadius: 18))

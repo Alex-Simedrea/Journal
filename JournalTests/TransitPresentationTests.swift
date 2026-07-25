@@ -87,6 +87,24 @@ struct TransitPresentationTests {
         #expect(snapshot.destination != entry.transitDetails?.destinationRawText)
     }
 
+    @Test("Timeline snapshots retain transit operator and service metadata")
+    @MainActor
+    func timelineRetainsServiceMetadata() {
+        let entry = LogEntry(kind: .transit, needsReview: false)
+        entry.transitDetails = TransitDetails(
+            type: "Train",
+            sourceOrganizationName: "CFR Călători",
+            sourceServiceIdentifier: "IC536"
+        )
+
+        let snapshot = TimelineEntrySnapshot(entry: entry)
+
+        #expect(
+            snapshot.transitSourceOrganizationName == "CFR Călători"
+        )
+        #expect(snapshot.transitSourceServiceIdentifier == "IC536")
+    }
+
     @Test("Timeline addresses remove cities but preserve street numbers")
     func timelineAddressFormatting() {
         #expect(

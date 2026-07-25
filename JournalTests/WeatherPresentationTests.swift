@@ -2,13 +2,13 @@ import Foundation
 import Testing
 @testable import Journal
 
-struct TimelineWeatherPresentationTests {
+struct WeatherPresentationTests {
     @Test func solarPhaseUsesCoordinateAndHistoricalDate() throws {
         let noon = try Date("2026-03-20T12:00:00Z", strategy: .iso8601)
         let midnight = try Date("2026-03-20T00:00:00Z", strategy: .iso8601)
 
         #expect(
-            TimelineWeatherPresentation.skyPhase(
+            WeatherPresentation.skyPhase(
                 date: noon,
                 latitude: 0,
                 longitude: 0,
@@ -17,7 +17,7 @@ struct TimelineWeatherPresentationTests {
             ) == .day
         )
         #expect(
-            TimelineWeatherPresentation.skyPhase(
+            WeatherPresentation.skyPhase(
                 date: midnight,
                 latitude: 0,
                 longitude: 0,
@@ -28,19 +28,19 @@ struct TimelineWeatherPresentationTests {
     }
 
     @Test func dawnAndDuskHaveDedicatedPalettes() {
-        let dawn = TimelineWeatherPresentation.gradientHexes(
+        let dawn = WeatherPresentation.gradientHexes(
             symbolName: "sun.max.fill",
             phase: .dawn
         )
-        let day = TimelineWeatherPresentation.gradientHexes(
+        let day = WeatherPresentation.gradientHexes(
             symbolName: "sun.max.fill",
             phase: .day
         )
-        let dusk = TimelineWeatherPresentation.gradientHexes(
+        let dusk = WeatherPresentation.gradientHexes(
             symbolName: "sun.max.fill",
             phase: .dusk
         )
-        let night = TimelineWeatherPresentation.gradientHexes(
+        let night = WeatherPresentation.gradientHexes(
             symbolName: "moon.stars.fill",
             phase: .night
         )
@@ -54,17 +54,17 @@ struct TimelineWeatherPresentationTests {
 
     @Test func conditionsSelectDistinctColorFamilies() {
         #expect(
-            TimelineWeatherPresentation.conditionFamily(
+            WeatherPresentation.conditionFamily(
                 symbolName: "cloud.bolt.rain.fill"
             ) == .storm
         )
         #expect(
-            TimelineWeatherPresentation.conditionFamily(
+            WeatherPresentation.conditionFamily(
                 symbolName: "cloud.snow.fill"
             ) == .snow
         )
         #expect(
-            TimelineWeatherPresentation.conditionFamily(
+            WeatherPresentation.conditionFamily(
                 symbolName: "wind"
             ) == .wind
         )

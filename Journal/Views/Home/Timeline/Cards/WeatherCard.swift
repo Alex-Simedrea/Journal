@@ -31,9 +31,10 @@ struct TimelineWeatherTile: View {
         .padding(layout == .large ? 10 : 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(
-            TimelineWeatherGradient.gradient(
+            WeatherGradient.gradient(
                 weather: weather,
-                location: location,
+                latitude: location?.latitude,
+                longitude: location?.longitude,
                 timeZoneIdentifier: timeZoneIdentifier,
                 colorScheme: colorScheme
             ),
@@ -48,7 +49,7 @@ struct TimelineCompactWeatherContent: View {
 
     var body: some View {
         HStack(spacing: 7) {
-            TimelineWeatherSymbol(symbolName: weather.symbolName, size: 26)
+            WeatherSymbol(symbolName: weather.symbolName, size: 26)
 
             VStack(alignment: .leading, spacing: 0) {
                 TimelineTemperatureLabel(celsius: weather.temperatureCelsius)
@@ -68,7 +69,7 @@ struct TimelineLargeWeatherContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            TimelineWeatherSymbol(symbolName: weather.symbolName, size: 32)
+            WeatherSymbol(symbolName: weather.symbolName, size: 32)
 
             Spacer(minLength: 2)
 
@@ -98,7 +99,7 @@ struct TimelineHumidityLabel: View {
 
     var body: some View {
         HStack(spacing: 3) {
-            TimelineFixedSymbol(systemName: "humidity.fill", size: 13)
+            FixedSizeSymbol(systemName: "humidity.fill", size: 13)
             Text(humidity, format: .percent.precision(.fractionLength(0)))
         }
         .font(.caption.weight(.semibold))
@@ -112,7 +113,7 @@ struct TimelineUnavailableWeatherContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            TimelineFixedSymbol(
+            FixedSizeSymbol(
                 systemName: "cloud.slash.fill",
                 size: layout == .large ? 30 : 24
             )
@@ -126,132 +127,5 @@ struct TimelineUnavailableWeatherContent: View {
                 .lineLimit(2)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-    }
-}
-
-struct TimelineWeatherSymbol: View {
-    let symbolName: String
-    let size: CGFloat
-
-    var body: some View {
-        let palette = TimelineWeatherSymbolPalette.colors(for: symbolName)
-        Image(systemName: symbolName)
-            .resizable()
-            .scaledToFit()
-            .symbolVariant(.fill)
-            .symbolRenderingMode(.palette)
-            .foregroundStyle(
-                palette.primary,
-                palette.secondary,
-                palette.tertiary
-            )
-            .fontWeight(.semibold)
-            .frame(width: size, height: size)
-    }
-}
-
-enum TimelineWeatherSymbolPalette {
-    static func colors(
-        for symbolName: String
-    ) -> (primary: Color, secondary: Color, tertiary: Color) {
-        if symbolName.contains("bolt") {
-            return (.yellow, .white, .purple)
-        }
-        if symbolName.contains("rain") || symbolName.contains("drizzle") {
-            return (.white, .cyan, .blue)
-        }
-        if symbolName.contains("snow") || symbolName.contains("sleet") {
-            return (.white, .cyan, .blue)
-        }
-        if symbolName.contains("cloud") && symbolName.contains("sun") {
-            return (.white, .yellow, .cyan)
-        }
-        if symbolName.contains("cloud") || symbolName.contains("fog") {
-            return (.white, .cyan, .blue)
-        }
-        if symbolName.contains("sun") {
-            return (.yellow, .orange, .white)
-        }
-        return (.white, .cyan, .blue)
-    }
-}
-
-enum TimelineWeatherGradient {
-    static func gradient(
-        weather: EntryWeather?,
-        location: TimelineLocationSnapshot?,
-        timeZoneIdentifier: String,
-        colorScheme: ColorScheme
-    ) -> LinearGradient {
-        let symbolName = weather?.symbolName ?? "cloud.slash.fill"
-        let phase = TimelineWeatherPresentation.skyPhase(
-            date: weather?.date ?? .now,
-            latitude: location?.latitude,
-            longitude: location?.longitude,
-            symbolName: symbolName,
-            timeZone: TimeZone(identifier: timeZoneIdentifier) ?? .current
-        )
-        let colors = TimelineWeatherPresentation.gradientHexes(
-            symbolName: symbolName,
-            phase: phase
-        )
-        let factor = colorScheme == .dark ? 0.82 : 1
-        return LinearGradient(
-            colors: colors.map {
-                Color(hex: scaled($0, factor: factor))
-            },
-            startPoint: .top,
-            endPoint: .bottom
-        )
-    }
-
-    private static func scaled(_ hex: UInt32, factor: Double) -> UInt32 {
-        let red = UInt32(Double((hex >> 16) & 0xff) * factor)
-        let green = UInt32(Double((hex >> 8) & 0xff) * factor)
-        let blue = UInt32(Double(hex & 0xff) * factor)
-        return (red << 16) | (green << 8) | blue
-    }
-}
-
-struct TimelineFixedSymbol: View {
-    let systemName: String
-    let size: CGFloat
-    let weight: Font.Weight
-
-    init(
-        systemName: String,
-        size: CGFloat,
-        weight: Font.Weight = .regular
-    ) {
-        self.systemName = systemName
-        self.size = size
-        self.weight = weight
-    }
-
-    var body: some View {
-        Image(systemName: systemName)
-            .resizable()
-            .scaledToFit()
-            .fontWeight(weight)
-            .frame(width: size, height: size)
-    }
-}
-
-struct TimelineFixedPlaceSymbol: View {
-    let systemImage: PlaceSystemImage
-    let size: CGFloat
-
-    var body: some View {
-        let symbol = PlaceSymbols.symbol(for: systemImage)
-        Image(systemName: symbol.systemImage.rawValue)
-            .resizable()
-            .scaledToFit()
-            .symbolRenderingMode(.palette)
-            .foregroundStyle(
-                symbol.primary.gradient,
-                symbol.secondary.gradient,
-                symbol.tertiary.gradient
-            )
-            .frame(width: size, height: size)
     }
 }

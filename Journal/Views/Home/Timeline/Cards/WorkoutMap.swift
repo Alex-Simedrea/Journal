@@ -34,7 +34,7 @@ struct TimelineWorkoutMiniMap: View {
                 $0.target == .place || $0.target == .origin
                     || $0.target == .destination
             }) {
-                TimelineReviewBadge().padding(5)
+                ReviewBadge(size: 17).padding(5)
             }
         }
         .task(id: occurrence.snapshot.workoutUUID) {
@@ -266,7 +266,7 @@ struct TimelineMapUnavailableTile: View {
     var body: some View {
         ZStack {
             Color(uiColor: .tertiarySystemGroupedBackground)
-            TimelineFixedSymbol(systemName: "map", size: 24)
+            FixedSizeSymbol(systemName: "map", size: 24)
                 .foregroundStyle(.secondary)
         }
         .accessibilityLabel("Location unavailable")

@@ -45,9 +45,11 @@ struct WakeUpTests {
         ]
 
         let wakeUps = HealthKitSleepSessionBuilder.wakeUps(from: samples)
+        let durations = wakeUps.map(\.sleepDurationSeconds)
+        let expectedDurations: [Double] = [60 * 60, 30 * 60]
 
         #expect(wakeUps.count == 2)
-        #expect(wakeUps.map(\.sleepDurationSeconds) == [60 * 60, 30 * 60])
+        #expect(durations == expectedDurations)
     }
 
     @Test("Wake-up synchronization is idempotent and mirrors HealthKit")

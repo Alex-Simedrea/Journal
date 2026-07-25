@@ -14,7 +14,7 @@ struct EntryDetailWeatherCard: View {
     var body: some View {
         HStack(spacing: 7) {
             if let _ = weather {
-                TimelineWeatherSymbol(
+                WeatherSymbol(
                     symbolName: weather?.symbolName ?? "cloud.slash.fill",
                     size: 27
                 )
@@ -26,7 +26,7 @@ struct EntryDetailWeatherCard: View {
                     )
                     .font(.title3.weight(.medium))
                     HStack(spacing: 3) {
-                        TimelineFixedSymbol(
+                        FixedSizeSymbol(
                             systemName: "humidity.fill",
                             size: 11
                         )
@@ -77,15 +77,10 @@ struct EntryDetailWeatherCard: View {
     }
 
     private var weatherGradient: LinearGradient {
-        TimelineWeatherGradient.gradient(
+        WeatherGradient.gradient(
             weather: weather,
-            location: location.map {
-                TimelineLocationSnapshot(
-                    place: nil,
-                    fallbackName: $0.preferredName ?? "Weather location",
-                    fallbackLocation: $0
-                )
-            },
+            latitude: location?.latitude,
+            longitude: location?.longitude,
             timeZoneIdentifier: timeZoneIdentifier,
             colorScheme: colorScheme
         )

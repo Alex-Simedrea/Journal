@@ -7,7 +7,7 @@ struct EntryDetailWorkoutCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            TimelineFixedSymbol(
+            FixedSizeSymbol(
                 systemName: WorkoutActivityCatalog.presentation(
                     for: details.activityTypeRawValue
                 ).systemImageName,

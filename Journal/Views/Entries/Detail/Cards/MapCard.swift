@@ -34,7 +34,7 @@ struct EntryDetailMapCard: View {
             }
             .overlay(alignment: .bottomTrailing) {
                 if needsReview {
-                    EntryDetailReviewBadge()
+                    ReviewBadge()
                         .padding(.trailing, 12)
                         .padding(.bottom, 12)
                 }

@@ -1,7 +1,6 @@
-import PhotosUI
 import SwiftUI
 
-struct EntryEditorSection<Content: View>: View {
+struct EditorCardSection<Content: View>: View {
     let title: LocalizedStringResource
     @ViewBuilder let content: Content
 

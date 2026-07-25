@@ -1,8 +1,6 @@
-import MapKit
-import Photos
 import SwiftUI
 
-struct EntryDetailChevron: View {
+struct DisclosureChevron: View {
     var body: some View {
         Image(systemName: "chevron.right")
             .font(.body.weight(.semibold))
@@ -10,19 +8,7 @@ struct EntryDetailChevron: View {
     }
 }
 
-struct EntryDetailReviewBadge: View {
-    var body: some View {
-        Image(systemName: "exclamationmark")
-            .font(.caption.bold())
-            .foregroundStyle(.white)
-            .frame(width: 20, height: 20)
-            .background(.orange, in: .circle)
-            .accessibilityLabel("Needs review")
-    }
-}
-
-
-struct EntryDetailSectionButton: View {
+struct DisclosureSectionButton: View {
     let title: LocalizedStringResource
     let onSelect: () -> Void
 
@@ -31,7 +17,7 @@ struct EntryDetailSectionButton: View {
             HStack {
                 Text(title).font(.title3.bold())
                 Spacer()
-                EntryDetailChevron()
+                DisclosureChevron()
             }
             .contentShape(.rect)
         }

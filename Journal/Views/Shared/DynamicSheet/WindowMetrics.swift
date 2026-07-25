@@ -18,6 +18,10 @@ enum DynamicSheetWindowMetrics {
         )
     }
 
+    static var maximumContentHeight: CGFloat {
+        max(260, availableHeight - 130)
+    }
+
     static var availableHeight: CGFloat {
         guard let scene = activeScene else {
             return 700
