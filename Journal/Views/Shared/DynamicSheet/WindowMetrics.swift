@@ -19,7 +19,13 @@ enum DynamicSheetWindowMetrics {
     }
 
     static var maximumContentHeight: CGFloat {
-        max(260, availableHeight - 130)
+        maximumContentHeight(bottomClearance: 130)
+    }
+
+    static func maximumContentHeight(
+        bottomClearance: CGFloat
+    ) -> CGFloat {
+        max(260, availableHeight - bottomClearance)
     }
 
     static var availableHeight: CGFloat {

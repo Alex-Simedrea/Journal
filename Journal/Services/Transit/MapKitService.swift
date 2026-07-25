@@ -34,6 +34,26 @@ nonisolated struct TransitRouteMetrics: Sendable, Equatable {
 }
 
 nonisolated enum TransitMapKitService {
+    static func estimatedTravelTime(
+        from origin: CLLocationCoordinate2D,
+        to destination: CLLocationCoordinate2D,
+        routingMode: TransitRoutingMode
+    ) async throws -> TimeInterval {
+        let transportType: MKDirectionsTransportType = routingMode == .walking
+            ? .walking
+            : .automobile
+        let duration = try await travelTime(
+            from: origin,
+            to: destination,
+            transportType: transportType
+        )
+        return roundedTravelTime(duration)
+    }
+
+    static func roundedTravelTime(_ duration: TimeInterval) -> TimeInterval {
+        ((duration / 60 * 10).rounded() / 10) * 60
+    }
+
     static func search(
         query: String,
         near center: CLLocationCoordinate2D,

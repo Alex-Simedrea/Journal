@@ -26,15 +26,18 @@ final class LocationSearchService: NSObject, MKLocalSearchCompleterDelegate {
 
             guard hasSearchQuery else {
                 suggestions = []
+                isSearching = false
                 return
             }
 
+            isSearching = true
             completer.queryFragment = query
         }
     }
 
     private(set) var suggestions: [LocationSearchSuggestion] = []
     private(set) var errorMessage: String?
+    private(set) var isSearching = false
 
     private let completer = MKLocalSearchCompleter()
 
@@ -67,17 +70,20 @@ final class LocationSearchService: NSObject, MKLocalSearchCompleterDelegate {
         query = ""
         suggestions = []
         errorMessage = nil
+        isSearching = false
     }
 
     func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
         guard hasSearchQuery else {
             suggestions = []
+            isSearching = false
             return
         }
 
         suggestions = completer.results
             .prefix(6)
             .map(LocationSearchSuggestion.init)
+        isSearching = false
     }
 
     func completer(
@@ -87,11 +93,13 @@ final class LocationSearchService: NSObject, MKLocalSearchCompleterDelegate {
         guard hasSearchQuery else {
             suggestions = []
             errorMessage = nil
+            isSearching = false
             return
         }
 
         suggestions = []
         errorMessage = error.localizedDescription
+        isSearching = false
     }
 }
 

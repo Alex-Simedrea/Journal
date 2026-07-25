@@ -20,6 +20,6 @@ struct EditorCardSection<Content: View>: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.background, in: .rect(cornerRadius: 18))
+        .dynamicSheetSurface()
     }
 }

@@ -8,7 +8,7 @@ import UIKit
 
 enum DynamicSheetSizing: Equatable {
     case content
-    case constrained
+    case fixed(CGFloat)
     case expanded
 }
 
@@ -70,14 +70,18 @@ struct DynamicSheet<Content: View>: View {
                 }
                 updateSheetHeight(height)
             }
+            .onAppear {
+                guard let height = targetHeight(for: sizing) else { return }
+                updateSheetHeight(height)
+            }
     }
 
     private func targetHeight(for sizing: DynamicSheetSizing) -> CGFloat? {
         switch sizing {
         case .content:
             nil
-        case .constrained:
-            DynamicSheetWindowMetrics.maximumContentHeight
+        case .fixed(let height):
+            height
         case .expanded:
             DynamicSheetWindowMetrics.expandedHeight
         }

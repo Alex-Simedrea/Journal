@@ -73,10 +73,7 @@ struct EntryDetailPeopleListSection: View {
                     }
                 }
             }
-            .background(
-                .background.opacity(0.7),
-                in: .rect(cornerRadius: 24)
-            )
+            .dynamicSheetSurface()
         }
     }
 }

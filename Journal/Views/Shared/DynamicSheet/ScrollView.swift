@@ -7,18 +7,21 @@ struct DynamicSheetScrollView<Content: View>: View {
     @Binding private var isScrolled: Bool
     let fillsAvailableHeight: Bool
     let indexItems: [DynamicSheetScrollIndexItem]
+    let maximumHeight: CGFloat?
     let topContentInset: CGFloat
     @ViewBuilder let content: Content
 
     init(
         fillsAvailableHeight: Bool = false,
         indexItems: [DynamicSheetScrollIndexItem] = [],
+        maximumHeight: CGFloat? = nil,
         topContentInset: CGFloat = 0,
         isScrolled: Binding<Bool> = .constant(false),
         @ViewBuilder content: () -> Content
     ) {
         self.fillsAvailableHeight = fillsAvailableHeight
         self.indexItems = indexItems
+        self.maximumHeight = maximumHeight
         self.topContentInset = topContentInset
         _isScrolled = isScrolled
         self.content = content()
@@ -95,7 +98,7 @@ struct DynamicSheetScrollView<Content: View>: View {
     }
 
     private var maximumViewportHeight: CGFloat {
-        DynamicSheetWindowMetrics.maximumContentHeight
+        maximumHeight ?? DynamicSheetWindowMetrics.maximumContentHeight
     }
 
     private var fittedContentHeight: CGFloat {

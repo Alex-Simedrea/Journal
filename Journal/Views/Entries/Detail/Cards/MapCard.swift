@@ -249,7 +249,7 @@ private struct EntryDetailMapContent: View {
     }
 
     private var workoutPlace: EntryDetailMapEndpoint? {
-        guard entry.workoutDetails?.movementKind != .moving,
+        guard entry.workoutDetails?.movementKind == .staticWorkout,
             let location = entry.workoutDetails?.sourceLocation
                 ?? entry.workoutDetails?.place?.location
         else { return nil }

@@ -109,6 +109,7 @@ final class PlaceEditorModel {
 
     func selectSearchSuggestion(_ suggestion: LocationSearchSuggestion) {
         locationUpdateTask?.cancel()
+        symbolSuggestionTask?.cancel()
         searchErrorMessage = nil
         isResolvingSearch = true
 
@@ -134,6 +135,12 @@ final class PlaceEditorModel {
 
                 if trimmedName.isEmpty {
                     name = mapItem.name ?? suggestion.title
+                }
+
+                if let inferredSymbol = PlaceSystemImage(
+                    pointOfInterestCategory: mapItem.pointOfInterestCategory
+                ) {
+                    selectedSymbol = inferredSymbol
                 }
 
                 locationSearch.clear()

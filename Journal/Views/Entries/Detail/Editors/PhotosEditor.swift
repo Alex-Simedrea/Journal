@@ -14,7 +14,7 @@ struct EntryDetailPhotosEditor: View {
                 Label("Add Photos", systemImage: "photo.badge.plus")
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
-                    .background(.background, in: .rect(cornerRadius: 16))
+                    .dynamicSheetSurface()
             }
             .buttonStyle(.plain)
 
@@ -35,7 +35,7 @@ struct EntryDetailPhotosEditor: View {
                         }
                     }
                     .padding(8)
-                    .background(.background, in: .rect(cornerRadius: 16))
+                    .dynamicSheetSurface()
                 }
             }
         }

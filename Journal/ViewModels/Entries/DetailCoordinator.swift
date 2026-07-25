@@ -22,9 +22,58 @@ enum EntryDetailLocationRole: String, Hashable, Identifiable, Sendable {
     }
 }
 
+enum EntryTimeZoneEndpoint: String, Hashable, Identifiable, Sendable {
+    case start
+    case end
+
+    var id: String { rawValue }
+
+    var title: LocalizedStringResource {
+        switch self {
+        case .start: "Start Time Zone"
+        case .end: "End Time Zone"
+        }
+    }
+}
+
+enum EntryDetailLocationRouting {
+    static func roles(
+        for kind: LogKind,
+        workoutMovementKind: WorkoutMovementKind?
+    ) -> [EntryDetailLocationRole] {
+        switch kind {
+        case .transit:
+            [.origin, .destination]
+        case .placeVisit:
+            [.place]
+        case .workout:
+            workoutMovementKind == .moving
+                ? [.origin, .destination]
+                : [.place]
+        case .wakeUp:
+            []
+        }
+    }
+
+    static func editRoute(
+        for kind: LogKind,
+        workoutMovementKind: WorkoutMovementKind?
+    ) -> EntryDetailRoute {
+        let roles = roles(
+            for: kind,
+            workoutMovementKind: workoutMovementKind
+        )
+        if roles.count == 1, let role = roles.first {
+            return .location(role)
+        }
+        return .locations
+    }
+}
+
 enum EntryDetailRoute: Hashable, Identifiable, Sendable {
     case details
     case time
+    case timeZone(EntryTimeZoneEndpoint)
     case people
     case photos
     case transitMetadata
@@ -33,12 +82,14 @@ enum EntryDetailRoute: Hashable, Identifiable, Sendable {
     case entryKind
     case addPerson
     case addPlace(EntryDetailLocationRole)
+    case placeSymbol(EntryDetailLocationRole)
     case advanced
 
     var id: String {
         switch self {
         case .details: "details"
         case .time: "time"
+        case .timeZone(let endpoint): "time-zone-\(endpoint.rawValue)"
         case .people: "people"
         case .photos: "photos"
         case .transitMetadata: "transit-metadata"
@@ -47,6 +98,7 @@ enum EntryDetailRoute: Hashable, Identifiable, Sendable {
         case .entryKind: "entry-kind"
         case .addPerson: "add-person"
         case .addPlace(let role): "add-place-\(role.rawValue)"
+        case .placeSymbol(let role): "place-symbol-\(role.rawValue)"
         case .advanced: "advanced"
         }
     }
@@ -55,6 +107,7 @@ enum EntryDetailRoute: Hashable, Identifiable, Sendable {
         switch self {
         case .details: "Details"
         case .time: "Time"
+        case .timeZone(let endpoint): endpoint.title
         case .people: "People"
         case .photos: "Photos"
         case .transitMetadata: "Transit"
@@ -63,16 +116,17 @@ enum EntryDetailRoute: Hashable, Identifiable, Sendable {
         case .entryKind: "Entry Type"
         case .addPerson: "New Person"
         case .addPlace: "New Place"
+        case .placeSymbol: "Symbol"
         case .advanced: "Advanced"
         }
     }
 
     var hasConfirmationAction: Bool {
         switch self {
-        case .time, .people, .photos, .transitMetadata, .location,
+        case .time, .timeZone, .people, .photos, .transitMetadata, .location,
              .entryKind, .addPerson, .addPlace:
             true
-        case .details, .locations, .advanced:
+        case .details, .locations, .placeSymbol, .advanced:
             false
         }
     }
@@ -192,7 +246,7 @@ final class EntryDetailEditSession {
         case .addPlace:
             newPlaceName = ""
             newPlaceSystemImage = .mappin
-        case .details, .locations, .advanced:
+        case .details, .timeZone, .locations, .placeSymbol, .advanced:
             break
         }
     }
@@ -224,7 +278,7 @@ final class EntryDetailEditSession {
             !newPlaceName.trimmingCharacters(
                 in: .whitespacesAndNewlines
             ).isEmpty || newPlaceSystemImage != .mappin
-        case .details, .locations, .advanced:
+        case .details, .timeZone, .locations, .placeSymbol, .advanced:
             false
         }
     }

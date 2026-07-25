@@ -18,10 +18,7 @@ struct LabeledTextField: View {
                 .autocorrectionDisabled(disablesAutocorrection)
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    .background.opacity(0.7),
-                    in: .rect(cornerRadius: 24)
-                )
+                .dynamicSheetSurface()
         }
     }
 }

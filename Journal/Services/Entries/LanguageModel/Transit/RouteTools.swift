@@ -1,7 +1,6 @@
 import AnyLanguageModel
 import CoreLocation
 import Foundation
-import MapKit
 
 nonisolated struct EstimateRouteTool: Tool {
     let recorder: TransitToolRecorder
@@ -47,12 +46,8 @@ nonisolated struct EstimateRouteTool: Tool {
 
         let normalizedType = TransitToolQueryValidator.normalize(arguments.transitType)
         let routingMode = routingModesByTypeOrAlias[normalizedType] ?? .automobile
-        let transportType: MKDirectionsTransportType = routingMode == .walking
-            ? .walking
-            : .automobile
-
         do {
-            let duration = try await TransitMapKitService.travelTime(
+            let duration = try await TransitMapKitService.estimatedTravelTime(
                 from: CLLocationCoordinate2D(
                     latitude: origin.latitude,
                     longitude: origin.longitude
@@ -61,13 +56,13 @@ nonisolated struct EstimateRouteTool: Tool {
                     latitude: destination.latitude,
                     longitude: destination.longitude
                 ),
-                transportType: transportType
+                routingMode: routingMode
             )
             return encode(
                 TransitRouteEstimateOutput(
                     originLocationKey: arguments.originLocationKey,
                     destinationLocationKey: arguments.destinationLocationKey,
-                    durationMinutes: rounded(duration / 60),
+                    durationMinutes: duration / 60,
                     durationSource: routingMode == .walking
                         ? "mapkitWalking"
                         : "mapkitCarFallback",
@@ -142,9 +137,6 @@ nonisolated struct CompareRoutesTool: Tool {
 
         let normalizedType = TransitToolQueryValidator.normalize(arguments.transitType)
         let routingMode = routingModesByTypeOrAlias[normalizedType] ?? .automobile
-        let transportType: MKDirectionsTransportType = routingMode == .walking
-            ? .walking
-            : .automobile
         let durationSource = routingMode == .walking
             ? "mapkitWalking"
             : "mapkitCarFallback"
@@ -197,7 +189,7 @@ nonisolated struct CompareRoutesTool: Tool {
             ) / 1_000
 
             do {
-                let duration = try await TransitMapKitService.travelTime(
+                let duration = try await TransitMapKitService.estimatedTravelTime(
                     from: CLLocationCoordinate2D(
                         latitude: origin.latitude,
                         longitude: origin.longitude
@@ -206,7 +198,7 @@ nonisolated struct CompareRoutesTool: Tool {
                         latitude: destination.latitude,
                         longitude: destination.longitude
                     ),
-                    transportType: transportType
+                    routingMode: routingMode
                 )
                 comparisons.append(
                     SavedRouteCandidateOutput(
@@ -214,7 +206,7 @@ nonisolated struct CompareRoutesTool: Tool {
                         originLocationKey: originKey,
                         destinationLocationKey: destinationKey,
                         straightLineDistanceKilometers: rounded(distance),
-                        durationMinutes: rounded(duration / 60),
+                        durationMinutes: duration / 60,
                         durationSource: durationSource,
                         error: nil
                     )

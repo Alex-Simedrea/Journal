@@ -14,6 +14,10 @@ struct AddPlaceSheet: View {
     private let onSave: ((Place) -> Void)?
     private let capturesCurrentLocation: Bool
     @State private var model: PlaceEditorModel
+    @State private var route: AddPlaceRoute = .editor
+    @State private var movesForward = true
+    @State private var isScrolled = false
+    @State private var chromeHeight: CGFloat = 0
 
     init(
         initialName: String = "",
@@ -35,42 +39,86 @@ struct AddPlaceSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                PlaceEditorDetailsSection(model: model)
-                PlaceEditorLocationSection(model: model)
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .navigationTitle("New Place")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(role: .cancel) {
-                        dismiss()
-                    }
-                }
+        @Bindable var model = model
 
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(role: .confirm) {
-                        if let place = model.insertPlace(in: modelContext) {
-                            onSave?(place)
-                            dismiss()
-                        }
-                    }
-                    .disabled(!model.canSave)
-                }
-            }
-            .alert(
-                "Couldn’t Save Place",
-                isPresented: Binding(
-                    get: { model.saveErrorMessage != nil },
-                    set: { if !$0 { model.saveErrorMessage = nil } }
-                )
+        DynamicSheet(sizing: .expanded) {
+            DynamicSheetNavigationContainer(
+                route: route,
+                movesForward: movesForward,
+                title: route.title,
+                isScrolled: isScrolled,
+                chromeHeight: $chromeHeight
             ) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(model.saveErrorMessage ?? "An unknown error occurred.")
+                switch route {
+                case .editor:
+                    DynamicSheetScrollView(
+                        fillsAvailableHeight: true,
+                        topContentInset: chromeHeight,
+                        isScrolled: $isScrolled
+                    ) {
+                        PlaceEditorContent(
+                            model: model,
+                            onSelectSymbol: {
+                                movesForward = true
+                                isScrolled = false
+                                route = .symbols
+                            }
+                        )
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                        .padding(.bottom, 24)
+                    }
+                case .symbols:
+                    DynamicSheetScrollView(
+                        fillsAvailableHeight: true,
+                        topContentInset: chromeHeight,
+                        isScrolled: $isScrolled
+                    ) {
+                        PlaceSymbolGrid(selection: $model.selectedSymbol)
+                    }
+                }
+            } leading: {
+                Button(action: leadingAction) {
+                    Image(
+                        systemName: route == .editor
+                            ? "xmark"
+                            : "chevron.left"
+                    )
+                    .font(.title2)
+                    .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
+                .accessibilityLabel(
+                    route == .editor ? "Close" : "Back"
+                )
+            } trailing: {
+                if route == .editor {
+                    Button(action: save) {
+                        Image(systemName: "checkmark")
+                            .font(.title2)
+                            .frame(width: 32, height: 32)
+                    }
+                    .buttonStyle(.glassProminent)
+                    .buttonBorderShape(.circle)
+                    .tint(.blue)
+                    .disabled(!model.canSave)
+                    .accessibilityLabel("Save Place")
+                }
+            } accessory: {
+                EmptyView()
             }
+        }
+        .alert(
+            "Couldn’t Save Place",
+            isPresented: Binding(
+                get: { model.saveErrorMessage != nil },
+                set: { if !$0 { model.saveErrorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(model.saveErrorMessage ?? "An unknown error occurred.")
         }
         .task {
             if capturesCurrentLocation, model.location == nil {
@@ -79,6 +127,34 @@ struct AddPlaceSheet: View {
         }
         .onDisappear {
             model.stop()
+        }
+    }
+
+    private func leadingAction() {
+        if route == .editor {
+            dismiss()
+        } else {
+            movesForward = false
+            isScrolled = false
+            route = .editor
+        }
+    }
+
+    private func save() {
+        guard let place = model.insertPlace(in: modelContext) else { return }
+        onSave?(place)
+        dismiss()
+    }
+}
+
+private enum AddPlaceRoute: Equatable {
+    case editor
+    case symbols
+
+    var title: LocalizedStringResource {
+        switch self {
+        case .editor: "New Place"
+        case .symbols: "Symbol"
         }
     }
 }

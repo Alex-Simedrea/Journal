@@ -476,6 +476,66 @@ struct EntryEditingTests {
         #expect(try context.fetch(FetchDescriptor<Place>()).map(\.name) == ["Reyna Beach"])
     }
 
+    @Test("A newly saved place associates before the places query refreshes")
+    func newlySavedPlaceAssociation() throws {
+        let context = try makeContext()
+        let entry = LogEntry(
+            kind: .transit,
+            startTime: Date(timeIntervalSince1970: 1_000),
+            endTime: Date(timeIntervalSince1970: 2_000),
+            needsReview: false
+        )
+        entry.transitDetails = TransitDetails(type: "Walk")
+        context.insert(entry)
+        try context.save()
+
+        let locationSelection = EntryLocationSelection(
+            location: Location(latitude: 44.43, longitude: 26.10),
+            title: "Studio"
+        )
+        let place = try EntryDetailEditingService.createPlace(
+            name: "Studio",
+            selection: locationSelection,
+            systemImage: .buildings,
+            in: context
+        )
+        let session = EntryDetailEditSession(entry: entry)
+        session.setSelection(
+            EntryLocationSelection(place: place),
+            for: .origin
+        )
+
+        try EntryDetailEditingService.saveLocation(
+            entry: entry,
+            role: .origin,
+            session: session,
+            places: [],
+            in: context
+        )
+
+        #expect(entry.transitDetails?.originPlace?.id == place.id)
+    }
+
+    @Test("The shared place editor preserves symbol, location, and area")
+    func sharedPlaceEditorInsertion() throws {
+        let context = try makeContext()
+        let location = Location(latitude: 44.43, longitude: 26.10)
+        let model = PlaceEditorModel(
+            initialName: "Home",
+            initialLocation: location,
+            allowsCurrentLocationCapture: false
+        )
+        model.selectedSymbol = .house
+        model.accuracyRadiusMeters = 250
+
+        let place = try #require(model.insertPlace(in: context))
+
+        #expect(place.name == "Home")
+        #expect(place.location == location)
+        #expect(place.systemImage == .house)
+        #expect(place.accuracyRadiusMeters == 250)
+    }
+
     private func makeContext() throws -> ModelContext {
         let schema = Schema([
             LogEntry.self,

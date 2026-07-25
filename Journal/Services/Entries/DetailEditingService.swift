@@ -132,7 +132,11 @@ enum EntryDetailEditingService {
         guard let selection = session.selection(for: role) else {
             throw EntryDetailEditingError.missingLocation
         }
-        let place = places.first { $0.id == selection.placeID }
+        let place = try associatedPlace(
+            with: selection.placeID,
+            places: places,
+            in: modelContext
+        )
 
         switch entry.kind {
         case .transit:
@@ -310,6 +314,22 @@ enum EntryDetailEditingService {
         case .place:
             throw EntryDetailEditingError.missingLocation
         }
+    }
+
+    private static func associatedPlace(
+        with placeID: UUID?,
+        places: [Place],
+        in modelContext: ModelContext
+    ) throws -> Place? {
+        guard let placeID else { return nil }
+        if let place = places.first(where: { $0.id == placeID }) {
+            return place
+        }
+
+        let descriptor = FetchDescriptor<Place>(
+            predicate: #Predicate { $0.id == placeID }
+        )
+        return try modelContext.fetch(descriptor).first
     }
 
     private static func removeTimeReview(from entry: LogEntry) {

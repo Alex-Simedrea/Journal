@@ -9,7 +9,6 @@ import SwiftUI
 struct EntryDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @Query(sort: \Person.name) private var people: [Person]
     @Query(sort: \Place.name) private var places: [Place]
@@ -21,10 +20,14 @@ struct EntryDetailSheet: View {
 
     @State private var coordinator: EntryDetailCoordinator
     @State private var routeModel = WorkoutRouteModel()
+    @State private var locationPickerModel = EntryLocationPickerModel()
+    @State private var addPlaceModel: PlaceEditorModel?
     @State private var isDeleteConfirmationPresented = false
     @State private var contentIsScrolled = false
     @State private var chromeHeight: CGFloat = 0
     @State private var peopleSearchText = ""
+    @State private var timeZoneSearchText = ""
+    @State private var timeZoneDraft = TimeZone.current.identifier
 
     init(entry: LogEntry) {
         self.entry = entry
@@ -33,91 +36,91 @@ struct EntryDetailSheet: View {
 
     var body: some View {
         DynamicSheet(sizing: sheetSizing) {
-            ZStack(alignment: .top) {
+            DynamicSheetNavigationContainer(
+                route: coordinator.route,
+                movesForward: coordinator.movesForward,
+                title: headerTitle,
+                isScrolled: contentIsScrolled,
+                chromeHeight: $chromeHeight
+            ) {
                 routeContent
-                    .id(coordinator.route.id)
-                    .transition(
-                        .blurReplace(
-                            coordinator.movesForward ? .upUp : .downUp
-                        )
-                    )
-
-                VStack(spacing: 0) {
-                    DynamicSheetHeader(
-                        title: headerTitle,
-                        isElevated: contentIsScrolled
-                    ) {
-                        if coordinator.route == .details {
-                            Button(action: { dismiss() }) {
-                                Image(systemName: "xmark")
-                                    .font(.title2)
-                                    .frame(width: 32, height: 32)
-                            }
-                            .buttonStyle(.glass)
-                            .buttonBorderShape(.circle)
-                            .accessibilityLabel("Close")
-                        } else {
-                            Button(action: { coordinator.goBack() }) {
-                                Image(systemName: "chevron.left")
-                                    .font(.title2)
-                                    .frame(width: 32, height: 32)
-                            }
-                            .buttonStyle(.glass)
-                            .buttonBorderShape(.circle)
-                            .accessibilityLabel("Back")
-                        }
-                    } trailing: {
-                        if coordinator.route == .details,
-                            entry.entryKindReviewReason != nil
-                        {
-                            Button(action: { coordinator.present(.entryKind) })
-                            {
-                                ReviewBadge()
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Review entry type")
-                        } else if coordinator.route.hasConfirmationAction {
-                            HStack(spacing: 8) {
-                                if coordinator.route == .people {
-                                    Button {
-                                        coordinator.present(.addPerson)
-                                    } label: {
-                                        Image(systemName: "plus")
-                                            .font(.title2)
-                                            .frame(width: 32, height: 32)
-                                    }
-                                    .buttonStyle(.glass)
-                                    .buttonBorderShape(.circle)
-                                    .accessibilityLabel("Add Person")
-                                }
-
-                                Button(action: saveCurrentRoute) {
-                                    Image(systemName: "checkmark")
-                                        .font(.title2)
-                                        .frame(width: 32, height: 32)
-                                }
-                                .buttonStyle(.glassProminent)
-                                .buttonBorderShape(.circle)
-                                .tint(.blue)
-                                .accessibilityLabel("Done")
-                            }
-                        }
+            } leading: {
+                if coordinator.route == .details {
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "xmark")
+                            .font(.title2)
+                            .frame(width: 32, height: 32)
                     }
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .accessibilityLabel("Close")
+                } else {
+                    Button(action: { coordinator.goBack() }) {
+                        Image(systemName: "chevron.left")
+                            .font(.title2)
+                            .frame(width: 32, height: 32)
+                    }
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .accessibilityLabel("Back")
+                }
+            } trailing: {
+                if coordinator.route == .details,
+                    entry.entryKindReviewReason != nil
+                {
+                    Button(action: { coordinator.present(.entryKind) }) {
+                        ReviewBadge()
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Review entry type")
+                } else if coordinator.route.hasConfirmationAction {
+                    HStack(spacing: 8) {
+                        if coordinator.route == .people {
+                            Button {
+                                coordinator.present(.addPerson)
+                            } label: {
+                                Image(systemName: "plus")
+                                    .font(.title2)
+                                    .frame(width: 32, height: 32)
+                            }
+                            .buttonStyle(.glass)
+                            .buttonBorderShape(.circle)
+                            .accessibilityLabel("Add Person")
+                        }
 
-                    if coordinator.route == .people {
-                        SearchField(
-                            prompt: "Search People",
-                            text: $peopleSearchText,
-                            capitalization: .words
-                        )
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 8)
+                        Button(action: saveCurrentRoute) {
+                            Image(systemName: "checkmark")
+                                .font(.title2)
+                                .frame(width: 32, height: 32)
+                        }
+                        .buttonStyle(.glassProminent)
+                        .buttonBorderShape(.circle)
+                        .tint(.blue)
+                        .disabled(!canConfirmCurrentRoute)
+                        .accessibilityLabel("Done")
                     }
                 }
-                .onGeometryChange(for: CGFloat.self) { proxy in
-                    proxy.size.height
-                } action: {
-                    chromeHeight = $0
+            } accessory: {
+                if coordinator.route == .people {
+                    SearchField(
+                        prompt: "Search People",
+                        text: $peopleSearchText,
+                        capitalization: .words
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+                } else if case .timeZone = coordinator.route {
+                    SearchField(
+                        prompt: "Search Time Zones",
+                        text: $timeZoneSearchText,
+                        capitalization: .words
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+                } else if case .location = coordinator.route {
+                    EntryLocationSearchField(model: locationPickerModel)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 8)
                 }
             }
         }
@@ -143,28 +146,40 @@ struct EntryDetailSheet: View {
         } message: {
             Text(coordinator.errorMessage ?? "An unknown error occurred.")
         }
-        .animation(
-            reduceMotion ? nil : .snappy(duration: 0.25),
-            value: coordinator.route
-        )
-        .sensoryFeedback(
-            .impact(flexibility: .soft, intensity: 1),
-            trigger: coordinator.route
-        )
         .onChange(of: coordinator.route) {
             contentIsScrolled = false
             if coordinator.route != .people {
                 peopleSearchText = ""
             }
+            if coordinator.route != .timeZone(.start),
+               coordinator.route != .timeZone(.end) {
+                timeZoneSearchText = ""
+            }
+            switch coordinator.route {
+            case .addPlace, .placeSymbol:
+                break
+            default:
+                addPlaceModel?.stop()
+                addPlaceModel = nil
+            }
+            if case .location = coordinator.route { return }
+            locationPickerModel.stop()
+        }
+        .onDisappear {
+            addPlaceModel?.stop()
         }
     }
 
     private var sheetSizing: DynamicSheetSizing {
         switch coordinator.route {
-        case .people:
+        case .people, .timeZone, .location, .addPlace, .placeSymbol:
             .expanded
         case .transitMetadata:
-            .constrained
+            .fixed(
+                DynamicSheetWindowMetrics.maximumContentHeight(
+                    bottomClearance: 200
+                )
+            )
         default:
             .content
         }
@@ -189,9 +204,28 @@ struct EntryDetailSheet: View {
                 onDelete: { isDeleteConfirmationPresented = true }
             )
         case .time:
-            editorViewport {
-                EntryDetailTimeEditor(session: coordinator.session)
+            EntryDetailEditorViewport(
+                maximumHeight: DynamicSheetWindowMetrics.maximumContentHeight(
+                    bottomClearance: 50
+                ),
+                topContentInset: chromeHeight,
+                isScrolled: $contentIsScrolled
+            ) {
+                EntryDetailTimeEditor(
+                    session: coordinator.session,
+                    mapKitRequest: mapKitRouteRequest,
+                    showsMapKitPreset: entry.kind == .transit,
+                    onSelectTimeZone: presentTimeZone
+                )
             }
+        case .timeZone(let endpoint):
+            TimeZoneEditor(
+                selection: $timeZoneDraft,
+                searchText: $timeZoneSearchText,
+                isScrolled: $contentIsScrolled,
+                date: timeZoneDate(for: endpoint),
+                topContentInset: chromeHeight
+            )
         case .people:
             EntryDetailPeopleEditor(
                 session: coordinator.session,
@@ -202,7 +236,10 @@ struct EntryDetailSheet: View {
                 usageCounts: peopleUsageCounts
             )
         case .photos:
-            editorViewport {
+            EntryDetailEditorViewport(
+                topContentInset: chromeHeight,
+                isScrolled: $contentIsScrolled
+            ) {
                 EntryDetailPhotosEditor(session: coordinator.session)
             }
         case .transitMetadata:
@@ -213,7 +250,10 @@ struct EntryDetailSheet: View {
                 isScrolled: $contentIsScrolled
             )
         case .locations:
-            editorViewport {
+            EntryDetailEditorViewport(
+                topContentInset: chromeHeight,
+                isScrolled: $contentIsScrolled
+            ) {
                 EntryDetailLocationsEditor(
                     entry: entry,
                     session: coordinator.session,
@@ -221,21 +261,30 @@ struct EntryDetailSheet: View {
                 )
             }
         case .location(let role):
-            editorViewport {
-                EntryDetailLocationEditor(
-                    session: coordinator.session,
-                    role: role,
-                    places: places,
-                    onSaveAsPlace: {
-                        coordinator.session.newPlaceName =
-                            coordinator.session
-                            .selection(for: role)?.title ?? ""
-                        coordinator.present(.addPlace(role))
-                    }
-                )
-            }
+            EntryDetailLocationEditor(
+                session: coordinator.session,
+                role: role,
+                places: places,
+                model: locationPickerModel,
+                topContentInset: chromeHeight,
+                isScrolled: $contentIsScrolled,
+                onSaveAsPlace: {
+                    let selection = coordinator.session.selection(for: role)
+                    let name = selection?.title ?? ""
+                    coordinator.session.newPlaceName = name
+                    addPlaceModel = PlaceEditorModel(
+                        initialName: name,
+                        initialLocation: selection?.location,
+                        allowsCurrentLocationCapture: false
+                    )
+                    coordinator.present(.addPlace(role))
+                }
+            )
         case .entryKind:
-            editorViewport {
+            EntryDetailEditorViewport(
+                topContentInset: chromeHeight,
+                isScrolled: $contentIsScrolled
+            ) {
                 EntryDetailKindEditor(
                     session: coordinator.session,
                     entry: entry,
@@ -243,37 +292,88 @@ struct EntryDetailSheet: View {
                 )
             }
         case .addPerson:
-            editorViewport {
+            EntryDetailEditorViewport(
+                topContentInset: chromeHeight,
+                isScrolled: $contentIsScrolled
+            ) {
                 EntryDetailAddPersonEditor(session: coordinator.session)
             }
         case .addPlace(let role):
-            editorViewport {
-                EntryDetailAddPlaceEditor(
-                    session: coordinator.session,
-                    role: role
-                )
+            DynamicSheetScrollView(
+                fillsAvailableHeight: true,
+                topContentInset: chromeHeight,
+                isScrolled: $contentIsScrolled
+            ) {
+                if let addPlaceModel {
+                    PlaceEditorContent(
+                        model: addPlaceModel,
+                        onSelectSymbol: {
+                            coordinator.present(.placeSymbol(role))
+                        }
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 24)
+                }
+            }
+        case .placeSymbol:
+            DynamicSheetScrollView(
+                fillsAvailableHeight: true,
+                topContentInset: chromeHeight,
+                isScrolled: $contentIsScrolled
+            ) {
+                if let addPlaceModel {
+                    @Bindable var addPlaceModel = addPlaceModel
+                    PlaceSymbolGrid(
+                        selection: $addPlaceModel.selectedSymbol
+                    )
+                }
             }
         case .advanced:
-            editorViewport {
+            EntryDetailEditorViewport(
+                topContentInset: chromeHeight,
+                isScrolled: $contentIsScrolled
+            ) {
                 EntryDetailAdvancedEditor(entry: entry)
             }
         }
     }
 
-    private func editorViewport<Content: View>(
+}
+
+private struct EntryDetailEditorViewport<Content: View>: View {
+    let maximumHeight: CGFloat?
+    let topContentInset: CGFloat
+    @Binding var isScrolled: Bool
+    let content: Content
+
+    init(
+        maximumHeight: CGFloat? = nil,
+        topContentInset: CGFloat,
+        isScrolled: Binding<Bool>,
         @ViewBuilder content: () -> Content
-    ) -> some View {
+    ) {
+        self.maximumHeight = maximumHeight
+        self.topContentInset = topContentInset
+        _isScrolled = isScrolled
+        self.content = content()
+    }
+
+    var body: some View {
         DynamicSheetScrollView(
-            topContentInset: chromeHeight,
-            isScrolled: $contentIsScrolled
+            maximumHeight: maximumHeight,
+            topContentInset: topContentInset,
+            isScrolled: $isScrolled
         ) {
-            content()
+            content
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
                 .padding(.bottom, 18)
         }
     }
+}
 
+private extension EntryDetailSheet {
     private var peopleUsageCounts: [UUID: Int] {
         EntryDetailPeopleUsage.counts(in: allEntries)
     }
@@ -288,6 +388,9 @@ struct EntryDetailSheet: View {
                     in: modelContext
                 )
                 coordinator.returnToDetails(entry: entry)
+            case .timeZone(let endpoint):
+                setTimeZoneDraft(for: endpoint)
+                coordinator.goBack(discardingChanges: false)
             case .people:
                 try EntryDetailEditingService.savePeople(
                     entry: entry,
@@ -334,13 +437,65 @@ struct EntryDetailSheet: View {
             case .addPerson:
                 try addPerson()
             case .addPlace(let role):
-                try addPlace(for: role)
-            case .details, .locations, .advanced:
+                addPlace(for: role)
+            case .details, .locations, .placeSymbol, .advanced:
                 break
             }
         } catch {
             coordinator.errorMessage = error.localizedDescription
         }
+    }
+
+    private var mapKitRouteRequest: TimeEditorRouteRequest? {
+        guard entry.kind == .transit,
+              let origin = coordinator.session.selection(for: .origin)?.location,
+              let destination = coordinator.session.selection(for: .destination)?.location else {
+            return nil
+        }
+
+        let selectedType = normalized(coordinator.session.transitType)
+        let routingMode = transitTypes.first { type in
+            normalized(type.canonicalName) == selectedType
+                || type.aliases.contains { normalized($0) == selectedType }
+        }?.routingMode ?? .automobile
+
+        return TimeEditorRouteRequest(
+            origin: origin,
+            destination: destination,
+            routingMode: routingMode
+        )
+    }
+
+    private func presentTimeZone(_ endpoint: EntryTimeZoneEndpoint) {
+        timeZoneDraft = switch endpoint {
+        case .start: coordinator.session.startTimeZoneIdentifier
+        case .end: coordinator.session.endTimeZoneIdentifier
+        }
+        coordinator.present(.timeZone(endpoint))
+    }
+
+    private func timeZoneDate(for endpoint: EntryTimeZoneEndpoint) -> Date {
+        switch endpoint {
+        case .start: coordinator.session.startTime
+        case .end: coordinator.session.endTime
+        }
+    }
+
+    private func setTimeZoneDraft(for endpoint: EntryTimeZoneEndpoint) {
+        switch endpoint {
+        case .start:
+            coordinator.session.startTimeZoneIdentifier = timeZoneDraft
+        case .end:
+            coordinator.session.endTimeZoneIdentifier = timeZoneDraft
+        }
+    }
+
+    private func normalized(_ value: String) -> String {
+        value.folding(
+            options: [.caseInsensitive, .diacriticInsensitive],
+            locale: .current
+        )
+        .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func addPerson() throws {
@@ -353,16 +508,21 @@ struct EntryDetailSheet: View {
         coordinator.goBack(discardingChanges: false)
     }
 
-    private func addPlace(for role: EntryDetailLocationRole) throws {
-        guard let selection = coordinator.session.selection(for: role) else {
-            throw EntryDetailEditingError.missingLocation
+    private var canConfirmCurrentRoute: Bool {
+        if case .addPlace = coordinator.route {
+            return addPlaceModel?.canSave ?? false
         }
-        let place = try EntryDetailEditingService.createPlace(
-            name: coordinator.session.newPlaceName,
-            selection: selection,
-            systemImage: coordinator.session.newPlaceSystemImage,
-            in: modelContext
-        )
+        return true
+    }
+
+    private func addPlace(for role: EntryDetailLocationRole) {
+        guard let addPlaceModel,
+              let place = addPlaceModel.insertPlace(in: modelContext) else {
+            coordinator.errorMessage =
+                addPlaceModel?.saveErrorMessage
+                ?? String(localized: "The place could not be saved.")
+            return
+        }
         coordinator.session.setSelection(
             EntryLocationSelection(place: place),
             for: role
@@ -370,6 +530,7 @@ struct EntryDetailSheet: View {
         coordinator.session.newPlaceName = ""
         coordinator.session.newPlaceSystemImage = .mappin
         coordinator.goBack(discardingChanges: false)
+        self.addPlaceModel = nil
     }
 
     private func deleteEntry() {

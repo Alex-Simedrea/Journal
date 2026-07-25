@@ -58,7 +58,8 @@ private struct EntryLocationSearchSection: View {
                 isResolving: model.isResolving
             ) { suggestion in
                 Task {
-                    if let selection = await model.resolve(suggestion) {
+                    await model.resolve(suggestion)
+                    if let selection = model.selection {
                         onSelect(selection)
                     }
                 }
@@ -81,7 +82,8 @@ private struct EntryCurrentLocationSection: View {
         Section {
             Button {
                 Task {
-                    if let selection = await model.currentLocation() {
+                    await model.useCurrentLocation()
+                    if let selection = model.selection {
                         onSelect(selection)
                     }
                 }

@@ -85,7 +85,7 @@ struct PersonContactTests {
 
     @Test(arguments: [
         ("Alexandru Simedrea", "AS"),
-        ("Prince", "PR"),
+        ("Prince", "P"),
         ("", "?"),
     ])
     func monogram(name: String, expected: String) {

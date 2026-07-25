@@ -83,13 +83,12 @@ struct EntryDetailOverview: View {
     }
 
     private func editMap() {
-        if entry.kind == .placeVisit
-            || entry.workoutDetails?.movementKind != .moving
-        {
-            onPresent(.location(.place))
-        } else {
-            onPresent(.locations)
-        }
+        onPresent(
+            EntryDetailLocationRouting.editRoute(
+                for: entry.kind,
+                workoutMovementKind: entry.workoutDetails?.movementKind
+            )
+        )
     }
 
     private func transitNeedsReview(_ field: TransitReviewField) -> Bool {

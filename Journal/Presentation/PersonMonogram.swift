@@ -15,6 +15,6 @@ enum PersonMonogram {
         if let last = components.last, components.count > 1 {
             return "\(first.prefix(1))\(last.prefix(1))".uppercased()
         }
-        return String(first.prefix(2)).uppercased()
+        return String(first.prefix(1)).uppercased()
     }
 }

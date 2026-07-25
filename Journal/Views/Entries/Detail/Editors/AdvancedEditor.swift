@@ -29,6 +29,6 @@ private struct EntryAdvancedValueCard: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.background, in: .rect(cornerRadius: 16))
+        .dynamicSheetSurface()
     }
 }

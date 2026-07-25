@@ -8,22 +8,15 @@ struct EntryDetailLocationsEditor: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            if entry.kind == .placeVisit
-                || entry.workoutDetails?.movementKind != .moving {
-                EntryLocationHubButton(
-                    role: .place,
-                    selection: session.selection(for: .place),
-                    onSelect: onSelect
+            ForEach(
+                EntryDetailLocationRouting.roles(
+                    for: entry.kind,
+                    workoutMovementKind: entry.workoutDetails?.movementKind
                 )
-            } else {
+            ) { role in
                 EntryLocationHubButton(
-                    role: .origin,
-                    selection: session.selection(for: .origin),
-                    onSelect: onSelect
-                )
-                EntryLocationHubButton(
-                    role: .destination,
-                    selection: session.selection(for: .destination),
+                    role: role,
+                    selection: session.selection(for: role),
                     onSelect: onSelect
                 )
             }
@@ -61,7 +54,7 @@ private struct EntryLocationHubButton: View {
                 DisclosureChevron()
             }
             .padding()
-            .background(.background, in: .rect(cornerRadius: 18))
+            .dynamicSheetSurface()
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
