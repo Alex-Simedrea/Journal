@@ -10,7 +10,10 @@ struct TimelineWorkoutMiniMap: View {
         ZStack(alignment: .bottom) {
             TimelineWorkoutMapContent(
                 occurrence: occurrence,
-                points: routeModel.points
+                points: routeModel.points,
+                lowersStaticPlacePin:
+                    occurrence.snapshot.workoutMovementKind == .staticWorkout
+                    && occurrence.snapshot.people.isEmpty
             )
             .environment(\.colorScheme, .dark)
 
@@ -49,6 +52,7 @@ struct TimelineWorkoutMiniMap: View {
 struct TimelineWorkoutMapContent: View {
     let occurrence: TimelineOccurrence
     let points: [WorkoutCoordinateSnapshot]
+    let lowersStaticPlacePin: Bool
     @State private var position: MapCameraPosition = .automatic
 
     var body: some View {
@@ -110,21 +114,23 @@ struct TimelineWorkoutMapContent: View {
                 position = routePosition(points: points)
             }
         } else if let location = workoutPlace {
+            let visibleDiameter = PlaceMapCamera.visibleDiameter(
+                accuracyRadiusMeters: location.accuracyRadiusMeters,
+                minimum: 320
+            )
+            let featureCoordinate = location.radiusCenterCoordinate
+                ?? location.coordinate
             Map(
                 initialPosition: .region(
                     MKCoordinateRegion(
-                        center: location.radiusCenterCoordinate
-                            ?? location.coordinate,
-                        latitudinalMeters: PlaceMapCamera.visibleDiameter(
-                            accuracyRadiusMeters:
-                                location.accuracyRadiusMeters,
-                            minimum: 320
-                        ),
-                        longitudinalMeters: PlaceMapCamera.visibleDiameter(
-                            accuracyRadiusMeters:
-                                location.accuracyRadiusMeters,
-                            minimum: 320
-                        )
+                        center: lowersStaticPlacePin
+                            ? PlaceMapCamera.center(
+                                northOf: featureCoordinate,
+                                byMeters: visibleDiameter * 0.18
+                            )
+                            : featureCoordinate,
+                        latitudinalMeters: visibleDiameter,
+                        longitudinalMeters: visibleDiameter
                     )
                 )
             ) {

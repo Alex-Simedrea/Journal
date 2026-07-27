@@ -72,4 +72,16 @@ enum PlaceMapCamera {
     ) -> Double {
         max(minimum, max(accuracyRadiusMeters, 0) * 2.6)
     }
+
+    static func center(
+        northOf coordinate: CLLocationCoordinate2D,
+        byMeters meters: Double
+    ) -> CLLocationCoordinate2D {
+        guard meters > 0 else { return coordinate }
+
+        let point = MKMapPoint(coordinate)
+        let offset = meters
+            * MKMapPointsPerMeterAtLatitude(coordinate.latitude)
+        return MKMapPoint(x: point.x, y: point.y - offset).coordinate
+    }
 }

@@ -304,6 +304,32 @@ final class EntryDetailEditSession {
         }
     }
 
+    func movePhotos(
+        _ sourceIDs: [PhotoReference.ID],
+        before destinationID: PhotoReference.ID?
+    ) {
+        let sourceIDs = Set(sourceIDs)
+        guard !sourceIDs.isEmpty else { return }
+
+        let movingPhotos = photoReferences.filter {
+            sourceIDs.contains($0.id)
+        }
+        guard !movingPhotos.isEmpty else { return }
+
+        var remainingPhotos = photoReferences.filter {
+            !sourceIDs.contains($0.id)
+        }
+        let destinationIndex = destinationID.flatMap { destinationID in
+            remainingPhotos.firstIndex { $0.id == destinationID }
+        } ?? remainingPhotos.endIndex
+
+        remainingPhotos.insert(
+            contentsOf: movingPhotos,
+            at: destinationIndex
+        )
+        photoReferences = remainingPhotos
+    }
+
     private func restoreAllDrafts() {
         startTime = baseline.startTime
         endTime = baseline.endTime

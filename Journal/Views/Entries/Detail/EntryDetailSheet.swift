@@ -28,6 +28,7 @@ struct EntryDetailSheet: View {
     @State private var peopleSearchText = ""
     @State private var timeZoneSearchText = ""
     @State private var timeZoneDraft = TimeZone.current.identifier
+    @State private var isPhotoPickerPresented = false
 
     init(entry: LogEntry) {
         self.entry = entry
@@ -86,6 +87,19 @@ struct EntryDetailSheet: View {
                             .buttonStyle(.glass)
                             .buttonBorderShape(.circle)
                             .accessibilityLabel("Add Person")
+                        }
+
+                        if coordinator.route == .photos {
+                            Button {
+                                isPhotoPickerPresented = true
+                            } label: {
+                                Image(systemName: "plus")
+                                    .font(.title2)
+                                    .frame(width: 32, height: 32)
+                            }
+                            .buttonStyle(.glass)
+                            .buttonBorderShape(.circle)
+                            .accessibilityLabel("Add Photos")
                         }
 
                         Button(action: saveCurrentRoute) {
@@ -154,6 +168,9 @@ struct EntryDetailSheet: View {
             if coordinator.route != .timeZone(.start),
                coordinator.route != .timeZone(.end) {
                 timeZoneSearchText = ""
+            }
+            if coordinator.route != .photos {
+                isPhotoPickerPresented = false
             }
             switch coordinator.route {
             case .addPlace, .placeSymbol:
@@ -240,7 +257,10 @@ struct EntryDetailSheet: View {
                 topContentInset: chromeHeight,
                 isScrolled: $contentIsScrolled
             ) {
-                EntryDetailPhotosEditor(session: coordinator.session)
+                EntryDetailPhotosEditor(
+                    session: coordinator.session,
+                    isPickerPresented: $isPhotoPickerPresented
+                )
             }
         case .transitMetadata:
             EntryDetailTransitEditor(

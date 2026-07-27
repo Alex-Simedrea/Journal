@@ -35,6 +35,33 @@ struct EntryEditingTests {
         #expect(reference.addedAt == Date(timeIntervalSince1970: 100))
     }
 
+    @Test("Photo attachments reorder by stable asset identifiers")
+    func photoReferencesReorder() {
+        let references = ["a", "b", "c", "d"].map {
+            PhotoReference(assetLocalIdentifier: $0)
+        }
+        let entry = LogEntry(
+            kind: .transit,
+            photoReferences: references,
+            needsReview: false
+        )
+        let session = EntryDetailEditSession(entry: entry)
+
+        session.movePhotos(["d", "b"], before: "c")
+
+        #expect(
+            session.photoReferences.map(\.assetLocalIdentifier)
+                == ["a", "b", "d", "c"]
+        )
+
+        session.movePhotos(["a", "b"], before: nil)
+
+        #expect(
+            session.photoReferences.map(\.assetLocalIdentifier)
+                == ["d", "c", "a", "b"]
+        )
+    }
+
     @Test("Transit editing updates shared entry fields and details")
     func editTransit() throws {
         let context = try makeContext()

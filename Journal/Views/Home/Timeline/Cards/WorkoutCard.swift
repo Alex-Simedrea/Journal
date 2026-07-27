@@ -2,6 +2,15 @@ import MapKit
 import Photos
 import SwiftUI
 
+enum TimelineWorkoutCardLayout {
+    static func rowCount(
+        movementKind: WorkoutMovementKind?,
+        hasPeople: Bool
+    ) -> Int {
+        movementKind == .staticWorkout && !hasPeople ? 1 : 2
+    }
+}
+
 struct TimelineWorkoutCard: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let occurrence: TimelineOccurrence
@@ -18,9 +27,19 @@ struct TimelineWorkoutCard: View {
         occurrence.snapshot.workoutPlaceLocation?.hasCoordinate == true
     }
 
+    private var rowCount: Int {
+        TimelineWorkoutCardLayout.rowCount(
+            movementKind: occurrence.snapshot.workoutMovementKind,
+            hasPeople: !occurrence.snapshot.people.isEmpty
+        )
+    }
+
+    private var totalHeight: CGFloat {
+        rowHeight * CGFloat(rowCount) + (rowCount == 2 ? 6 : 0)
+    }
+
     var body: some View {
         GeometryReader { proxy in
-            let totalHeight = rowHeight * 2 + 6
             if isMoving {
                 let columnWidth = (proxy.size.width - 12) / 3
                 HStack(spacing: 6) {
@@ -66,14 +85,15 @@ struct TimelineWorkoutCard: View {
                         location: occurrence.snapshot.workoutWeatherLocation,
                         timeZoneIdentifier: occurrence.timeZoneIdentifier,
                         people: occurrence.snapshot.people,
-                        rowHeight: rowHeight
+                        rowHeight: rowHeight,
+                        usesSingleRow: rowCount == 1
                     )
                     .frame(width: columnWidth, height: totalHeight)
                 }
                 .frame(height: totalHeight, alignment: .top)
             }
         }
-        .frame(height: rowHeight * 2 + 6)
+        .frame(height: totalHeight)
     }
 }
 
@@ -108,17 +128,20 @@ struct TimelineWorkoutWeatherAndPeopleColumn: View {
     let timeZoneIdentifier: String
     let people: [TimelinePersonSnapshot]
     let rowHeight: CGFloat
+    let usesSingleRow: Bool
 
     var body: some View {
         VStack(spacing: 6) {
             TimelineWeatherTile(
                 weather: weather,
-                layout: people.isEmpty ? .large : .compact,
+                layout: people.isEmpty && !usesSingleRow ? .large : .compact,
                 location: location,
                 timeZoneIdentifier: timeZoneIdentifier
             )
             .frame(
-                height: people.isEmpty ? rowHeight * 2 + 6 : rowHeight
+                height: people.isEmpty && !usesSingleRow
+                    ? rowHeight * 2 + 6
+                    : rowHeight
             )
 
             if !people.isEmpty {
