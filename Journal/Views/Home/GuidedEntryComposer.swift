@@ -1,3 +1,4 @@
+import Observation
 import SwiftData
 import SwiftUI
 
@@ -180,7 +181,7 @@ private struct GuidedComposerEditor: View {
     }
 }
 
-private struct GuidedComposerSuggestionPanel: View {
+struct GuidedComposerSuggestionPanel: View {
     let model: GuidedEntryComposerModel
 
     var body: some View {
@@ -188,6 +189,7 @@ private struct GuidedComposerSuggestionPanel: View {
             if case .time(let role) = model.activeSlot {
                 GuidedComposerTimePicker(model: model, role: role)
                 Divider()
+                    .padding(.horizontal, 6)
             }
 
             GuidedComposerSuggestionList(model: model)
@@ -223,130 +225,331 @@ private struct GuidedComposerSuggestionPanel: View {
             }
 
             if let message = model.locationStatusMessage {
-                GuidedComposerLocationStatusRow(message: message)
+                Label(message, systemImage: "location.slash")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .accessibilityLabel("Current location unavailable")
+                    .accessibilityValue(message)
             }
         }
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(.separator.opacity(0.75), lineWidth: 0.5)
-        }
-        .shadow(color: .black.opacity(0.24), radius: 14, y: 7)
+        .padding(.horizontal, 8)
+        .glassEffect(
+            .regular.interactive(),
+            in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+        )
         .accessibilityElement(children: .contain)
     }
 }
 
-private struct GuidedComposerLocationStatusRow: View {
-    let message: String
-
-    var body: some View {
-        Label(message, systemImage: "location.slash")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .accessibilityLabel("Current location unavailable")
-            .accessibilityValue(message)
-    }
-}
-
 private struct GuidedComposerSuggestionList: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     let model: GuidedEntryComposerModel
 
+    @Namespace private var selectionNamespace
+    @State private var rowFrames: [String: CGRect] = [:]
+    @State private var hapticTrigger = 0
+    @State private var scrollContentHeight: CGFloat = 220
+    @State private var selectionOpacity = 1.0
+
+    private static let coordinateSpace = "guided-composer-suggestions"
+
     var body: some View {
-        if model.suggestions.count > 6 {
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    suggestionRows
+        VStack(spacing: 0) {
+            if model.suggestions.count > 6 {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(model.suggestions) { suggestion in
+                            GuidedComposerSuggestionButton(
+                                suggestion: suggestion,
+                                isActive:
+                                    suggestion.id
+                                    == model.activeSuggestionID,
+                                selectionOpacity: selectionOpacity,
+                                selectionNamespace: selectionNamespace,
+                                onSelect: { model.accept(suggestion) }
+                            )
+                        }
+                    }
+                    .padding(.vertical, 8)
+                    .onGeometryChange(for: CGFloat.self) { proxy in
+                        proxy.size.height
+                    } action: { height in
+                        guard height > 0,
+                              scrollContentHeight != height else {
+                            return
+                        }
+                        scrollContentHeight = height
+                    }
                 }
+                .frame(height: min(scrollContentHeight, 220))
+                .scrollBounceBehavior(.basedOnSize)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(model.suggestions) { suggestion in
+                        GuidedComposerSuggestionButton(
+                            suggestion: suggestion,
+                            isActive:
+                                suggestion.id == model.activeSuggestionID,
+                            selectionOpacity: selectionOpacity,
+                            selectionNamespace: selectionNamespace,
+                            onSelect: { model.accept(suggestion) }
+                        )
+                        .onGeometryChange(for: CGRect.self) { proxy in
+                            proxy.frame(in: .named(Self.coordinateSpace))
+                        } action: { frame in
+                            guard rowFrames[suggestion.id] != frame else {
+                                return
+                            }
+                            rowFrames[suggestion.id] = frame
+                        }
+                    }
+                }
+                .padding(.vertical, 8)
+                .coordinateSpace(name: Self.coordinateSpace)
+                .contentShape(.rect)
+                .highPriorityGesture(
+                    DragGesture(
+                        minimumDistance: 4,
+                        coordinateSpace: .named(Self.coordinateSpace)
+                    )
+                    .onChanged { value in
+                        selectionOpacity = 1
+                        guard let suggestionID = suggestionID(
+                            at: value.location
+                        ) else {
+                            return
+                        }
+                        activate(suggestionID)
+                    }
+                    .onEnded { value in
+                        guard let suggestionID = suggestionID(
+                            at: value.location
+                        ),
+                              let suggestion = model.suggestions.first(
+                                  where: { $0.id == suggestionID }
+                              ) else {
+                            var transaction = Transaction(animation: nil)
+                            transaction.disablesAnimations = true
+                            withTransaction(transaction) {
+                                selectionOpacity = 0
+                                model.activateFirstSuggestion()
+                            }
+                            withAnimation(
+                                reduceMotion
+                                    ? nil
+                                    : .easeOut(duration: 0.08)
+                            ) {
+                                selectionOpacity = 1
+                            }
+                            return
+                        }
+                        activate(suggestionID)
+                        model.accept(suggestion)
+                    }
+                )
+                .sensoryFeedback(.selection, trigger: hapticTrigger)
+                .animation(
+                    reduceMotion ? nil : .snappy(duration: 0.2),
+                    value: model.activeSuggestionID
+                )
             }
-            .frame(maxHeight: 320)
-            .scrollBounceBehavior(.basedOnSize)
-        } else {
-            VStack(spacing: 0) {
-                suggestionRows
+        }
+        .onChange(
+            of: model.suggestions.map(\.id),
+            initial: true
+        ) { _, ids in
+            if ids.count > 6 {
+                model.activateFirstSuggestion()
+            } else {
+                let visibleIDs = Set(ids)
+                rowFrames = rowFrames.filter { visibleIDs.contains($0.key) }
             }
         }
     }
 
-    @ViewBuilder
-    private var suggestionRows: some View {
-        ForEach(model.suggestions) { suggestion in
-            GuidedComposerSuggestionButton(
-                suggestion: suggestion,
-                isPrimary: suggestion.id == model.suggestions.first?.id,
-                onSelect: { model.accept(suggestion) }
-            )
+    private func suggestionID(at location: CGPoint) -> String? {
+        let rows = model.suggestions.compactMap { suggestion in
+            rowFrames[suggestion.id].map {
+                (suggestion.id, $0)
+            }
         }
+        guard rows.contains(where: { $0.1.contains(location) }) else {
+            return nil
+        }
+        return rows.min {
+            abs($0.1.midY - location.y) < abs($1.1.midY - location.y)
+        }?.0
+    }
+
+    private func activate(_ suggestionID: String) {
+        guard model.activeSuggestionID != suggestionID else { return }
+        model.activateSuggestion(suggestionID)
+        hapticTrigger &+= 1
     }
 }
 
 private struct GuidedComposerSuggestionButton: View {
     let suggestion: ComposerSuggestion
-    let isPrimary: Bool
+    let isActive: Bool
+    let selectionOpacity: Double
+    let selectionNamespace: Namespace.ID
     let onSelect: () -> Void
 
     var body: some View {
+        let subtitle = suggestion.subtitle.flatMap { subtitle in
+            subtitle.localizedCaseInsensitiveCompare(suggestion.title)
+                == .orderedSame ? nil : subtitle
+        }
+
         Button(action: onSelect) {
             HStack(spacing: 10) {
-                Image(systemName: suggestion.systemImage)
-                    .font(.callout.weight(.medium))
-                    .foregroundStyle(isPrimary ? .white : .secondary)
-                    .frame(width: 20)
-
-                Text(suggestion.title)
-                    .font(.callout.weight(isPrimary ? .semibold : .regular))
-                    .foregroundStyle(isPrimary ? .white : .primary)
-                    .lineLimit(1)
-
-                Spacer(minLength: 12)
-
-                if let subtitle = visibleSubtitle {
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(
-                            isPrimary
-                                ? Color.white.opacity(0.78)
-                                : Color.secondary
-                        )
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                Group {
+                    switch iconStyle {
+                    case .place(let symbol):
+                        Image(systemName: suggestion.systemImage)
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(
+                                symbol.primary,
+                                symbol.secondary,
+                                symbol.tertiary
+                            )
+                    case .color(let color):
+                        Image(systemName: suggestion.systemImage)
+                            .symbolRenderingMode(.monochrome)
+                            .foregroundStyle(color)
+                    }
                 }
+                .font(.callout.weight(.medium))
+                .frame(width: 20)
 
-                if isPrimary {
-                    Image(systemName: "return")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.72))
-                        .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(suggestion.title)
+                        .font(.callout)
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Color.clear
+                    .frame(width: 12, height: 12)
+                    .accessibilityHidden(true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.vertical, subtitle == nil ? 9 : 7)
             .contentShape(.rect)
-            .background(
-                isPrimary ? Color.accentColor : Color.clear
-            )
-            .overlay(alignment: .bottom) {
-                if !isPrimary {
-                    Divider()
-                        .padding(.leading, 40)
+            .background {
+                if isActive {
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .fill(.primary.opacity(0.3))
+                        .overlay(alignment: .trailing) {
+                            Image(systemName: "return")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                                .padding(.trailing, 10)
+                                .accessibilityHidden(true)
+                        }
+                        .matchedGeometryEffect(
+                            id: "active-suggestion",
+                            in: selectionNamespace
+                        )
+                        .opacity(selectionOpacity)
                 }
             }
         }
-        .buttonStyle(.plain)
-        .accessibilityHint(isPrimary ? "Top autocomplete result" : "")
+        .buttonStyle(
+            GuidedComposerSuggestionButtonStyle(isActive: isActive)
+        )
+        .accessibilityAddTraits(isActive ? .isSelected : [])
+        .accessibilityHint(
+            isActive ? "Selected autocomplete result" : "Autocomplete result"
+        )
     }
 
-    private var visibleSubtitle: String? {
-        guard let subtitle = suggestion.subtitle,
-              subtitle.localizedCaseInsensitiveCompare(suggestion.title)
-                != .orderedSame else {
-            return nil
+    private var iconStyle: IconStyle {
+        switch suggestion.kind {
+        case .addPerson:
+            return .color(.blue)
+        case .semanticSplit:
+            return .color(.secondary)
+        case .macro(let tokens, _):
+            if let leading = tokens.first(where: {
+                if case .leading = $0.value { true } else { false }
+            }) {
+                return style(for: leading)
+            }
+            let values = tokens.filter {
+                if case .connector = $0.value { false } else { true }
+            }
+            if !values.isEmpty,
+               values.allSatisfy({ token in
+                   switch token.value {
+                   case .time, .duration: true
+                   default: false
+                   }
+               }) {
+                return .color(.orange)
+            }
+            return .color(.primary)
+        case .value(let tokens, _):
+            return tokens.first.map(style(for:)) ?? .color(.primary)
         }
-        return subtitle
+    }
+
+    private func style(for token: ComposerToken) -> IconStyle {
+        switch token.value {
+        case .leading(.transit(let canonicalName)):
+            .color(
+                TransitPresentationCatalog.presentation(
+                    for: canonicalName
+                ).color
+            )
+        case .leading(.placeVisit):
+            .color(.indigo)
+        case .location(let location, _):
+            .place(PlaceSymbols.symbol(for: location.systemImage))
+        case .time, .duration:
+            .color(.orange)
+        case .person:
+            .color(.blue)
+        case .connector:
+            .color(.secondary)
+        }
+    }
+
+    private enum IconStyle {
+        case place(PlaceSymbol)
+        case color(Color)
+    }
+}
+
+private struct GuidedComposerSuggestionButtonStyle: ButtonStyle {
+    let isActive: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background {
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .fill(.secondary.opacity(0.16))
+                    .opacity(configuration.isPressed && !isActive ? 1 : 0)
+            }
+            .animation(
+                .easeOut(duration: 0.06),
+                value: configuration.isPressed
+            )
     }
 }
 

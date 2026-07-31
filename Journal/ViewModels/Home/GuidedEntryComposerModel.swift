@@ -10,6 +10,7 @@ final class GuidedEntryComposerModel {
     var editorText = AttributedString()
     var selection = AttributedTextSelection()
     private(set) var suggestions: [ComposerSuggestion] = []
+    private(set) var activeSuggestionID: String?
     private(set) var activeSlot: ComposerSlot = .leading
     private(set) var activeQuery = ""
     private(set) var draft = ComposerDraft()
@@ -93,6 +94,8 @@ final class GuidedEntryComposerModel {
     private var suggestionReplacementRanges: [String: Range<Int>] = [:]
     @ObservationIgnored
     private var pendingPersonReplacementRange: Range<Int>?
+    @ObservationIgnored
+    private var activeSuggestionWasExplicitlySelected = false
 
     var canSubmit: Bool {
         draft.canSubmit
@@ -288,6 +291,7 @@ final class GuidedEntryComposerModel {
         if selectedWholeToken {
             activeQuery = ""
         }
+        activeSuggestionWasExplicitlySelected = false
         updateCurrentLocationNeed()
         schedulePlaceSearchIfNeeded()
         scheduleRouteSuggestions()
@@ -300,8 +304,25 @@ final class GuidedEntryComposerModel {
     }
 
     func acceptTopSuggestion() {
-        guard let suggestion = suggestions.first else { return }
+        let suggestion = activeSuggestionID.flatMap { activeID in
+            suggestions.first { $0.id == activeID }
+        } ?? suggestions.first
+        guard let suggestion else { return }
         accept(suggestion)
+    }
+
+    func activateSuggestion(_ suggestionID: String) {
+        guard activeSuggestionID != suggestionID,
+              suggestions.contains(where: { $0.id == suggestionID }) else {
+            return
+        }
+        activeSuggestionID = suggestionID
+        activeSuggestionWasExplicitlySelected = true
+    }
+
+    func activateFirstSuggestion() {
+        activeSuggestionID = suggestions.first?.id
+        activeSuggestionWasExplicitlySelected = false
     }
 
     func accept(_ suggestion: ComposerSuggestion) {
@@ -651,6 +672,11 @@ final class GuidedEntryComposerModel {
             }
             return $0.score > $1.score
         }
+        if !activeSuggestionWasExplicitlySelected
+            || !suggestions.contains(where: { $0.id == activeSuggestionID }) {
+            activeSuggestionID = suggestions.first?.id
+            activeSuggestionWasExplicitlySelected = false
+        }
     }
 
     private func targetedSuggestions(
@@ -865,18 +891,15 @@ final class GuidedEntryComposerModel {
               let connectorIndex = draft.tokens.firstIndex(where: {
                   $0.id == connector.id
               }),
-              let nextRole = draft.tokens[
+              draft.tokens[
                   draft.tokens.index(after: connectorIndex)...
-              ].first(where: { $0.role != .connector })?.role else {
+              ].contains(where: { $0.role != .connector }) else {
             return nil
         }
-        let previousRole = draft.tokens[..<connectorIndex].last {
-            $0.role != .connector
-        }?.role
         return GuidedComposerGrammar.replacementOptions(
             entryKind: entryKind,
-            previousRole: previousRole,
-            nextRole: nextRole,
+            tokens: draft.tokens,
+            connectorIndex: connectorIndex,
             currentDisplayText: connector.displayText
         )
     }
@@ -915,7 +938,8 @@ final class GuidedEntryComposerModel {
     }
 
     private var mapKitConnectorSuggestion: ComposerSuggestion? {
-        guard activeSlot == .connector,
+        guard let entryKind = draft.entryKind,
+              activeSlot == .connector,
               activeQuery.trimmingCharacters(
                   in: .whitespacesAndNewlines
               ).isEmpty,
@@ -931,6 +955,14 @@ final class GuidedEntryComposerModel {
             role = .start
             connector = .from
         } else {
+            return nil
+        }
+        guard GuidedComposerGrammar.legalConnectors(
+            entryKind: entryKind,
+            tokens: draft.tokens
+        ).contains(where: {
+            $0.connector == connector && $0.slot == .time(role)
+        }) else {
             return nil
         }
         guard let timeSuggestion = mapKitTimeSuggestion(
@@ -1532,6 +1564,7 @@ final class GuidedEntryComposerModel {
         preferredSelectionOffset: Int?,
         selectionSnapshot: ComposerSelectionSnapshot? = nil
     ) {
+        activeSuggestionWasExplicitlySelected = false
         rawEditorString = rawText
 
         let previousTokens = draft.tokens
@@ -2036,6 +2069,27 @@ final class GuidedEntryComposerModel {
     }
 
 }
+
+#if DEBUG
+extension GuidedEntryComposerModel {
+    static func preview(
+        suggestions: [ComposerSuggestion],
+        activeSlot: ComposerSlot = .connector,
+        isSearchingPlaces: Bool = false,
+        isCalculatingRoutes: Bool = false,
+        locationStatusMessage: String? = nil
+    ) -> GuidedEntryComposerModel {
+        let model = GuidedEntryComposerModel()
+        model.suggestions = suggestions
+        model.activeSuggestionID = suggestions.first?.id
+        model.activeSlot = activeSlot
+        model.isSearchingPlaces = isSearchingPlaces
+        model.isCalculatingRoutes = isCalculatingRoutes
+        model.locationStatusMessage = locationStatusMessage
+        return model
+    }
+}
+#endif
 
 private struct ComposerSelectionSnapshot {
     let range: Range<Int>

@@ -7,80 +7,138 @@ struct GuidedComposerConnectorOption: Equatable {
 }
 
 enum GuidedComposerGrammar {
+    private struct ClauseState {
+        let previousRole: ComposerValueRole?
+        let hasPeopleClause: Bool
+        let hasVisitLocation: Bool
+        let hasOrigin: Bool
+        let hasDestination: Bool
+        let hasExplicitStart: Bool
+        let hasExplicitEnd: Bool
+        let hasDuration: Bool
+
+        /// An explicit pair or a duration anchored to either boundary already
+        /// determines the complete interval. Derived draft times must not be
+        /// mistaken for additional explicit clauses when deciding grammar.
+        var hasResolvedInterval: Bool {
+            (hasExplicitStart && hasExplicitEnd)
+                || (hasDuration && (hasExplicitStart || hasExplicitEnd))
+        }
+
+        var needsStartBoundary: Bool {
+            !hasExplicitStart && !hasResolvedInterval
+        }
+
+        var needsEndBoundary: Bool {
+            !hasExplicitEnd && !hasResolvedInterval
+        }
+
+        init(tokens: [ComposerToken]) {
+            previousRole = tokens.reversed().first {
+                if case .connector = $0.value { return false }
+                return true
+            }?.role
+
+            var visitLocation = false
+            var origin = false
+            var destination = false
+            var explicitStart = false
+            var explicitEnd = false
+            var duration = false
+            var peopleClause = false
+            for token in tokens {
+                switch token.value {
+                case .location(_, .visit):
+                    visitLocation = true
+                case .location(_, .origin):
+                    origin = true
+                case .location(_, .destination):
+                    destination = true
+                case .time(_, .start):
+                    explicitStart = true
+                case .time(_, .end):
+                    explicitEnd = true
+                case .duration:
+                    duration = true
+                case .connector(.with):
+                    peopleClause = GuidedComposerNormalization.text(
+                        token.displayText
+                    ) == ComposerConnector.with.rawValue || peopleClause
+                case .leading, .connector, .person:
+                    break
+                }
+            }
+            hasVisitLocation = visitLocation
+            hasOrigin = origin
+            hasDestination = destination
+            hasExplicitStart = explicitStart
+            hasExplicitEnd = explicitEnd
+            hasDuration = duration
+            hasPeopleClause = peopleClause
+        }
+    }
+
     static func legalConnectors(
         entryKind: ComposerEntryKind,
         tokens: [ComposerToken]
     ) -> [(connector: ComposerConnector, slot: ComposerSlot)] {
-        let draft = ComposerDraft(tokens: tokens)
-        let previousRole = tokens.reversed().first {
-            if case .connector = $0.value { return false }
-            return true
-        }?.role
-        let hasPeopleClause = tokens.contains { token in
-            guard case .connector(.with) = token.value else {
-                return false
-            }
-            return GuidedComposerNormalization.text(token.displayText)
-                == ComposerConnector.with.rawValue
-        }
+        let state = ClauseState(tokens: tokens)
 
         switch entryKind {
         case .placeVisit:
             var result: [(ComposerConnector, ComposerSlot)] = []
-            let needsStart = draft.startTime == nil
-            let needsEnd = draft.endTime == nil
-            if draft.location(.visit) == nil {
+            if !state.hasVisitLocation {
                 result.append((.at, .location(.visit)))
-            } else if needsStart {
+            } else if state.needsStartBoundary {
                 result.append((.at, .time(.start)))
             }
-            if needsStart {
+            if state.needsStartBoundary {
                 result.append((.from, .time(.start)))
                 result.append((.since, .time(.start)))
             }
-            if needsEnd {
+            if state.needsEndBoundary {
                 result.append((.to, .time(.end)))
                 result.append((.until, .time(.end)))
             }
-            if draft.duration == nil,
-               draft.location(.visit) != nil,
-               needsStart || needsEnd {
+            if !state.hasDuration,
+               !(state.hasExplicitStart && state.hasExplicitEnd),
+               state.hasVisitLocation
+                   || state.hasExplicitStart
+                   || state.hasExplicitEnd {
                 result.append((.forDuration, .duration))
             }
-            if !hasPeopleClause {
+            if !state.hasPeopleClause {
                 result.append((.with, .person))
             }
             return deduplicated(result)
 
         case .transit:
             var result: [(ComposerConnector, ComposerSlot)] = []
-            let hasOrigin = draft.location(.origin) != nil
-            let hasDestination = draft.location(.destination) != nil
-            let needsStart = draft.startTime == nil
-            let needsEnd = draft.endTime == nil
-            if !hasOrigin {
+            if !state.hasOrigin {
                 result.append((.from, .location(.origin)))
-            } else if hasDestination, needsStart {
+            } else if state.hasDestination, state.needsStartBoundary {
                 result.append((.from, .time(.start)))
             }
-            if !hasDestination {
+            if !state.hasDestination {
                 result.append((.to, .location(.destination)))
-            } else if hasOrigin, needsEnd {
+            } else if state.hasOrigin, state.needsEndBoundary {
                 result.append((.to, .time(.end)))
             }
-            if previousRole == .location(.origin), needsStart {
+            if state.previousRole == .location(.origin),
+               state.needsStartBoundary {
                 result.append((.at, .time(.start)))
             }
-            if previousRole == .location(.destination), needsEnd {
+            if state.previousRole == .location(.destination),
+               state.needsEndBoundary {
                 result.append((.at, .time(.end)))
             }
-            if draft.duration == nil,
-               hasOrigin,
-               hasDestination,
-               needsStart != needsEnd {
+            if !state.hasDuration,
+               state.hasOrigin,
+               state.hasDestination,
+               state.hasExplicitStart != state.hasExplicitEnd {
                 result.append((.forDuration, .duration))
             }
-            if !hasPeopleClause {
+            if !state.hasPeopleClause {
                 result.append((.with, .person))
             }
             return deduplicated(result)
@@ -98,54 +156,19 @@ enum GuidedComposerGrammar {
 
     static func replacementOptions(
         entryKind: ComposerEntryKind,
-        previousRole: ComposerValueRole?,
-        nextRole: ComposerValueRole,
+        tokens: [ComposerToken],
+        connectorIndex: Int,
         currentDisplayText: String
     ) -> [GuidedComposerConnectorOption] {
+        guard tokens.indices.contains(connectorIndex),
+              case .connector = tokens[connectorIndex].value,
+              let nextRole = tokens[tokens.index(after: connectorIndex)...]
+                .first(where: { $0.role != .connector })?.role else {
+            return []
+        }
+
         let options: [GuidedComposerConnectorOption]
-        switch nextRole {
-        case .location(.visit):
-            options = [option(.at, slot: .location(.visit))]
-        case .location(.origin):
-            options = [option(.from, slot: .location(.origin))]
-        case .location(.destination):
-            options = [option(.to, slot: .location(.destination))]
-        case .time(.start):
-            switch entryKind {
-            case .placeVisit:
-                options = [
-                    option(.at, slot: .time(.start)),
-                    option(.from, slot: .time(.start)),
-                    option(.since, slot: .time(.start)),
-                ]
-            case .transit:
-                options = [
-                    option(.from, slot: .time(.start)),
-                ] + (
-                    previousRole == .location(.origin)
-                        ? [option(.at, slot: .time(.start))]
-                        : []
-                )
-            }
-        case .time(.end):
-            switch entryKind {
-            case .placeVisit:
-                options = [
-                    option(.to, slot: .time(.end)),
-                    option(.until, slot: .time(.end)),
-                ]
-            case .transit:
-                options = [
-                    option(.to, slot: .time(.end)),
-                ] + (
-                    previousRole == .location(.destination)
-                        ? [option(.at, slot: .time(.end))]
-                        : []
-                )
-            }
-        case .duration:
-            options = [option(.forDuration, slot: .duration)]
-        case .person:
+        if nextRole == .person {
             if GuidedComposerNormalization.text(currentDisplayText)
                 == ComposerConnector.with.rawValue {
                 options = [option(.with, slot: .person)]
@@ -158,8 +181,15 @@ enum GuidedComposerGrammar {
                     )
                 }
             }
-        case .leading, .connector:
-            options = []
+        } else {
+            let prefix = Array(tokens[..<connectorIndex])
+            options = legalConnectors(
+                entryKind: entryKind,
+                tokens: prefix
+            ).compactMap { candidate in
+                guard candidate.slot == nextRole.slot else { return nil }
+                return option(candidate.connector, slot: candidate.slot)
+            }
         }
 
         let normalizedCurrent = GuidedComposerNormalization.text(

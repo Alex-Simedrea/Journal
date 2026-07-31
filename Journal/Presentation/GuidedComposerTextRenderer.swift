@@ -15,7 +15,7 @@ enum GuidedComposerTextRenderer {
                   ) else {
                 continue
             }
-            result[range].foregroundColor = color(for: token.role)
+            result[range].foregroundColor = color(for: token)
         }
         return result
     }
@@ -38,15 +38,22 @@ enum GuidedComposerTextRenderer {
         return lower..<upper
     }
 
-    private static func color(
-        for role: ComposerValueRole
-    ) -> Color {
-        switch role {
-        case .leading: .purple
-        case .location: .green
-        case .time, .duration: .orange
-        case .person: .pink
-        case .connector: .secondary
+    private static func color(for token: ComposerToken) -> Color {
+        switch token.value {
+        case .leading(.transit(let canonicalName)):
+            TransitPresentationCatalog.presentation(
+                for: canonicalName
+            ).color
+        case .leading(.placeVisit):
+            .indigo
+        case .location(let location, _):
+            PlaceSymbols.symbol(for: location.systemImage).primary
+        case .time, .duration:
+            .orange
+        case .person:
+            .blue
+        case .connector:
+            .secondary
         }
     }
 }

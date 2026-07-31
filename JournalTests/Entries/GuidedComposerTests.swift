@@ -416,6 +416,48 @@ struct GuidedComposerTests {
         #expect(model.activeQuery.isEmpty)
     }
 
+    @Test("The first suggestion is active and Return accepts a moved selection")
+    func activeSuggestionSelection() throws {
+        let context = try makeContext()
+        let model = GuidedEntryComposerModel()
+        model.prepare(
+            selectedDay: TimelineDayKey(year: 2026, month: 7, day: 18),
+            places: [],
+            people: [],
+            transitTypes: [
+                TransitType(canonicalName: "Bolt", aliases: ["bolt"]),
+                TransitType(canonicalName: "Uber", aliases: ["uber"]),
+            ],
+            modelContext: context
+        )
+
+        model.editorText = AttributedString("bolt")
+        model.editorTextDidChange()
+        #expect(model.activeSuggestionID == model.suggestions.first?.id)
+
+        let relatedUber = try #require(
+            model.suggestions.first { $0.title == "Uber" }
+        )
+        model.activateSuggestion(relatedUber.id)
+        model.activateFirstSuggestion()
+        #expect(model.activeSuggestionID == model.suggestions.first?.id)
+
+        model.activateSuggestion(relatedUber.id)
+        model.editorText = AttributedString("bol")
+        model.editorTextDidChange()
+        #expect(model.activeSuggestionID == model.suggestions.first?.id)
+
+        model.editorText = AttributedString("")
+        model.editorTextDidChange()
+        let uber = try #require(
+            model.suggestions.first { $0.title == "Uber" }
+        )
+        model.activateSuggestion(uber.id)
+        model.acceptTopSuggestion()
+
+        #expect(model.draft.entryKind == .transit(canonicalName: "Uber"))
+    }
+
     @Test("Only named Homes are ranked and nearby alternatives remain visible")
     func closestHomeRanking() {
         let target = location("AFI", latitude: 45.66, longitude: 25.61)
@@ -2083,6 +2125,96 @@ struct GuidedComposerTests {
         #expect(model.canSubmit)
     }
 
+    @Test("Visit duration is legal after a start even before its place")
+    func visitDurationDoesNotDependOnLocation() throws {
+        let context = try makeContext()
+        let beach = Place(
+            name: "Beach",
+            location: Location(latitude: 44.10, longitude: 28.64)
+        )
+        let model = GuidedEntryComposerModel()
+        model.prepare(
+            selectedDay: TimelineDayKey(year: 2026, month: 7, day: 18),
+            places: [beach],
+            people: [],
+            transitTypes: [],
+            modelContext: context
+        )
+
+        let sentence = "Stay from 12:00 "
+        model.editorText = AttributedString(sentence)
+        model.editorTextDidChange()
+
+        #expect(model.draft.time(.start) != nil)
+        #expect(model.draft.location(.visit) == nil)
+        #expect(model.suggestions.contains { $0.title == "for" })
+
+        let connectors = GuidedComposerGrammar.legalConnectors(
+            entryKind: .placeVisit(description: nil),
+            tokens: model.draft.tokens
+        )
+        #expect(connectors.contains {
+            $0.connector == .forDuration && $0.slot == .duration
+        })
+
+        let completeSentence = "Stay from 12:00 for 2h at Beach"
+        model.editorText = AttributedString(completeSentence)
+        model.editorTextDidChange()
+        #expect(model.isSyntaxValid)
+        #expect(model.canSubmit)
+        let resolvedStart = try #require(model.draft.startTime?.date)
+        #expect(
+            model.draft.endTime?.date
+                == resolvedStart.addingTimeInterval(7_200)
+        )
+    }
+
+    @Test("Visit start connector replacements respect the clause prefix")
+    func earlyVisitStartConnectorDoesNotOfferAt() throws {
+        let context = try makeContext()
+        let beach = Place(
+            name: "Beach",
+            location: Location(latitude: 44.10, longitude: 28.64)
+        )
+        let model = GuidedEntryComposerModel()
+        model.prepare(
+            selectedDay: TimelineDayKey(year: 2026, month: 7, day: 18),
+            places: [beach],
+            people: [],
+            transitTypes: [],
+            modelContext: context
+        )
+        let sentence = "Stay from 12:00 at Beach"
+        model.editorText = AttributedString(sentence)
+        model.editorTextDidChange()
+
+        let fromRange = try #require(sentence.range(of: "from"))
+        let offset = sentence.distance(
+            from: sentence.startIndex,
+            to: fromRange.lowerBound
+        )
+        let selectionIndex = model.editorText.characters.index(
+            model.editorText.startIndex,
+            offsetBy: offset + 1
+        )
+        model.selection = AttributedTextSelection(
+            insertionPoint: selectionIndex
+        )
+        model.selectionDidChange()
+
+        #expect(Set(model.suggestions.map(\.title)) == ["from", "since"])
+        #expect(!model.suggestions.contains { $0.title == "at" })
+
+        model.accept(try #require(
+            model.suggestions.first { $0.title == "since" }
+        ))
+        #expect(
+            String(model.editorText.characters)
+                == "Stay since 12:00 at Beach"
+        )
+        #expect(model.isSyntaxValid)
+    }
+
     @Test("Selecting a people separator offers comma, and, and ampersand")
     func selectedPeopleSeparatorShowsAlternatives() throws {
         let context = try makeContext()
@@ -3083,6 +3215,14 @@ struct GuidedComposerTests {
         }
 
         let visitKind = ComposerEntryKind.placeVisit(description: nil)
+        let visitWithStartBeforePlace = connectors(
+            kind: visitKind,
+            tokens: [visitLeading, start]
+        )
+        #expect(visitWithStartBeforePlace.contains(.at))
+        #expect(visitWithStartBeforePlace.contains(.forDuration))
+        #expect(!visitWithStartBeforePlace.contains(.from))
+
         let visitAtPlace = connectors(
             kind: visitKind,
             tokens: [visitLeading, visitLocation]
@@ -3141,6 +3281,100 @@ struct GuidedComposerTests {
             tokens: transitEndpoints + [start, duration]
         )
         #expect(transitWithDerivedEnd == Set([.with]))
+    }
+
+    @Test("Connector grammar is stable across every visit interval state")
+    func visitConnectorStateSpace() {
+        let home = location(
+            "Home",
+            latitude: 45.65,
+            longitude: 25.59
+        )
+        let startValue = ComposerTimeValue(
+            date: date("2026-07-18T12:00:00+03:00"),
+            timeZoneIdentifier: zone.identifier,
+            source: .explicit
+        )
+        let endValue = ComposerTimeValue(
+            date: date("2026-07-18T13:00:00+03:00"),
+            timeZoneIdentifier: zone.identifier,
+            source: .explicit
+        )
+        let leading = token(
+            "Stay",
+            .leading(.placeVisit(description: nil))
+        )
+        let place = token("Home", .location(home, .visit))
+        let start = token("12:00", .time(startValue, .start))
+        let end = token("13:00", .time(endValue, .end))
+        let duration = token(
+            "1 hr",
+            .duration(
+                ComposerDurationValue(
+                    interval: 3_600,
+                    source: .manualOverride
+                )
+            )
+        )
+
+        func key(
+            _ connector: ComposerConnector,
+            _ slot: ComposerSlot
+        ) -> String {
+            "\(connector.rawValue)|\(slot)"
+        }
+
+        for hasPlace in [false, true] {
+            for hasStart in [false, true] {
+                for hasEnd in [false, true] {
+                    for hasDuration in [false, true] {
+                        var tokens = [leading]
+                        if hasStart { tokens.append(start) }
+                        if hasEnd { tokens.append(end) }
+                        if hasDuration { tokens.append(duration) }
+                        if hasPlace { tokens.append(place) }
+
+                        let actual = Set(
+                            GuidedComposerGrammar.legalConnectors(
+                                entryKind: .placeVisit(description: nil),
+                                tokens: tokens
+                            ).map { key($0.connector, $0.slot) }
+                        )
+                        let intervalResolved = (hasStart && hasEnd)
+                            || (hasDuration && (hasStart || hasEnd))
+                        let needsStart = !hasStart && !intervalResolved
+                        let needsEnd = !hasEnd && !intervalResolved
+                        var expected = Set([key(.with, .person)])
+
+                        if hasPlace {
+                            if needsStart {
+                                expected.insert(key(.at, .time(.start)))
+                            }
+                        } else {
+                            expected.insert(key(.at, .location(.visit)))
+                        }
+                        if needsStart {
+                            expected.insert(key(.from, .time(.start)))
+                            expected.insert(key(.since, .time(.start)))
+                        }
+                        if needsEnd {
+                            expected.insert(key(.to, .time(.end)))
+                            expected.insert(key(.until, .time(.end)))
+                        }
+                        if !hasDuration,
+                           !(hasStart && hasEnd),
+                           hasPlace || hasStart || hasEnd {
+                            expected.insert(key(.forDuration, .duration))
+                        }
+
+                        #expect(
+                            actual == expected,
+                            "place=\(hasPlace), start=\(hasStart), end=\(hasEnd), duration=\(hasDuration)"
+                        )
+                    }
+                }
+            }
+        }
     }
 
     @Test("A duration after two explicit transit times is invalid")
