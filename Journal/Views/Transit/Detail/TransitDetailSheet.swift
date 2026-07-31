@@ -58,6 +58,8 @@ struct TransitDetailSheet: View {
 
                 if let rawInput = entry.rawInputString {
                     EntryOriginalInputSection(rawInput: rawInput)
+                }
+                if entry.hasModelExchange {
                     EntryModelExchangeSection(
                         instructions: entry.modelInstructions,
                         prompt: entry.modelPrompt,

@@ -50,8 +50,17 @@ struct PlaceVisitDetailSheet: View {
 
                 EntryPhotoAttachmentsSection(entry: entry)
 
+                if let description = entry.placeVisitDetails?.description,
+                   !description.trimmingCharacters(
+                       in: .whitespacesAndNewlines
+                   ).isEmpty {
+                    PlaceVisitDescriptionSection(description: description)
+                }
+
                 if let rawInput = entry.rawInputString {
                     EntryOriginalInputSection(rawInput: rawInput)
+                }
+                if entry.hasModelExchange {
                     EntryModelExchangeSection(
                         instructions: entry.modelInstructions,
                         prompt: entry.modelPrompt,
@@ -101,6 +110,16 @@ struct PlaceVisitDetailSheet: View {
                     dismiss()
                 }
             }
+        }
+    }
+}
+
+private struct PlaceVisitDescriptionSection: View {
+    let description: String
+
+    var body: some View {
+        Section("Description") {
+            Text(description)
         }
     }
 }

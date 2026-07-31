@@ -13,6 +13,10 @@ final class ManualPersonEditorModel {
     var name = ""
     var errorMessage: String?
 
+    init(name: String = "") {
+        self.name = name
+    }
+
     var canSave: Bool {
         !trimmedName.isEmpty
     }

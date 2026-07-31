@@ -148,3 +148,12 @@ final class LogEntry {
         )
     }
 }
+
+extension LogEntry {
+    var hasModelExchange: Bool {
+        modelInstructions != nil
+            || modelPrompt != nil
+            || modelToolTranscript != nil
+            || modelResponse != nil
+    }
+}

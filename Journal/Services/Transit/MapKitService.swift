@@ -87,9 +87,17 @@ nonisolated enum TransitMapKitService {
         var results: [TransitMapSearchResult] = []
 
         for completion in completions.prefix(limit) {
+            try Task.checkCancellation()
             let request = MKLocalSearch.Request(completion: completion)
-            guard let item = try await MKLocalSearch(request: request)
-                .start().mapItems.first else {
+            let response: MKLocalSearch.Response
+            do {
+                response = try await MKLocalSearch(request: request).start()
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                continue
+            }
+            guard let item = response.mapItems.first else {
                 continue
             }
             let coordinate = item.location.coordinate
@@ -222,9 +230,16 @@ private final class TransitAutocompleteRequest: NSObject,
     }
 
     func completions(for query: String) async throws -> [MKLocalSearchCompletion] {
-        try await withCheckedThrowingContinuation { continuation in
-            self.continuation = continuation
-            completer.queryFragment = query
+        try Task.checkCancellation()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                self.continuation = continuation
+                completer.queryFragment = query
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.cancel()
+            }
         }
     }
 
@@ -238,6 +253,12 @@ private final class TransitAutocompleteRequest: NSObject,
         didFailWithError error: any Error
     ) {
         continuation?.resume(throwing: error)
+        continuation = nil
+    }
+
+    private func cancel() {
+        completer.queryFragment = ""
+        continuation?.resume(throwing: CancellationError())
         continuation = nil
     }
 }

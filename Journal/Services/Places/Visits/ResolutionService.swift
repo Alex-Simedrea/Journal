@@ -6,6 +6,7 @@
 import Foundation
 
 struct ResolvedPlaceVisitDraft {
+    var description: String? = nil
     var place: Place?
     var location: Location?
     var placeRawText: String?

@@ -61,6 +61,7 @@ struct HomeScreen: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             HomeEntryComposer(
                 selectedDay: selectedDay,
+                timelineRevision: presentation.timelineRevision,
                 onEntryChanged: reloadTimelineAndRoutes
             )
         }

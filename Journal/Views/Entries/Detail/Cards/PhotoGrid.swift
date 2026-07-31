@@ -1,9 +1,15 @@
 import MapKit
 import Photos
+import QuickLook
 import SwiftUI
 
 struct EntryDetailPhotoGrid: View {
     let references: [PhotoReference]
+    @State private var previewURL: URL?
+    @State private var previewFailure: PhotoPreviewFailure?
+    @State private var showsPreviewFailure = false
+    @State private var previewTask: Task<Void, Never>?
+    @State private var previewRequestID = UUID()
 
     private let columns = [
         GridItem(.flexible(), spacing: 10),
@@ -20,13 +26,83 @@ struct EntryDetailPhotoGrid: View {
         } else {
             LazyVGrid(columns: columns, spacing: 10) {
                 ForEach(references) { reference in
-                    EntryDetailPhotoThumbnail(reference: reference)
-                        .aspectRatio(1, contentMode: .fit)
-                        .clipShape(.rect(cornerRadius: 22))
+                    Button {
+                        preparePreview(for: reference)
+                    } label: {
+                        EntryDetailPhotoThumbnail(reference: reference)
+                            .aspectRatio(1, contentMode: .fit)
+                            .clipShape(.rect(cornerRadius: 22))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Preview photo")
                 }
+            }
+            .quickLookPreview($previewURL)
+            .alert(
+                "Unable to Preview Photo",
+                isPresented: $showsPreviewFailure,
+                presenting: previewFailure
+            ) { _ in
+                Button("OK", role: .cancel) {}
+            } message: { failure in
+                Text(failure.message)
+            }
+            .onChange(of: previewURL) { oldValue, newValue in
+                if oldValue != newValue, let oldValue {
+                    PhotoLibraryService.removeTemporaryPreview(at: oldValue)
+                }
+            }
+            .onDisappear(perform: discardPreview)
+        }
+    }
+
+    private func preparePreview(for reference: PhotoReference) {
+        previewTask?.cancel()
+        previewRequestID = UUID()
+        let requestID = previewRequestID
+        previewFailure = nil
+        showsPreviewFailure = false
+
+        previewTask = Task {
+            do {
+                let url = try await PhotoLibraryService
+                    .temporaryPreviewURL(
+                        for: reference.assetLocalIdentifier
+                    )
+                guard !Task.isCancelled,
+                      previewRequestID == requestID else {
+                    PhotoLibraryService.removeTemporaryPreview(at: url)
+                    return
+                }
+                previewTask = nil
+                previewURL = url
+            } catch {
+                guard !Task.isCancelled,
+                      previewRequestID == requestID else {
+                    return
+                }
+                previewTask = nil
+                previewFailure = PhotoPreviewFailure(
+                    message: error.localizedDescription
+                )
+                showsPreviewFailure = true
             }
         }
     }
+
+    private func discardPreview() {
+        previewTask?.cancel()
+        previewTask = nil
+        previewRequestID = UUID()
+        if let previewURL {
+            PhotoLibraryService.removeTemporaryPreview(at: previewURL)
+            self.previewURL = nil
+        }
+    }
+}
+
+private struct PhotoPreviewFailure {
+    let message: String
 }
 
 struct EntryDetailPhotoThumbnail: View {

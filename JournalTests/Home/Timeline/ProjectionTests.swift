@@ -27,20 +27,28 @@ struct TimelineProjectionTests {
             configurations: [configuration]
         )
         let context = ModelContext(container)
-        context.insert(
-            LogEntry(
-                kind: .transit,
-                creationTimeZoneIdentifier: bucharest,
-                needsReview: true
-            )
+        let entry = LogEntry(
+            kind: .transit,
+            creationTimeZoneIdentifier: bucharest,
+            needsReview: true
         )
+        context.insert(entry)
         try context.save()
 
         let presentation = HomePresentationModel()
+        #expect(presentation.timelineRevision == 0)
         presentation.reloadTimeline(in: context)
 
         #expect(presentation.timelineErrorMessage == nil)
         #expect(presentation.reviewOccurrences.count == 1)
+        #expect(presentation.timelineRevision == 1)
+
+        context.delete(entry)
+        try context.save()
+        presentation.reloadTimeline(in: context)
+
+        #expect(presentation.reviewOccurrences.isEmpty)
+        #expect(presentation.timelineRevision == 2)
     }
 
     @Test("Same-zone intervals appear on every overlapping day")

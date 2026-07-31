@@ -46,6 +46,7 @@ struct TimelinePlaceVisitCard: View {
                         references: occurrence.snapshot.photoReferences
                     )
                     .frame(width: columnWidth, height: totalHeight)
+                    .clipShape(.rect(cornerRadius: 16))
                 }
             }
             .frame(height: totalHeight, alignment: .top)

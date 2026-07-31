@@ -9,15 +9,21 @@ import SwiftUI
 struct AddPersonSheet: View {
     @Environment(\.dismiss) private var dismiss
 
+    let initialName: String
     let onAdd: ((Person) -> Void)?
 
-    init(onAdd: ((Person) -> Void)? = nil) {
+    init(
+        initialName: String = "",
+        onAdd: ((Person) -> Void)? = nil
+    ) {
+        self.initialName = initialName
         self.onAdd = onAdd
     }
 
     var body: some View {
         NavigationStack {
             ManualPersonView(
+                initialName: initialName,
                 onAdd: { person in
                     onAdd?(person)
                     dismiss()
@@ -34,9 +40,16 @@ struct AddPersonSheet: View {
 
 private struct ManualPersonView: View {
     @Environment(\.modelContext) private var modelContext
-    @State private var model = ManualPersonEditorModel()
+    @State private var model: ManualPersonEditorModel
 
     let onAdd: (Person) -> Void
+
+    init(initialName: String, onAdd: @escaping (Person) -> Void) {
+        self.onAdd = onAdd
+        _model = State(
+            initialValue: ManualPersonEditorModel(name: initialName)
+        )
+    }
 
     var body: some View {
         Form {

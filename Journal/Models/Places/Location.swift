@@ -5,7 +5,7 @@
 
 import CoreLocation
 
-nonisolated struct Location: Hashable {
+nonisolated struct Location: Hashable, Sendable {
     var latitude: Double
     var longitude: Double
     var displayName: String?

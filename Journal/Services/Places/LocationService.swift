@@ -31,7 +31,13 @@ enum LocationCaptureError: LocalizedError {
 final class LocationService {
     static let shared = LocationService()
 
+    private let manager = CLLocationManager()
+
     private init() {}
+
+    var authorizationStatus: CLAuthorizationStatus {
+        manager.authorizationStatus
+    }
 
     func captureCurrentLocation() async throws -> Location {
         for try await update in CLLocationUpdate.liveUpdates() {

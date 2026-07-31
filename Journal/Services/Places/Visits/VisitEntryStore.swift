@@ -17,6 +17,7 @@ enum PlaceVisitEntryStore {
             draft.place?.name
         )
         let details = PlaceVisitDetails(
+            description: draft.description,
             place: draft.place,
             location: location,
             placeRawText: draft.placeRawText,

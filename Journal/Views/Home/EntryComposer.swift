@@ -14,24 +14,68 @@ struct HomeEntryComposer: View {
     private var transitTypes: [TransitType]
 
     let selectedDay: TimelineDayKey
+    let timelineRevision: Int
     let onEntryChanged: () -> Void
 
-    @State private var model = EntryComposerModel()
+    @State private var legacyModel = EntryComposerModel()
+    @State private var guidedModel = GuidedEntryComposerModel()
+    @State private var mode = GuidedComposerMode.guided
     @State private var presentedSheet: HomeComposerSheet?
 
     var body: some View {
-        HomeComposerInput(
-            model: model,
+        HomeComposerModeContent(
+            mode: mode,
+            legacyModel: legacyModel,
+            guidedModel: guidedModel,
+            places: places,
+            people: people,
+            transitTypes: transitTypes,
+            selectedDay: selectedDay,
+            guidedContextRevision: guidedContextRevision,
             onPresentSheet: { presentedSheet = $0 },
-            onSubmit: submit
+            onToggleMode: toggleMode,
+            onLegacySubmit: submitLegacy,
+            onGuidedSubmit: submitGuided
         )
         .sheet(item: $presentedSheet, onDismiss: onEntryChanged) { sheet in
             HomeComposerSheetContent(sheet: sheet)
         }
     }
 
-    private func submit() async -> Bool {
-        let saved = await model.submit(
+    private var guidedContextRevision: GuidedComposerContextRevision {
+        GuidedComposerContextRevision(
+            selectedDay: selectedDay,
+            places: places.map {
+                GuidedComposerContextRevision.PlaceRevision(
+                    id: $0.id,
+                    name: $0.name,
+                    aliases: $0.aliases,
+                    location: $0.location,
+                    systemImage: $0.systemImage,
+                    accuracyRadiusMeters: $0.accuracyRadiusMeters
+                )
+            },
+            people: people.map {
+                GuidedComposerContextRevision.PersonRevision(
+                    id: $0.id,
+                    name: $0.name,
+                    aliases: $0.aliases,
+                    contactIdentifier: $0.contactIdentifier
+                )
+            },
+            transitTypes: transitTypes.map {
+                GuidedComposerContextRevision.TransitTypeRevision(
+                    canonicalName: $0.canonicalName,
+                    aliases: $0.aliases,
+                    routingMode: $0.routingMode
+                )
+            },
+            timelineRevision: timelineRevision
+        )
+    }
+
+    private func submitLegacy() async -> Bool {
+        let saved = await legacyModel.submit(
             places: places,
             people: people,
             transitTypes: transitTypes,
@@ -40,13 +84,30 @@ struct HomeEntryComposer: View {
         )
         guard saved else { return false }
 
-        model.input = ""
+        legacyModel.input = ""
         onEntryChanged()
         return true
     }
+
+    private func submitGuided() -> Bool {
+        let saved = guidedModel.submit(
+            places: places,
+            people: people,
+            modelContext: modelContext
+        )
+        if saved {
+            onEntryChanged()
+        }
+        return saved
+    }
+
+    private func toggleMode() {
+        guard !legacyModel.isSaving, !guidedModel.isSaving else { return }
+        mode = mode == .guided ? .legacyAI : .guided
+    }
 }
 
-private enum HomeComposerSheet: String, Identifiable {
+enum HomeComposerSheet: String, Identifiable {
     case manualTransit
     case manualVisit
     case newPlace
@@ -55,9 +116,49 @@ private enum HomeComposerSheet: String, Identifiable {
     var id: String { rawValue }
 }
 
-private struct HomeComposerInput: View {
+private struct HomeComposerModeContent: View {
+    let mode: GuidedComposerMode
+    let legacyModel: EntryComposerModel
+    let guidedModel: GuidedEntryComposerModel
+    let places: [Place]
+    let people: [Person]
+    let transitTypes: [TransitType]
+    let selectedDay: TimelineDayKey
+    let guidedContextRevision: GuidedComposerContextRevision
+    let onPresentSheet: (HomeComposerSheet) -> Void
+    let onToggleMode: () -> Void
+    let onLegacySubmit: () async -> Bool
+    let onGuidedSubmit: () -> Bool
+
+    var body: some View {
+        switch mode {
+        case .guided:
+            HomeGuidedEntryComposer(
+                model: guidedModel,
+                places: places,
+                people: people,
+                transitTypes: transitTypes,
+                selectedDay: selectedDay,
+                contextRevision: guidedContextRevision,
+                onPresentSheet: onPresentSheet,
+                onToggleMode: onToggleMode,
+                onSubmit: onGuidedSubmit
+            )
+        case .legacyAI:
+            HomeLegacyComposerInput(
+                model: legacyModel,
+                onPresentSheet: onPresentSheet,
+                onToggleMode: onToggleMode,
+                onSubmit: onLegacySubmit
+            )
+        }
+    }
+}
+
+private struct HomeLegacyComposerInput: View {
     @Bindable var model: EntryComposerModel
     let onPresentSheet: (HomeComposerSheet) -> Void
+    let onToggleMode: () -> Void
     let onSubmit: () async -> Bool
 
     @FocusState private var isFocused: Bool
@@ -67,7 +168,9 @@ private struct HomeComposerInput: View {
             HStack(alignment: .bottom, spacing: 8) {
                 HomeComposerAddMenu(
                     isDisabled: model.isSaving,
-                    onSelect: onPresentSheet
+                    mode: .legacyAI,
+                    onSelect: onPresentSheet,
+                    onToggleMode: onToggleMode
                 )
 
                 HStack(alignment: .bottom, spacing: 4) {
@@ -121,12 +224,27 @@ private struct HomeComposerInput: View {
     }
 }
 
-private struct HomeComposerAddMenu: View {
+struct HomeComposerAddMenu: View {
     let isDisabled: Bool
+    let mode: GuidedComposerMode
     let onSelect: (HomeComposerSheet) -> Void
+    let onToggleMode: () -> Void
 
     var body: some View {
         Menu {
+            Section("Composer") {
+                Button(action: onToggleMode) {
+                    Label(
+                        mode == .guided
+                            ? "Use AI Composer"
+                            : "Use Guided Composer",
+                        systemImage: mode == .guided
+                            ? "sparkles"
+                            : "text.badge.checkmark"
+                    )
+                }
+            }
+
             Section("Log Manually") {
                 Button {
                     onSelect(.manualTransit)
@@ -168,7 +286,7 @@ private struct HomeComposerAddMenu: View {
     }
 }
 
-private struct HomeComposerSendButton: View {
+struct HomeComposerSendButton: View {
     let isLoading: Bool
     let isEnabled: Bool
     let action: () -> Void

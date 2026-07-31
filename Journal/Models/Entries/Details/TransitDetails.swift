@@ -8,12 +8,12 @@
 import Foundation
 import SwiftData
 
-enum TransitRoutingMode: String, Codable, CaseIterable {
+enum TransitRoutingMode: String, Codable, CaseIterable, Hashable, Sendable {
     case walking
     case automobile
 }
 
-enum DurationSource: String, Codable {
+enum DurationSource: String, Codable, Hashable, Sendable {
     case unresolved
     case mapkitCarFallback
     case mapkitWalking

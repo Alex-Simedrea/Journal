@@ -29,6 +29,7 @@ final class HomePresentationModel {
     private(set) var reviewOccurrences: [TimelineOccurrence] = []
     private(set) var overviewData = TimelineOverviewData()
     private(set) var selectedDayEntries: [LogEntry] = []
+    private(set) var timelineRevision = 0
 
     @ObservationIgnored
     private let workoutClient: HealthKitWorkoutClient
@@ -99,6 +100,7 @@ final class HomePresentationModel {
             overviewOccurrences = projection.occurrences
             overviewDay = selectedDay
             timelineErrorMessage = nil
+            timelineRevision &+= 1
         } catch {
             loadedEntries = []
             selectedDayEntries = []
@@ -109,6 +111,7 @@ final class HomePresentationModel {
             overviewOccurrences = []
             overviewDay = nil
             timelineErrorMessage = error.localizedDescription
+            timelineRevision &+= 1
         }
     }
 
