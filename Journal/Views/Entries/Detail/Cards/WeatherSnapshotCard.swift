@@ -13,12 +13,6 @@ struct EntryDetailWeatherCard: View {
 
     var body: some View {
         HStack(spacing: 7) {
-            if let _ = weather {
-                WeatherSymbol(
-                    symbolName: weather?.symbolName ?? "cloud.slash.fill",
-                    size: 27
-                )
-            }
             VStack(alignment: .leading, spacing: 0) {
                 if let weather {
                     Text(

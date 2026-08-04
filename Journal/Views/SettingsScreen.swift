@@ -9,16 +9,14 @@ struct SettingsScreen: View {
     @State private var model = AISettingsModel()
 
     var body: some View {
-        NavigationStack {
-            Form {
-                OllamaModelSection()
-                OllamaCredentialSection(model: model)
-            }
-            .navigationTitle("Settings")
-            .scrollDismissesKeyboard(.interactively)
-            .task {
-                model.refresh()
-            }
+        Form {
+            OllamaModelSection()
+            OllamaCredentialSection(model: model)
+        }
+        .navigationTitle("Settings")
+        .scrollDismissesKeyboard(.interactively)
+        .task {
+            model.refresh()
         }
     }
 }
@@ -116,5 +114,7 @@ private struct APIKeyStatusRow: View {
 }
 
 #Preview {
-    SettingsScreen()
+    NavigationStack {
+        SettingsScreen()
+    }
 }

@@ -11,6 +11,7 @@ struct TimelineOverviewMap: View {
     @State private var position: MapCameraPosition = .automatic
 
     let data: TimelineOverviewData
+    var fillsAvailableSpace = false
 
     var body: some View {
         Map(position: $position) {
@@ -64,7 +65,12 @@ struct TimelineOverviewMap: View {
         .onChange(of: data, initial: true) {
             position = .automatic
         }
-        .frame(height: horizontalSizeClass == .regular ? 320 : 250)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(
+            height: fillsAvailableSpace
+                ? nil
+                : (horizontalSizeClass == .regular ? 320 : 250)
+        )
         .clipShape(.rect(cornerRadius: 22))
         .accessibilityLabel("Map of the day’s places, transit, and workouts")
     }

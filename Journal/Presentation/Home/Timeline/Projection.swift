@@ -143,6 +143,13 @@ struct TimelineProjection: Sendable {
             if entry.kind == .wakeUp {
                 if let wakeUp = wakeUpOccurrence(for: entry, on: day) {
                     occurrences.append(wakeUp)
+                } else if entry.endTime == nil {
+                    if let review = unresolvedOccurrence(
+                        for: entry,
+                        on: day
+                    ) {
+                        reviews.append(review)
+                    }
                 }
                 continue
             }

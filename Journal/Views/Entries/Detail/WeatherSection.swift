@@ -100,7 +100,7 @@ private struct EntryWeatherSnapshotContent: View {
 private struct EntryWeatherUnavailableContent: View {
     var body: some View {
         ContentUnavailableView {
-            Label("Weather Unavailable", systemImage: "cloud.slash")
+            Label("Weather Unavailable", systemImage: "cloud")
         } description: {
             Text("Resolve the entry’s start time and location to attach weather.")
         }

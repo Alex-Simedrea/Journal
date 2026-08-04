@@ -27,11 +27,91 @@ struct EntryWeatherAttribution: Equatable, Sendable {
 
 private enum EntryWeatherServiceError: LocalizedError {
     case noHourlyWeather
+    case noDailyWeather
 
     var errorDescription: String? {
         switch self {
         case .noHourlyWeather:
             String(localized: "Weather is unavailable for this time and location.")
+        case .noDailyWeather:
+            String(localized: "Weather is unavailable for this day and location.")
+        }
+    }
+}
+
+nonisolated protocol DayWeatherProviding: Sendable {
+    func weather(for request: DayWeatherRequest) async throws
+        -> DayWeatherSummary
+}
+
+actor WeatherKitDayClient: DayWeatherProviding {
+    typealias Loader = @Sendable (DayWeatherRequest) async throws
+        -> DayWeatherSummary
+
+    nonisolated static let shared = WeatherKitDayClient()
+
+    private let service = WeatherService.shared
+    private let loader: Loader?
+    private var cache: [DayWeatherRequest: DayWeatherSummary] = [:]
+    private var tasks: [
+        DayWeatherRequest: Task<DayWeatherSummary, any Error>
+    ] = [:]
+
+    init(loader: Loader? = nil) {
+        self.loader = loader
+    }
+
+    func weather(for request: DayWeatherRequest) async throws
+        -> DayWeatherSummary {
+        if let cached = cache[request] {
+            return cached
+        }
+        if let task = tasks[request] {
+            return try await task.value
+        }
+
+        let loader = loader
+        let service = service
+        let task = Task<DayWeatherSummary, any Error> {
+            if let loader {
+                return try await loader(request)
+            }
+            let location = CLLocation(
+                latitude: request.latitude,
+                longitude: request.longitude
+            )
+            let forecast = try await service.weather(
+                for: location,
+                including: .daily(
+                    startDate: request.startDate,
+                    endDate: request.endDate
+                )
+            )
+            guard let day = forecast.min(by: {
+                abs($0.date.timeIntervalSince(request.startDate))
+                    < abs($1.date.timeIntervalSince(request.startDate))
+            }) else {
+                throw EntryWeatherServiceError.noDailyWeather
+            }
+            return DayWeatherSummary(
+                condition: day.condition.rawValue,
+                symbolName: day.symbolName,
+                highTemperatureCelsius: day.highTemperature
+                    .converted(to: .celsius).value,
+                maximumHumidity: day.maximumHumidity,
+                date: day.date
+            )
+        }
+        tasks[request] = task
+
+        do {
+            let result = try await task.value
+            cache[request] = result
+            tasks[request] = nil
+            return result
+        } catch {
+            tasks[request] = nil
+            throw error
         }
     }
 }

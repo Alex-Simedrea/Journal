@@ -17,7 +17,7 @@ struct WeatherSymbol: View {
                 palette.tertiary
             )
             .fontWeight(.semibold)
-            .frame(width: size, height: size)
+            .frame(width: size, height: size, alignment: .top)
     }
 }
 

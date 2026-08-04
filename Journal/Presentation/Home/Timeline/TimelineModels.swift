@@ -6,12 +6,16 @@
 import CoreLocation
 import Foundation
 
-struct TimelineDayKey: Hashable, Identifiable, Sendable {
+nonisolated struct TimelineDayKey: Comparable, Hashable, Identifiable, Sendable {
     let year: Int
     let month: Int
     let day: Int
 
     var id: String { "\(year)-\(month)-\(day)" }
+
+    static func < (lhs: TimelineDayKey, rhs: TimelineDayKey) -> Bool {
+        (lhs.year, lhs.month, lhs.day) < (rhs.year, rhs.month, rhs.day)
+    }
 
     init(year: Int, month: Int, day: Int) {
         self.year = year

@@ -21,27 +21,30 @@ import SwiftUI
 }
 
 struct ContentView: View {
+    var body: some View {
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-day-summary-gallery")
+            || ProcessInfo.processInfo.environment["DAY_SUMMARY_GALLERY"] == "1" {
+            DaySummaryDesignGallery()
+        } else {
+            JournalApplicationContent()
+        }
+#else
+        JournalApplicationContent()
+#endif
+    }
+}
+
+private struct JournalApplicationContent: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @State private var boardingPassImports = BoardingPassImportCoordinator()
     @State private var workoutImports = WorkoutImportCoordinator()
-    @State private var selectedDay = TimelineDayKey.today()
+    @State private var contentRevision = 0
 
     var body: some View {
-        TabView {
-            Tab("Home", systemImage: "house") {
-                NavigationStack {
-                    HomeScreen(selectedDay: $selectedDay)
-                }
-            }
-            Tab("Library", systemImage: "square.stack") {
-                NavigationStack {
-                    LibraryScreen()
-                }
-            }
-            Tab("Settings", systemImage: "gearshape") {
-                SettingsScreen()
-            }
+        NavigationStack {
+            HomeScreen(contentRevision: contentRevision)
         }
         .task {
             _ = try? await ContactPersonSyncService
@@ -49,6 +52,7 @@ struct ContentView: View {
             await workoutImports.start(in: modelContext)
             await EntryWeatherService.populateMissing(in: modelContext)
             await TransitDistanceService.populateMissing(in: modelContext)
+            contentRevision &+= 1
             boardingPassImports.loadNextIfNeeded()
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -62,6 +66,7 @@ struct ContentView: View {
                     await TransitDistanceService.populateMissing(
                         in: modelContext
                     )
+                    contentRevision &+= 1
                 }
             }
         }
@@ -73,7 +78,10 @@ struct ContentView: View {
         .sheet(item: $boardingPassImports.pendingImport) { pendingImport in
             BoardingPassImportReviewSheet(
                 pendingImport: pendingImport,
-                onComplete: boardingPassImports.complete,
+                onComplete: {
+                    boardingPassImports.complete($0)
+                    contentRevision &+= 1
+                },
                 onCancel: boardingPassImports.discard
             )
         }

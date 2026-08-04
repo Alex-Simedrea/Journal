@@ -197,6 +197,9 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
         visitPlace: String = "Place",
         visitSystemImage: PlaceSystemImage = .mappin,
         visitLocation: TimelineLocationSnapshot? = nil,
+        people: [TimelinePersonSnapshot] = [],
+        photoReferences: [PhotoReference] = [],
+        workoutUUID: UUID? = nil,
         workoutActivityName: String = "Workout",
         workoutSystemImageName: String = "figure.mixed.cardio",
         workoutMovementKind: WorkoutMovementKind? = nil,
@@ -235,13 +238,13 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
         self.visitPlace = visitPlace
         self.visitSystemImage = visitSystemImage
         self.visitLocation = visitLocation
-        people = []
-        photoReferences = []
+        self.people = people
+        self.photoReferences = photoReferences
         weather = nil
         self.reviews = reviews ?? (needsReview
             ? [TimelineReviewSnapshot(target: .time, reason: "Time needs review")]
             : [])
-        workoutUUID = nil
+        self.workoutUUID = workoutUUID
         self.workoutActivityName = workoutActivityName
         self.workoutSystemImageName = workoutSystemImageName
         self.workoutMovementKind = workoutMovementKind

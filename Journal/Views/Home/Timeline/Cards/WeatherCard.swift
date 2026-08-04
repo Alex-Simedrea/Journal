@@ -71,14 +71,15 @@ struct TimelineLargeWeatherContent: View {
         VStack(alignment: .leading, spacing: 0) {
             WeatherSymbol(symbolName: weather.symbolName, size: 32)
 
-            Spacer(minLength: 2)
+            VStack(alignment: .leading, spacing: 0) {
+                TimelineTemperatureLabel(celsius: weather.temperatureCelsius)
+                    .font(.title.weight(.medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
 
-            TimelineTemperatureLabel(celsius: weather.temperatureCelsius)
-                .font(.title.weight(.medium))
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-
-            TimelineHumidityLabel(humidity: weather.humidity)
+                TimelineHumidityLabel(humidity: weather.humidity)
+            }
+            .frame(maxHeight: .infinity, alignment: .bottomTrailing)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
@@ -113,12 +114,6 @@ struct TimelineUnavailableWeatherContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            FixedSizeSymbol(
-                systemName: "cloud.slash.fill",
-                size: layout == .large ? 30 : 24
-            )
-            .symbolRenderingMode(.palette)
-            .foregroundStyle(.white, .cyan)
             if layout == .large {
                 Spacer(minLength: 4)
             }
