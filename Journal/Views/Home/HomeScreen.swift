@@ -8,18 +8,23 @@ private struct PresentedTimeline: Identifiable {
     var id: TimelineDayKey { selectedDay }
 }
 
+private struct HomeFeedScrollRequest: Hashable {
+    let id = UUID()
+    let day: TimelineDayKey
+}
+
 struct HomeScreen: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @Namespace private var dayTransition
     @State private var model = HomeFeedModel()
-    @State private var scrollPosition: TimelineDayKey?
+    @State private var scrollRequest: HomeFeedScrollRequest?
     @State private var visibleDay: TimelineDayKey?
+    @State private var isFeedReady = false
     @State private var emptyTransitionDay = TimelineDayKey.today()
     @State private var presentedTimeline: PresentedTimeline?
     @State private var isCalendarPresented = false
     @State private var isProfilePresented = false
-    @State private var didSetInitialPosition = false
     let contentRevision: Int
 
     init(contentRevision: Int = 0) {
@@ -27,23 +32,29 @@ struct HomeScreen: View {
     }
 
     private var titleDay: TimelineDayKey {
-        visibleDay ?? scrollPosition ?? .today()
+        visibleDay ?? scrollRequest?.day ?? .today()
     }
 
     var body: some View {
-        HomeFeedContent(
-            model: model,
-            namespace: dayTransition,
-            emptyTransitionDay: emptyTransitionDay,
-            scrollPosition: $scrollPosition,
-            onVisibleDayChange: { visibleDay = $0 },
-            onOpenDay: presentTimeline,
-            onStartToday: {
-                let today = TimelineDayKey.today()
-                emptyTransitionDay = today
-                presentTimeline(today)
+        Group {
+            if isFeedReady {
+                HomeFeedContent(
+                    model: model,
+                    namespace: dayTransition,
+                    emptyTransitionDay: emptyTransitionDay,
+                    scrollRequest: scrollRequest,
+                    onVisibleDayChange: { visibleDay = $0 },
+                    onOpenDay: presentTimeline,
+                    onStartToday: {
+                        let today = TimelineDayKey.today()
+                        emptyTransitionDay = today
+                        presentTimeline(today)
+                    }
+                )
+            } else {
+                Color(uiColor: .systemGroupedBackground)
             }
-        )
+        }
         .navigationTitle(
             DaySummaryDatePresentation.monthTitle(for: titleDay)
         )
@@ -91,31 +102,25 @@ struct HomeScreen: View {
             )
         }
         .task(id: contentRevision) {
-            reloadFeed(setInitialPosition: !didSetInitialPosition)
+            reloadFeed()
+            isFeedReady = true
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
-                reloadFeed(setInitialPosition: !didSetInitialPosition)
+                reloadFeed()
             }
         }
     }
 
-    private func reloadFeed(setInitialPosition: Bool) {
+    private func reloadFeed() {
         model.reload(in: modelContext)
-        guard setInitialPosition,
-              let target = model.nearestDay(to: .today()) else { return }
-        scrollPosition = target
-        visibleDay = target
-        didSetInitialPosition = true
     }
 
     private func handleCalendarSelection(_ selectedDay: TimelineDayKey) {
         isCalendarPresented = false
         if let target = model.nearestDay(to: selectedDay) {
-            withAnimation(.smooth) {
-                scrollPosition = target
-                visibleDay = target
-            }
+            scrollRequest = HomeFeedScrollRequest(day: target)
+            visibleDay = target
         } else {
             emptyTransitionDay = selectedDay
             presentTimeline(selectedDay)
@@ -149,51 +154,63 @@ private struct HomeFeedContent: View {
     let model: HomeFeedModel
     let namespace: Namespace.ID
     let emptyTransitionDay: TimelineDayKey
-    @Binding var scrollPosition: TimelineDayKey?
+    let scrollRequest: HomeFeedScrollRequest?
     let onVisibleDayChange: (TimelineDayKey) -> Void
     let onOpenDay: (TimelineDayKey) -> Void
     let onStartToday: () -> Void
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 32) {
-                if let errorMessage = model.errorMessage {
-                    HomeFeedErrorView(message: errorMessage)
-                } else if model.rows.isEmpty {
-                    HomeFeedEmptyView(onStartToday: onStartToday)
-                        .matchedTransitionSource(
-                            id: emptyTransitionDay,
-                            in: namespace
-                        )
-                } else {
-                    ForEach(model.rows) { rowModel in
-                        HomeFeedDayRow(
-                            model: rowModel,
-                            namespace: namespace,
-                            onOpen: { onOpenDay(rowModel.id) }
-                        )
-                        .id(rowModel.id)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 32) {
+                    if let errorMessage = model.errorMessage {
+                        HomeFeedErrorView(message: errorMessage)
+                    } else if model.rows.isEmpty {
+                        HomeFeedEmptyView(onStartToday: onStartToday)
+                            .matchedTransitionSource(
+                                id: emptyTransitionDay,
+                                in: namespace
+                            )
+                    } else {
+                        ForEach(model.rows) { rowModel in
+                            HomeFeedDayRow(
+                                model: rowModel,
+                                namespace: namespace,
+                                onOpen: { onOpenDay(rowModel.id) }
+                            )
+                            .id(rowModel.id)
+                        }
                     }
                 }
+                .scrollTargetLayout()
+                .frame(maxWidth: 440)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
             }
-            .scrollTargetLayout()
-            .frame(maxWidth: 372)
-            .frame(maxWidth: .infinity)
-            .padding(.top, 16)
-            .padding(.bottom, 28)
-        }
-        .contentMargins(.horizontal, 16, for: .scrollContent)
-        .scrollPosition(id: $scrollPosition, anchor: .top)
-        .onScrollTargetVisibilityChange(
-            idType: TimelineDayKey.self,
-            threshold: 0.1
-        ) { visibleDays in
-            if let first = visibleDays.first {
-                onVisibleDayChange(first)
+            .contentMargins(.bottom, 100, for: .scrollContent)
+            .onScrollTargetVisibilityChange(
+                idType: TimelineDayKey.self,
+                threshold: 0.1
+            ) { visibleDays in
+                if let first = visibleDays.first {
+                    onVisibleDayChange(first)
+                }
+            }
+            .background(Color(uiColor: .systemGroupedBackground))
+            .scrollContentBackground(.hidden)
+            .task {
+                guard let lastDay = model.rows.last?.id else { return }
+                proxy.scrollTo(lastDay, anchor: .bottom)
+            }
+            .task(id: scrollRequest?.id) {
+                guard let scrollRequest else { return }
+                withAnimation(.smooth) {
+                    proxy.scrollTo(scrollRequest.day)
+                }
             }
         }
         .background(Color(uiColor: .systemGroupedBackground))
-        .scrollContentBackground(.hidden)
     }
 }
 

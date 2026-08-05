@@ -27,12 +27,12 @@ struct DaySummaryDesignGallery: View {
                         }
                     }
                 }
-                .frame(maxWidth: 372)
+                .frame(maxWidth: 440)
                 .frame(maxWidth: .infinity)
+                .padding(.horizontal, 16)
                 .padding(.top, 16)
-                .padding(.bottom, 28)
             }
-            .contentMargins(.horizontal, 16, for: .scrollContent)
+            .contentMargins(.bottom, 44, for: .scrollContent)
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("July")
             .toolbarTitleDisplayMode(.inlineLarge)
