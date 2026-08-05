@@ -23,6 +23,7 @@ struct AddPlaceSheet: View {
         initialName: String = "",
         initialSearchQuery: String = "",
         initialLocation: Location? = nil,
+        initialSymbol: PlaceSystemImage = .mappin,
         capturesCurrentLocation: Bool = true,
         onSave: ((Place) -> Void)? = nil
     ) {
@@ -33,6 +34,7 @@ struct AddPlaceSheet: View {
                 initialName: initialName,
                 initialSearchQuery: initialSearchQuery,
                 initialLocation: initialLocation,
+                initialSymbol: initialSymbol,
                 allowsCurrentLocationCapture: capturesCurrentLocation
             )
         )

@@ -71,6 +71,32 @@ struct GuidedComposerTextRendererTests {
         #expect(try foregroundColor(at: 0, in: rendered) == .indigo)
     }
 
+    @Test("Uber leading text uses the adaptive primary color")
+    func uberLeadingColor() throws {
+        let uber = ComposerToken(
+            displayText: "Uber",
+            value: .leading(.transit(canonicalName: "Uber"))
+        )
+        let rendered = GuidedComposerTextRenderer.render(
+            "Uber",
+            tokens: [uber],
+            ranges: [uber.id: 0..<4]
+        )
+
+        #expect(try foregroundColor(at: 0, in: rendered) == .primary)
+    }
+
+    @Test("Unresolved text uses the adaptive primary color")
+    func unresolvedTextColor() throws {
+        let rendered = GuidedComposerTextRenderer.render(
+            "unresolved",
+            tokens: [],
+            ranges: [:]
+        )
+
+        #expect(try foregroundColor(at: 0, in: rendered) == .primary)
+    }
+
     private func foregroundColor(
         at offset: Int,
         in text: AttributedString

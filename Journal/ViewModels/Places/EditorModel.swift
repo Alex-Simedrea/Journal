@@ -39,12 +39,13 @@ final class PlaceEditorModel {
         initialName: String = "",
         initialSearchQuery: String = "",
         initialLocation: Location? = nil,
+        initialSymbol: PlaceSystemImage = .mappin,
         allowsCurrentLocationCapture: Bool = true
     ) {
         self.allowsCurrentLocationCapture = allowsCurrentLocationCapture
         let initialResolvedLocation = place?.location ?? initialLocation
         name = place?.name ?? initialName
-        selectedSymbol = place?.systemImage ?? .mappin
+        selectedSymbol = place?.systemImage ?? initialSymbol
         location = initialResolvedLocation
         accuracyRadiusMeters = place?.accuracyRadiusMeters ?? 0
         isLoadingLocation = place == nil

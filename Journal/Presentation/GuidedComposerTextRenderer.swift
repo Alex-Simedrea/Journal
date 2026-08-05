@@ -7,6 +7,7 @@ enum GuidedComposerTextRenderer {
         ranges: [UUID: Range<Int>]
     ) -> AttributedString {
         var result = AttributedString(text)
+        result.foregroundColor = .primary
         for token in tokens {
             guard let offsets = ranges[token.id],
                   let range = attributedRange(
@@ -41,19 +42,23 @@ enum GuidedComposerTextRenderer {
     private static func color(for token: ComposerToken) -> Color {
         switch token.value {
         case .leading(.transit(let canonicalName)):
-            TransitPresentationCatalog.presentation(
+            let presentation = TransitPresentationCatalog.presentation(
                 for: canonicalName
-            ).color
+            )
+            if case .some(.uber) = presentation.brandImage {
+                return .primary
+            }
+            return presentation.color
         case .leading(.placeVisit):
-            .indigo
+            return .indigo
         case .location(let location, _):
-            PlaceSymbols.symbol(for: location.systemImage).primary
+            return PlaceSymbols.symbol(for: location.systemImage).primary
         case .time, .duration:
-            .orange
+            return .orange
         case .person:
-            .blue
+            return .blue
         case .connector:
-            .secondary
+            return .secondary
         }
     }
 }

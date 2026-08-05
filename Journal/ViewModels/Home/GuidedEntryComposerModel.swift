@@ -39,7 +39,8 @@ final class GuidedEntryComposerModel {
     private var timelineContext = ComposerTimelineContext(
         intervals: [],
         gaps: [],
-        endpointCandidates: []
+        endpointCandidates: [],
+        selectedDayInterval: nil
     )
     @ObservationIgnored
     private var people: [ComposerPersonCandidate] = []
@@ -363,12 +364,19 @@ final class GuidedEntryComposerModel {
 
     func selectTime(_ date: Date, role: ComposerTimeRole) {
         let zone = activeTimeZone(for: role)
-        var resolvedDate = date
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        let minuteComponents = calendar.dateComponents(
+            [.year, .month, .day, .hour, .minute],
+            from: date
+        )
+        var resolvedDate = calendar.date(from: minuteComponents) ?? date
         if role == .end, let start = draft.startTime?.date {
             resolvedDate = GuidedComposerTimeParser.rolledEndIfNeeded(
-                date,
+                resolvedDate,
                 after: start,
-                hadExplicitDate: true
+                hadExplicitDate: false,
+                timeZone: zone
             )
         }
         accept(
@@ -405,12 +413,18 @@ final class GuidedEntryComposerModel {
         )
     }
 
-    func suggestedPickerDate(for role: ComposerTimeRole) -> Date {
+    func suggestedPickerDate(
+        for role: ComposerTimeRole,
+        now: Date = .now
+    ) -> Date {
         if let activeTimePickerSeed,
            activeTimePickerSeed.role == role {
             return activeTimePickerSeed.date
         }
-        return defaultTime(for: role, zone: activeTimeZone(for: role))
+        return defaultPickerTime(
+            zone: activeTimeZone(for: role),
+            now: now
+        )
     }
 
     func pickerTimeZone(for role: ComposerTimeRole) -> TimeZone {
@@ -1131,6 +1145,7 @@ final class GuidedEntryComposerModel {
             in: .whitespacesAndNewlines
         )
         let zone = activeTimeZone(for: role)
+        let now = Date.now
         var values: [ComposerSuggestion] = []
         if let mapKitSuggestion = mapKitTimeSuggestion(
             role: role,
@@ -1189,6 +1204,33 @@ final class GuidedEntryComposerModel {
             )
         }
 
+        if selectedDay == .today(now: now, timeZone: zone) {
+            values.append(
+                ComposerSuggestion(
+                    id: "time-now-\(role.rawValue)",
+                    title: String(localized: "Now"),
+                    subtitle: GuidedComposerTimeParser.displayDateTime(
+                        now,
+                        timeZone: zone
+                    ),
+                    systemImage: "clock.badge.checkmark",
+                    kind: .value(
+                        tokens: [
+                            ComposerTokenFactory.explicitTime(
+                                date: now,
+                                timeZone: zone,
+                                role: role,
+                                displayText: String(localized: "now"),
+                                allowsOvernightRollover: false
+                            ),
+                        ],
+                        nextSlot: .connector
+                    ),
+                    score: query.isEmpty ? 11_000 : 500
+                )
+            )
+        }
+
         if query.isEmpty {
             let oppositeBoundary = role == .end
                 ? draft.time(.start)?.date
@@ -1213,8 +1255,15 @@ final class GuidedEntryComposerModel {
                     )
                 }
             } else {
-                let base = defaultTime(for: role, zone: zone)
-                presets = [0, 15, 30, 60].map { offset in
+                let base = defaultPickerTime(
+                    zone: zone,
+                    now: now
+                )
+                let offsets = selectedDay == .today(
+                    now: now,
+                    timeZone: zone
+                ) ? [15, 30, 60] : [0, 15, 30, 60]
+                presets = offsets.map { offset in
                     (
                         base.addingTimeInterval(
                             TimeInterval(offset * 60)
@@ -1882,6 +1931,10 @@ final class GuidedEntryComposerModel {
                     id: "map-\(result.latitude)-\(result.longitude)-\(index)",
                     displayName: result.name,
                     location: result.location,
+                    systemImage: PlaceSystemImage(
+                        pointOfInterestCategory:
+                            result.pointOfInterestCategory
+                    ) ?? .mappin,
                     source: .mapKit,
                     searchTerms: [result.address].compactMap { $0 }
                 )
@@ -1923,25 +1976,24 @@ final class GuidedEntryComposerModel {
         return TimeZone(identifier: identifier ?? "") ?? .current
     }
 
-    private func defaultTime(
-        for role: ComposerTimeRole,
-        zone: TimeZone
+    private func defaultPickerTime(
+        zone: TimeZone,
+        now: Date = .now
     ) -> Date {
-        if role == .end, let start = draft.startTime?.date {
-            return start.addingTimeInterval(30 * 60)
-        }
-        if selectedDay == .today(timeZone: zone) {
-            return .now
-        }
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = zone
+        let clock = calendar.dateComponents(
+            [.hour, .minute],
+            from: now
+        )
         return calendar.date(
             from: DateComponents(
                 timeZone: zone,
                 year: selectedDay.year,
                 month: selectedDay.month,
                 day: selectedDay.day,
-                hour: 12
+                hour: clock.hour,
+                minute: clock.minute
             )
         ) ?? selectedDay.displayDate(in: zone)
     }

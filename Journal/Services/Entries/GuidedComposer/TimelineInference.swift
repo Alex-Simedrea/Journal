@@ -28,6 +28,17 @@ struct ComposerTimelineContext: Equatable, Sendable {
     let intervals: [ComposerTimelineInterval]
     let gaps: [ComposerTimelineGap]
     let endpointCandidates: [ComposerLocationCandidate]
+    let selectedDayInterval: DateInterval?
+
+    func containsSelectedDayBoundary(_ date: Date) -> Bool {
+        selectedDayInterval?.contains(date) ?? true
+    }
+
+    func containsSelectedDayInterval(start: Date, end: Date) -> Bool {
+        guard let selectedDayInterval else { return true }
+        return start >= selectedDayInterval.start
+            && end <= selectedDayInterval.end
+    }
 }
 
 @MainActor
@@ -37,7 +48,8 @@ enum GuidedComposerTimelineInference {
 
     static func makeContext(
         entries: [LogEntry],
-        selectedDay: TimelineDayKey? = nil
+        selectedDay: TimelineDayKey? = nil,
+        timeZone: TimeZone = .current
     ) -> ComposerTimelineContext {
         let visibleEntries = if let selectedDay {
             entries.filter { isVisible($0, on: selectedDay) }
@@ -271,12 +283,17 @@ enum GuidedComposerTimelineInference {
             return $0.startTime < $1.startTime
         }
 
-        let gaps = inferredGaps(in: intervals)
+        let selectedDayInterval = selectedDay?.dateInterval(in: timeZone)
+        let gaps = inferredGaps(
+            in: intervals,
+            selectedDayInterval: selectedDayInterval
+        )
 
         return ComposerTimelineContext(
             intervals: intervals,
             gaps: gaps,
-            endpointCandidates: deduplicated(candidates)
+            endpointCandidates: deduplicated(candidates),
+            selectedDayInterval: selectedDayInterval
         )
     }
 
@@ -301,6 +318,7 @@ enum GuidedComposerTimelineInference {
                         )
                 }
             if hasInferenceWindow(before: index, in: context),
+               context.containsSelectedDayBoundary(interval.startTime),
                !GuidedComposerLocationRanking.isHome(departure),
                !alreadyHasDepartureVisit {
                 let preceding = index > 0
@@ -370,6 +388,7 @@ enum GuidedComposerTimelineInference {
                         )
                 }
             guard hasInferenceWindow(after: index, in: context),
+                  context.containsSelectedDayBoundary(interval.endTime),
                   !GuidedComposerLocationRanking.isHome(arrival),
                   !alreadyHasArrivalVisit else {
                 continue
@@ -723,16 +742,20 @@ enum GuidedComposerTimelineInference {
         in context: ComposerTimelineContext
     ) -> Bool {
         guard let first = context.intervals.first else { return false }
-        return first.kind != .transit
+        return context.containsSelectedDayBoundary(first.startTime)
+            && (first.kind != .transit
             || !GuidedComposerLocationRanking.isHome(first.startLocation)
+            )
     }
 
     static func shouldOfferTrailingHomeRoute(
         in context: ComposerTimelineContext
     ) -> Bool {
         guard let last = context.intervals.last else { return false }
-        return last.kind != .transit
+        return context.containsSelectedDayBoundary(last.endTime)
+            && (last.kind != .transit
             || !GuidedComposerLocationRanking.isHome(last.endLocation)
+            )
     }
 
     static func routeTokens(
@@ -1013,7 +1036,8 @@ enum GuidedComposerTimelineInference {
     }
 
     private static func inferredGaps(
-        in intervals: [ComposerTimelineInterval]
+        in intervals: [ComposerTimelineInterval],
+        selectedDayInterval: DateInterval?
     ) -> [ComposerTimelineGap] {
         var result: [ComposerTimelineGap] = []
         for nextIndex in intervals.indices where nextIndex > 0 {
@@ -1027,6 +1051,10 @@ enum GuidedComposerTimelineInference {
             }),
             next.startTime.timeIntervalSince(previous.endTime)
                 >= minimumInferenceGap,
+            selectedDayInterval.map({ interval in
+                previous.endTime >= interval.start
+                    && next.startTime <= interval.end
+            }) ?? true,
             !GuidedComposerLocationMatcher.sameLocation(
                 previous.endLocation,
                 next.startLocation

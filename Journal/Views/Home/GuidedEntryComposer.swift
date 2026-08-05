@@ -18,6 +18,7 @@ struct HomeGuidedEntryComposer: View {
 
     @FocusState private var isFocused: Bool
     @State private var addPersonRequest: GuidedComposerPersonRequest?
+    @State private var addPlaceRequest: GuidedComposerPlaceRequest?
     @State private var composerHeight: CGFloat = 52
 
     var body: some View {
@@ -43,7 +44,10 @@ struct HomeGuidedEntryComposer: View {
             }
             .overlay(alignment: .bottomTrailing) {
                 if model.shouldPresentSuggestions {
-                    GuidedComposerSuggestionPanel(model: model)
+                    GuidedComposerSuggestionPanel(
+                        model: model,
+                        onSavePlace: presentPlaceEditor
+                    )
                         .padding(.leading, 52)
                         .offset(y: -(composerHeight + 8))
                         .transition(
@@ -81,14 +85,28 @@ struct HomeGuidedEntryComposer: View {
         .onChange(of: isFocused) { _, isFocused in
             model.editorFocusDidChange(isFocused)
         }
-        .sheet(item: $addPersonRequest, onDismiss: {
-            model.cancelPendingPersonAddition()
-            isFocused = true
-        }) { request in
+        .sheet(
+            item: $addPersonRequest,
+            onDismiss: {
+                model.cancelPendingPersonAddition()
+                isFocused = true
+            }
+        ) { request in
             AddPersonSheet(initialName: request.name) { person in
                 model.personWasAdded(person)
                 isFocused = true
             }
+        }
+        .sheet(
+            item: $addPlaceRequest,
+            onDismiss: { isFocused = true }
+        ) { request in
+            AddPlaceSheet(
+                initialName: request.candidate.displayName,
+                initialLocation: request.candidate.location,
+                initialSymbol: request.candidate.systemImage,
+                capturesCurrentLocation: false
+            )
         }
         .alert("Couldn’t Log Entry", isPresented: $model.isShowingError) {
             Button("OK", role: .cancel) {}
@@ -106,6 +124,13 @@ struct HomeGuidedEntryComposer: View {
         if onSubmit() {
             isFocused = false
         }
+    }
+
+    private func presentPlaceEditor(
+        for candidate: ComposerLocationCandidate
+    ) {
+        isFocused = false
+        addPlaceRequest = GuidedComposerPlaceRequest(candidate: candidate)
     }
 }
 
@@ -183,6 +208,7 @@ private struct GuidedComposerEditor: View {
 
 struct GuidedComposerSuggestionPanel: View {
     let model: GuidedEntryComposerModel
+    let onSavePlace: (ComposerLocationCandidate) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -192,7 +218,10 @@ struct GuidedComposerSuggestionPanel: View {
                     .padding(.horizontal, 6)
             }
 
-            GuidedComposerSuggestionList(model: model)
+            GuidedComposerSuggestionList(
+                model: model,
+                onSavePlace: onSavePlace
+            )
 
             if model.isSearchingPlaces {
                 HStack(spacing: 8) {
@@ -248,6 +277,7 @@ private struct GuidedComposerSuggestionList: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let model: GuidedEntryComposerModel
+    let onSavePlace: (ComposerLocationCandidate) -> Void
 
     @Namespace private var selectionNamespace
     @State private var rowFrames: [String: CGRect] = [:]
@@ -257,9 +287,17 @@ private struct GuidedComposerSuggestionList: View {
 
     private static let coordinateSpace = "guided-composer-suggestions"
 
+    private var scrollThreshold: Int {
+        if case .time = model.activeSlot { 2 } else { 6 }
+    }
+
+    private var maximumHeight: CGFloat {
+        if case .time = model.activeSlot { 160 } else { 220 }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            if model.suggestions.count > 6 {
+            if model.suggestions.count > scrollThreshold {
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         ForEach(model.suggestions) { suggestion in
@@ -270,7 +308,8 @@ private struct GuidedComposerSuggestionList: View {
                                     == model.activeSuggestionID,
                                 selectionOpacity: selectionOpacity,
                                 selectionNamespace: selectionNamespace,
-                                onSelect: { model.accept(suggestion) }
+                                onSelect: { model.accept(suggestion) },
+                                onSavePlace: onSavePlace
                             )
                         }
                     }
@@ -279,13 +318,14 @@ private struct GuidedComposerSuggestionList: View {
                         proxy.size.height
                     } action: { height in
                         guard height > 0,
-                              scrollContentHeight != height else {
+                            scrollContentHeight != height
+                        else {
                             return
                         }
                         scrollContentHeight = height
                     }
                 }
-                .frame(height: min(scrollContentHeight, 220))
+                .frame(height: min(scrollContentHeight, maximumHeight))
                 .scrollBounceBehavior(.basedOnSize)
             } else {
                 VStack(spacing: 0) {
@@ -296,7 +336,8 @@ private struct GuidedComposerSuggestionList: View {
                                 suggestion.id == model.activeSuggestionID,
                             selectionOpacity: selectionOpacity,
                             selectionNamespace: selectionNamespace,
-                            onSelect: { model.accept(suggestion) }
+                            onSelect: { model.accept(suggestion) },
+                            onSavePlace: onSavePlace
                         )
                         .onGeometryChange(for: CGRect.self) { proxy in
                             proxy.frame(in: .named(Self.coordinateSpace))
@@ -318,20 +359,24 @@ private struct GuidedComposerSuggestionList: View {
                     )
                     .onChanged { value in
                         selectionOpacity = 1
-                        guard let suggestionID = suggestionID(
-                            at: value.location
-                        ) else {
+                        guard
+                            let suggestionID = suggestionID(
+                                at: value.location
+                            )
+                        else {
                             return
                         }
                         activate(suggestionID)
                     }
                     .onEnded { value in
-                        guard let suggestionID = suggestionID(
-                            at: value.location
-                        ),
-                              let suggestion = model.suggestions.first(
-                                  where: { $0.id == suggestionID }
-                              ) else {
+                        guard
+                            let suggestionID = suggestionID(
+                                at: value.location
+                            ),
+                            let suggestion = model.suggestions.first(
+                                where: { $0.id == suggestionID }
+                            )
+                        else {
                             var transaction = Transaction(animation: nil)
                             transaction.disablesAnimations = true
                             withTransaction(transaction) {
@@ -362,7 +407,7 @@ private struct GuidedComposerSuggestionList: View {
             of: model.suggestions.map(\.id),
             initial: true
         ) { _, ids in
-            if ids.count > 6 {
+            if ids.count > scrollThreshold {
                 model.activateFirstSuggestion()
             } else {
                 let visibleIDs = Set(ids)
@@ -398,6 +443,7 @@ private struct GuidedComposerSuggestionButton: View {
     let selectionOpacity: Double
     let selectionNamespace: Namespace.ID
     let onSelect: () -> Void
+    let onSavePlace: (ComposerLocationCandidate) -> Void
 
     var body: some View {
         let subtitle = suggestion.subtitle.flatMap { subtitle in
@@ -409,6 +455,15 @@ private struct GuidedComposerSuggestionButton: View {
             HStack(spacing: 10) {
                 Group {
                     switch iconStyle {
+                    case .transit(let presentation):
+                        TransitPresentationIcon(
+                            presentation: presentation,
+                            size: 14,
+                            weight: .semibold
+                        )
+                        .foregroundStyle(presentation.foregroundColor)
+                        .frame(width: 24, height: 24)
+                        .background(presentation.color.gradient, in: .circle)
                     case .place(let symbol):
                         Image(systemName: suggestion.systemImage)
                             .symbolRenderingMode(.palette)
@@ -424,7 +479,7 @@ private struct GuidedComposerSuggestionButton: View {
                     }
                 }
                 .font(.callout.weight(.medium))
-                .frame(width: 20)
+                .frame(width: 24)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(suggestion.title)
@@ -477,6 +532,35 @@ private struct GuidedComposerSuggestionButton: View {
         .accessibilityHint(
             isActive ? "Selected autocomplete result" : "Autocomplete result"
         )
+        .contextMenu {
+            if let candidate = unsavedLocationCandidate {
+                Button {
+                    onSavePlace(candidate)
+                } label: {
+                    Label("Save Place…", systemImage: "bookmark")
+                }
+            }
+        }
+    }
+
+    private var unsavedLocationCandidate: ComposerLocationCandidate? {
+        guard case .value(let tokens, _) = suggestion.kind else {
+            return nil
+        }
+        let locations = tokens.compactMap { token in
+            if case .location(let candidate, _) = token.value {
+                candidate
+            } else {
+                nil
+            }
+        }
+        guard locations.count == 1,
+            let candidate = locations.first,
+            candidate.savedPlaceID == nil
+        else {
+            return nil
+        }
+        return candidate
     }
 
     private var iconStyle: IconStyle {
@@ -495,12 +579,13 @@ private struct GuidedComposerSuggestionButton: View {
                 if case .connector = $0.value { false } else { true }
             }
             if !values.isEmpty,
-               values.allSatisfy({ token in
-                   switch token.value {
-                   case .time, .duration: true
-                   default: false
-                   }
-               }) {
+                values.allSatisfy({ token in
+                    switch token.value {
+                    case .time, .duration: true
+                    default: false
+                    }
+                })
+            {
                 return .color(.orange)
             }
             return .color(.primary)
@@ -512,10 +597,8 @@ private struct GuidedComposerSuggestionButton: View {
     private func style(for token: ComposerToken) -> IconStyle {
         switch token.value {
         case .leading(.transit(let canonicalName)):
-            .color(
-                TransitPresentationCatalog.presentation(
-                    for: canonicalName
-                ).color
+            .transit(
+                TransitPresentationCatalog.presentation(for: canonicalName)
             )
         case .leading(.placeVisit):
             .color(.indigo)
@@ -531,6 +614,7 @@ private struct GuidedComposerSuggestionButton: View {
     }
 
     private enum IconStyle {
+        case transit(TransitPresentation)
         case place(PlaceSymbol)
         case color(Color)
     }
@@ -554,6 +638,10 @@ private struct GuidedComposerSuggestionButtonStyle: ButtonStyle {
 }
 
 private struct GuidedComposerTimePicker: View {
+    private static let wheelHeight: CGFloat = 180
+    private static let wheelWidth: CGFloat = 300
+    private static let wheelScale: CGFloat = 0.6
+
     let model: GuidedEntryComposerModel
     let role: ComposerTimeRole
 
@@ -563,30 +651,74 @@ private struct GuidedComposerTimePicker: View {
         let suggestedDate = model.suggestedPickerDate(for: role)
         let timeZone = model.pickerTimeZone(for: role)
 
-        HStack(spacing: 8) {
-            Image(systemName: "clock")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .frame(width: 20)
+        HStack(spacing: 6) {
+            ZStack {
+                DatePicker(
+                    selection: $date,
+                    displayedComponents: .date
+                ) {
+                    if role == .start {
+                        Text("Start date")
+                    } else {
+                        Text("End date")
+                    }
+                }
+                .labelsHidden()
+                .datePickerStyle(.compact)
+                .controlSize(.mini)
+                .fixedSize()
+                .frame(width: 65, height: 32)
+                .contentShape(.capsule)
+                .clipShape(.capsule)
+
+                Text(
+                    date,
+                    format: .dateTime.day().month(.abbreviated)
+                )
+                .frame(width: 68, height: 32)
+                .background(
+                    Color(uiColor: .systemGray5),
+                    in: Capsule()
+                )
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+            .frame(width: 68, height: 44)
+            .clipped()
 
             DatePicker(
-                role == .start ? "Start" : "End",
                 selection: $date,
-                displayedComponents: [.date, .hourAndMinute]
-            )
+                displayedComponents: .hourAndMinute
+            ) {
+                if role == .start {
+                    Text("Start")
+                } else {
+                    Text("End")
+                }
+            }
             .labelsHidden()
-            .environment(\.timeZone, timeZone)
+            .datePickerStyle(.wheel)
+            .frame(
+                width: Self.wheelWidth,
+                height: Self.wheelHeight
+            )
+            .scaleEffect(Self.wheelScale)
+            .frame(
+                width: Self.wheelWidth * Self.wheelScale,
+                height: Self.wheelHeight * Self.wheelScale
+            )
+            .clipped()
 
-            Spacer(minLength: 0)
-
-            Button("Use") {
+            Button {
                 model.selectTime(date, role: role)
+            } label: {
+                Image(systemName: "checkmark")
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .padding(.horizontal, 8)
+        .environment(\.timeZone, timeZone)
         .task(
             id: GuidedComposerTimePickerTaskID(
                 role: role,
@@ -606,4 +738,10 @@ private struct GuidedComposerTimePickerTaskID: Equatable {
 private struct GuidedComposerPersonRequest: Identifiable {
     let id = UUID()
     let name: String
+}
+
+private struct GuidedComposerPlaceRequest: Identifiable {
+    let candidate: ComposerLocationCandidate
+
+    var id: String { candidate.id }
 }

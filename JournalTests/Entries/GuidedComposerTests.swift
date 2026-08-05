@@ -649,6 +649,169 @@ struct GuidedComposerTests {
         #expect(bridged.gaps.isEmpty)
     }
 
+    @Test("Overnight entries only expose boundaries on the selected day")
+    func overnightEntryBoundariesStayOnSelectedDay() throws {
+        let beach = Place(
+            name: "Beach",
+            location: Location(latitude: 44.10, longitude: 28.64)
+        )
+        let office = Place(
+            name: "Office",
+            location: Location(latitude: 44.18, longitude: 28.61)
+        )
+        let overnight = visit(
+            place: beach,
+            start: "2026-07-17T19:00:00+03:00",
+            end: "2026-07-18T02:00:00+03:00"
+        )
+        let evening = visit(
+            place: office,
+            start: "2026-07-18T20:00:00+03:00",
+            end: "2026-07-18T21:00:00+03:00"
+        )
+        let context = GuidedComposerTimelineInference.makeContext(
+            entries: [overnight, evening],
+            selectedDay: TimelineDayKey(
+                year: 2026,
+                month: 7,
+                day: 18
+            ),
+            timeZone: zone
+        )
+
+        #expect(context.gaps.count == 1)
+        #expect(
+            context.gaps.first?.startTime
+                == date("2026-07-18T02:00:00+03:00")
+        )
+        #expect(
+            context.gaps.first?.endTime
+                == date("2026-07-18T20:00:00+03:00")
+        )
+        #expect(
+            !GuidedComposerTimelineInference
+                .shouldOfferLeadingHomeRoute(in: context)
+        )
+
+        let newOrigin = location(
+            "New origin",
+            latitude: 44.15,
+            longitude: 28.60
+        )
+        let requests = GuidedComposerRouteInference.anchoredRouteRequests(
+            in: context,
+            selectedOrigin: newOrigin,
+            selectedDestination: nil
+        )
+        #expect(requests.count == 1)
+        guard case .arrival(let arrival) = try #require(requests.first).anchor
+        else {
+            Issue.record("Expected an arrival boundary")
+            return
+        }
+        #expect(arrival == date("2026-07-18T20:00:00+03:00"))
+    }
+
+    @Test("Picker defaults to the current clock on the selected day")
+    func pickerDefaultsToCurrentClock() throws {
+        let context = try makeContext()
+        let model = GuidedEntryComposerModel()
+        let fixedNow = date("2026-08-04T15:23:00+03:00")
+        model.prepare(
+            selectedDay: TimelineDayKey(year: 2026, month: 7, day: 18),
+            places: [],
+            people: [],
+            transitTypes: [],
+            modelContext: context
+        )
+
+        let pickerDate = model.suggestedPickerDate(
+            for: .start,
+            now: fixedNow
+        )
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        let components = calendar.dateComponents(
+            [.year, .month, .day, .hour, .minute],
+            from: pickerDate
+        )
+        #expect(components.year == 2026)
+        #expect(components.month == 7)
+        #expect(components.day == 18)
+        #expect(components.hour == 15)
+        #expect(components.minute == 23)
+    }
+
+    @Test("Now remains available alongside end-time presets")
+    func nowRemainsAnEndTimeSuggestion() throws {
+        let context = try makeContext()
+        let home = Place(
+            name: "Home",
+            location: Location(
+                latitude: 44.18,
+                longitude: 28.61,
+                timeZoneIdentifier: zone.identifier
+            )
+        )
+        let model = GuidedEntryComposerModel()
+        model.prepare(
+            selectedDay: .today(timeZone: zone),
+            places: [home],
+            people: [],
+            transitTypes: [],
+            modelContext: context
+        )
+        model.editorText = AttributedString(
+            "Stay at Home from 10:00 to "
+        )
+        model.editorTextDidChange()
+
+        #expect(model.activeSlot == .time(.end))
+        #expect(model.suggestions.contains { suggestion in
+            suggestion.id == "time-now-end"
+        })
+        #expect(model.suggestions.contains { suggestion in
+            suggestion.subtitle?.contains("minutes after departure")
+                == true
+        })
+    }
+
+    @Test("Wheel times use minute precision and roll overnight ends")
+    func wheelTimeNormalizesAndRollsOvernight() throws {
+        let context = try makeContext()
+        let home = Place(
+            name: "Home",
+            location: Location(
+                latitude: 44.18,
+                longitude: 28.61,
+                timeZoneIdentifier: zone.identifier
+            )
+        )
+        let model = GuidedEntryComposerModel()
+        model.prepare(
+            selectedDay: TimelineDayKey(year: 2026, month: 7, day: 18),
+            places: [home],
+            people: [],
+            transitTypes: [],
+            modelContext: context
+        )
+        model.editorText = AttributedString(
+            "Stay at Home from 23:00 to "
+        )
+        model.editorTextDidChange()
+
+        model.selectTime(
+            date("2026-07-18T02:15:47+03:00"),
+            role: .end
+        )
+
+        #expect(
+            model.draft.time(.end)?.date
+                == date("2026-07-19T02:15:00+03:00")
+        )
+        #expect(model.canSubmit)
+    }
+
     @Test("Partial routes project their destination and timeline times")
     func partialRouteProjectsDestinationAndTimes() throws {
         let context = try makeContext()

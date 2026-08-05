@@ -13,9 +13,32 @@ nonisolated struct TransitMapSearchResult: Sendable, Equatable {
     let latitude: Double
     let longitude: Double
     let timeZoneIdentifier: String?
+    let pointOfInterestCategory: MKPointOfInterestCategory?
     let distanceKilometers: Double?
     let walkingDurationMinutes: Double?
     let automobileDurationMinutes: Double?
+
+    init(
+        name: String,
+        address: String?,
+        latitude: Double,
+        longitude: Double,
+        timeZoneIdentifier: String?,
+        pointOfInterestCategory: MKPointOfInterestCategory? = nil,
+        distanceKilometers: Double?,
+        walkingDurationMinutes: Double?,
+        automobileDurationMinutes: Double?
+    ) {
+        self.name = name
+        self.address = address
+        self.latitude = latitude
+        self.longitude = longitude
+        self.timeZoneIdentifier = timeZoneIdentifier
+        self.pointOfInterestCategory = pointOfInterestCategory
+        self.distanceKilometers = distanceKilometers
+        self.walkingDurationMinutes = walkingDurationMinutes
+        self.automobileDurationMinutes = automobileDurationMinutes
+    }
 
     var location: Location {
         Location(
@@ -112,6 +135,7 @@ nonisolated enum TransitMapKitService {
                 latitude: coordinate.latitude,
                 longitude: coordinate.longitude,
                 timeZoneIdentifier: item.timeZone?.identifier,
+                pointOfInterestCategory: item.pointOfInterestCategory,
                 distanceKilometers: origin.distance(from: location) / 1_000,
                 walkingDurationMinutes: nil,
                 automobileDurationMinutes: nil
@@ -154,6 +178,7 @@ nonisolated enum TransitMapKitService {
                     latitude: result.latitude,
                     longitude: result.longitude,
                     timeZoneIdentifier: result.timeZoneIdentifier,
+                    pointOfInterestCategory: result.pointOfInterestCategory,
                     distanceKilometers: result.distanceKilometers,
                     walkingDurationMinutes: walkingSeconds.map { $0 / 60 },
                     automobileDurationMinutes: automobileSeconds.map { $0 / 60 }

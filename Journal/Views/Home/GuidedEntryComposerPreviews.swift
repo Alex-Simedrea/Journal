@@ -9,7 +9,10 @@ private struct GuidedComposerSuggestionPreviewCanvas: View {
         ZStack(alignment: .bottom) {
             GuidedComposerPreviewBackdrop(heading: heading)
 
-            GuidedComposerSuggestionPanel(model: model)
+            GuidedComposerSuggestionPanel(
+                model: model,
+                onSavePlace: { _ in }
+            )
                 .padding(12)
         }
         .frame(width: 402, height: 700)

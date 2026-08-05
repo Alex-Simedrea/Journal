@@ -124,6 +124,8 @@ enum GuidedComposerRouteInference {
                 where GuidedComposerTimelineInference.hasInferenceWindow(
                     before: index,
                     in: context
+                ) && context.containsSelectedDayBoundary(
+                    interval.startTime
                 ) {
                     appendArrivalRequest(
                         origin: selectedOrigin,
@@ -149,6 +151,8 @@ enum GuidedComposerRouteInference {
                 where GuidedComposerTimelineInference.hasInferenceWindow(
                     after: index,
                     in: context
+                ) && context.containsSelectedDayBoundary(
+                    interval.endTime
                 ) {
                     appendDepartureRequest(
                         origin: interval.endLocation,

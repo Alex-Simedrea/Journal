@@ -550,9 +550,9 @@ struct EntryEditingTests {
         let model = PlaceEditorModel(
             initialName: "Home",
             initialLocation: location,
+            initialSymbol: .house,
             allowsCurrentLocationCapture: false
         )
-        model.selectedSymbol = .house
         model.accuracyRadiusMeters = 250
 
         let place = try #require(model.insertPlace(in: context))

@@ -197,6 +197,12 @@ enum GuidedComposerRouteSuggestionBuilder {
             guard !Task.isCancelled else { return }
             guard let duration else { continue }
             let interval = request.interval(for: duration)
+            guard context.containsSelectedDayInterval(
+                start: interval.start,
+                end: interval.end
+            ) else {
+                continue
+            }
             suggestions.append(
                 GuidedComposerRouteInference.routeSuggestion(
                     id: request.id,
@@ -316,13 +322,19 @@ enum GuidedComposerRouteSuggestionBuilder {
                     continue
                 }
                 guard !Task.isCancelled else { return }
+                let start = first.startTime.addingTimeInterval(-duration)
+                guard context.containsSelectedDayInterval(
+                    start: start,
+                    end: first.startTime
+                ) else {
+                    continue
+                }
                 suggestions.append(
                     GuidedComposerRouteInference.routeSuggestion(
                         id: "route-before-\(first.id)-\(home.id)",
                         origin: home,
                         destination: first.startLocation,
-                        start:
-                            first.startTime.addingTimeInterval(-duration),
+                        start: start,
                         end: first.startTime,
                         timeSource: .history,
                         durationSource: durationSource(for: routingMode),
@@ -353,13 +365,20 @@ enum GuidedComposerRouteSuggestionBuilder {
                     continue
                 }
                 guard !Task.isCancelled else { return }
+                let end = last.endTime.addingTimeInterval(duration)
+                guard context.containsSelectedDayInterval(
+                    start: last.endTime,
+                    end: end
+                ) else {
+                    continue
+                }
                 suggestions.append(
                     GuidedComposerRouteInference.routeSuggestion(
                         id: "route-after-\(last.id)-\(home.id)",
                         origin: last.endLocation,
                         destination: home,
                         start: last.endTime,
-                        end: last.endTime.addingTimeInterval(duration),
+                        end: end,
                         timeSource: .history,
                         durationSource: durationSource(for: routingMode),
                         subtitle: String(
