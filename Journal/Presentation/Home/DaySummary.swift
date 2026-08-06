@@ -48,6 +48,10 @@ nonisolated struct DayWeatherRequest: Hashable, Sendable {
         }
         return interval.start.addingTimeInterval(interval.duration / 2)
     }
+
+    func isCompleted(at date: Date = .now) -> Bool {
+        date >= endDate
+    }
 }
 
 nonisolated struct DayWeatherSummary: Equatable, Sendable {
@@ -64,6 +68,37 @@ nonisolated struct DayWeatherSummary: Equatable, Sendable {
             temperatureCelsius: highTemperatureCelsius,
             humidity: maximumHumidity,
             date: date
+        )
+    }
+}
+
+nonisolated extension PersistedDayWeather {
+    init(request: DayWeatherRequest, summary: DayWeatherSummary) {
+        year = request.day.year
+        month = request.day.month
+        day = request.day.day
+        latitude = request.latitude
+        longitude = request.longitude
+        timeZoneIdentifier = request.timeZoneIdentifier
+        weather = summary.entryWeather
+    }
+
+    func matches(_ request: DayWeatherRequest) -> Bool {
+        year == request.day.year
+            && month == request.day.month
+            && day == request.day.day
+            && timeZoneIdentifier == request.timeZoneIdentifier
+            && abs(latitude - request.latitude) < 0.000_01
+            && abs(longitude - request.longitude) < 0.000_01
+    }
+
+    var summary: DayWeatherSummary {
+        DayWeatherSummary(
+            condition: weather.condition,
+            symbolName: weather.symbolName,
+            highTemperatureCelsius: weather.temperatureCelsius,
+            maximumHumidity: weather.humidity,
+            date: weather.date
         )
     }
 }
@@ -265,7 +300,9 @@ enum DaySummaryProjector {
             featuredPlace: weatherFeaturedPlace,
             occurrences: occurrences
         )
-        let mappedLocations = occurrences.flatMap(mappedLocations)
+        let mappedLocations = occurrences.flatMap { occurrence in
+            mappedLocations(occurrence)
+        }
             .filter(\.hasCoordinate)
         let distinctLocationIDs = Set(mappedLocations.map(\.id))
         let showsOverview = !movementOccurrences.isEmpty

@@ -12,6 +12,9 @@ nonisolated struct Location: Hashable, Sendable {
     var formattedAddress: String?
     var compactAddress: String?
     var timeZoneIdentifier: String?
+    var cityName: String?
+    var countryName: String?
+    var countryCode: String?
 
     init(
         latitude: Double,
@@ -19,7 +22,10 @@ nonisolated struct Location: Hashable, Sendable {
         displayName: String? = nil,
         formattedAddress: String? = nil,
         compactAddress: String? = nil,
-        timeZoneIdentifier: String? = nil
+        timeZoneIdentifier: String? = nil,
+        cityName: String? = nil,
+        countryName: String? = nil,
+        countryCode: String? = nil
     ) {
         self.latitude = latitude
         self.longitude = longitude
@@ -27,6 +33,9 @@ nonisolated struct Location: Hashable, Sendable {
         self.formattedAddress = formattedAddress
         self.compactAddress = compactAddress
         self.timeZoneIdentifier = timeZoneIdentifier
+        self.cityName = cityName
+        self.countryName = countryName
+        self.countryCode = countryCode
     }
 
     var coordinate: CLLocationCoordinate2D {

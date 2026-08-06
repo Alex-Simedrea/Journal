@@ -63,7 +63,8 @@ actor WeatherKitDayClient: DayWeatherProviding {
 
     func weather(for request: DayWeatherRequest) async throws
         -> DayWeatherSummary {
-        if let cached = cache[request] {
+        let retainsResult = request.isCompleted()
+        if retainsResult, let cached = cache[request] {
             return cached
         }
         if let task = tasks[request] {
@@ -106,7 +107,9 @@ actor WeatherKitDayClient: DayWeatherProviding {
 
         do {
             let result = try await task.value
-            cache[request] = result
+            if retainsResult {
+                cache[request] = result
+            }
             tasks[request] = nil
             return result
         } catch {

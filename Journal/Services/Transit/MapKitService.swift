@@ -13,6 +13,9 @@ nonisolated struct TransitMapSearchResult: Sendable, Equatable {
     let latitude: Double
     let longitude: Double
     let timeZoneIdentifier: String?
+    let cityName: String?
+    let countryName: String?
+    let countryCode: String?
     let pointOfInterestCategory: MKPointOfInterestCategory?
     let distanceKilometers: Double?
     let walkingDurationMinutes: Double?
@@ -24,6 +27,9 @@ nonisolated struct TransitMapSearchResult: Sendable, Equatable {
         latitude: Double,
         longitude: Double,
         timeZoneIdentifier: String?,
+        cityName: String? = nil,
+        countryName: String? = nil,
+        countryCode: String? = nil,
         pointOfInterestCategory: MKPointOfInterestCategory? = nil,
         distanceKilometers: Double?,
         walkingDurationMinutes: Double?,
@@ -34,6 +40,9 @@ nonisolated struct TransitMapSearchResult: Sendable, Equatable {
         self.latitude = latitude
         self.longitude = longitude
         self.timeZoneIdentifier = timeZoneIdentifier
+        self.cityName = cityName
+        self.countryName = countryName
+        self.countryCode = countryCode
         self.pointOfInterestCategory = pointOfInterestCategory
         self.distanceKilometers = distanceKilometers
         self.walkingDurationMinutes = walkingDurationMinutes
@@ -46,7 +55,10 @@ nonisolated struct TransitMapSearchResult: Sendable, Equatable {
             longitude: longitude,
             displayName: name,
             formattedAddress: address,
-            timeZoneIdentifier: timeZoneIdentifier
+            timeZoneIdentifier: timeZoneIdentifier,
+            cityName: cityName,
+            countryName: countryName,
+            countryCode: countryCode
         )
     }
 }
@@ -124,6 +136,7 @@ nonisolated enum TransitMapKitService {
                 continue
             }
             let coordinate = item.location.coordinate
+            let enrichedLocation = LocationService.location(for: item)
             let location = CLLocation(
                 latitude: coordinate.latitude,
                 longitude: coordinate.longitude
@@ -135,6 +148,9 @@ nonisolated enum TransitMapKitService {
                 latitude: coordinate.latitude,
                 longitude: coordinate.longitude,
                 timeZoneIdentifier: item.timeZone?.identifier,
+                cityName: enrichedLocation.cityName,
+                countryName: enrichedLocation.countryName,
+                countryCode: enrichedLocation.countryCode,
                 pointOfInterestCategory: item.pointOfInterestCategory,
                 distanceKilometers: origin.distance(from: location) / 1_000,
                 walkingDurationMinutes: nil,
@@ -178,6 +194,9 @@ nonisolated enum TransitMapKitService {
                     latitude: result.latitude,
                     longitude: result.longitude,
                     timeZoneIdentifier: result.timeZoneIdentifier,
+                    cityName: result.cityName,
+                    countryName: result.countryName,
+                    countryCode: result.countryCode,
                     pointOfInterestCategory: result.pointOfInterestCategory,
                     distanceKilometers: result.distanceKilometers,
                     walkingDurationMinutes: walkingSeconds.map { $0 / 60 },

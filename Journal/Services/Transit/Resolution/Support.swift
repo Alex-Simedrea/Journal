@@ -34,7 +34,10 @@ extension TransitResolutionService {
                     address: reference.location.formattedAddress,
                     latitude: reference.location.latitude,
                     longitude: reference.location.longitude,
-                    timeZoneIdentifier: reference.location.timeZoneIdentifier
+                    timeZoneIdentifier: reference.location.timeZoneIdentifier,
+                    cityName: reference.location.cityName,
+                    countryName: reference.location.countryName,
+                    countryCode: reference.location.countryCode
                 )
             }
             guard let result = searchResults[key] else { return nil }
@@ -44,6 +47,9 @@ extension TransitResolutionService {
                 latitude: result.latitude,
                 longitude: result.longitude,
                 timeZoneIdentifier: result.timeZoneIdentifier,
+                cityName: result.cityName,
+                countryName: result.countryName,
+                countryCode: result.countryCode,
                 distanceKilometers: result.distanceKilometers,
                 walkingDurationMinutes: result.walkingDurationMinutes,
                 automobileDurationMinutes: result.automobileDurationMinutes

@@ -53,11 +53,13 @@ enum WeatherGradient {
         latitude: Double?,
         longitude: Double?,
         timeZoneIdentifier: String,
-        colorScheme: ColorScheme
+        colorScheme: ColorScheme,
+        presentationDate: Date? = nil
     ) -> LinearGradient {
-        let symbolName = weather?.symbolName ?? "cloud.slash.fill"
+        let symbolName = weather?.symbolName
+            ?? (presentationDate == nil ? "cloud.slash.fill" : "sun.max.fill")
         let phase = WeatherPresentation.skyPhase(
-            date: weather?.date ?? .now,
+            date: weather?.date ?? presentationDate ?? .now,
             latitude: latitude,
             longitude: longitude,
             symbolName: symbolName,

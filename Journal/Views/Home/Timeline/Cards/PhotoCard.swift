@@ -57,8 +57,20 @@ struct TimelinePhotoTile: View {
 struct TimelinePhotoThumbnail: View {
     @Environment(\.displayScale) private var displayScale
     let reference: PhotoReference
+    let loadsContent: Bool
+    let usesSummaryCache: Bool
     @State private var image: UIImage?
     @State private var didFinishLoading = false
+
+    init(
+        reference: PhotoReference,
+        loadsContent: Bool = true,
+        usesSummaryCache: Bool = false
+    ) {
+        self.reference = reference
+        self.loadsContent = loadsContent
+        self.usesSummaryCache = usesSummaryCache
+    }
 
     var body: some View {
         ZStack {
@@ -78,15 +90,30 @@ struct TimelinePhotoThumbnail: View {
             }
         }
         .clipped()
-        .task(id: reference.assetLocalIdentifier) {
+        .task(id: "\(reference.assetLocalIdentifier)-\(loadsContent)-\(usesSummaryCache)") {
+            if usesSummaryCache,
+               let cached = SummaryPhotoThumbnailService.cachedImage(
+                   for: reference
+               ) {
+                image = cached
+                didFinishLoading = true
+                return
+            }
+            guard loadsContent else { return }
             didFinishLoading = false
-            image = await PhotoLibraryService.image(
-                for: reference.assetLocalIdentifier,
-                targetSize: CGSize(
-                    width: 180 * displayScale,
-                    height: 180 * displayScale
+            if usesSummaryCache {
+                image = await SummaryPhotoThumbnailService.image(
+                    for: reference
                 )
-            )
+            } else {
+                image = await PhotoLibraryService.image(
+                    for: reference.assetLocalIdentifier,
+                    targetSize: CGSize(
+                        width: 180 * displayScale,
+                        height: 180 * displayScale
+                    )
+                )
+            }
             didFinishLoading = true
         }
     }

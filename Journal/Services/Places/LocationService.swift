@@ -84,7 +84,10 @@ final class LocationService {
             longitude: coordinate.longitude,
             formattedAddress: metadata.address,
             compactAddress: metadata.compactAddress,
-            timeZoneIdentifier: metadata.timeZoneIdentifier
+            timeZoneIdentifier: metadata.timeZoneIdentifier,
+            cityName: metadata.cityName,
+            countryName: metadata.countryName,
+            countryCode: metadata.countryCode
         )
     }
 
@@ -102,15 +105,37 @@ final class LocationService {
         return [primary, city].joined(separator: ", ")
     }
 
+    static func location(
+        for mapItem: MKMapItem,
+        fallbackName: String? = nil
+    ) -> Location {
+        let coordinate = mapItem.location.coordinate
+        let countryName = mapItem.addressRepresentations?.regionName
+        return Location(
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude,
+            displayName: mapItem.name ?? fallbackName,
+            formattedAddress: mapItem.address?.fullAddress,
+            compactAddress: compactAddress(for: mapItem),
+            timeZoneIdentifier: mapItem.timeZone?.identifier,
+            cityName: mapItem.addressRepresentations?.cityName,
+            countryName: countryName,
+            countryCode: countryCode(for: countryName)
+        )
+    }
+
     private func reverseGeocode(
         _ location: CLLocation
     ) async -> (
         address: String?,
         compactAddress: String?,
-        timeZoneIdentifier: String?
+        timeZoneIdentifier: String?,
+        cityName: String?,
+        countryName: String?,
+        countryCode: String?
     ) {
         guard let request = MKReverseGeocodingRequest(location: location) else {
-            return (nil, nil, nil)
+            return (nil, nil, nil, nil, nil, nil)
         }
 
         do {
@@ -118,10 +143,15 @@ final class LocationService {
             return (
                 item?.address?.fullAddress,
                 item.flatMap(Self.compactAddress),
-                item?.timeZone?.identifier
+                item?.timeZone?.identifier,
+                item?.addressRepresentations?.cityName,
+                item?.addressRepresentations?.regionName,
+                Self.countryCode(
+                    for: item?.addressRepresentations?.regionName
+                )
             )
         } catch {
-            return (nil, nil, nil)
+            return (nil, nil, nil, nil, nil, nil)
         }
     }
 
@@ -135,5 +165,15 @@ final class LocationService {
             options: [.caseInsensitive, .diacriticInsensitive],
             locale: .current
         )
+    }
+
+    private static func countryCode(for countryName: String?) -> String? {
+        guard let countryName = nonempty(countryName) else { return nil }
+        return Locale.Region.isoRegions.first { region in
+            guard let localized = Locale.current.localizedString(
+                forRegionCode: region.identifier
+            ) else { return false }
+            return normalized(localized) == normalized(countryName)
+        }?.identifier
     }
 }

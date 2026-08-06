@@ -1,8 +1,16 @@
-import MapKit
 import SwiftUI
 
 struct DaySummaryCardContent: View {
     let model: DaySummaryRowModel
+    let loadsDeferredContent: Bool
+
+    init(
+        model: DaySummaryRowModel,
+        loadsDeferredContent: Bool = true
+    ) {
+        self.model = model
+        self.loadsDeferredContent = loadsDeferredContent
+    }
 
     var body: some View {
         let recipe = DaySummaryLayoutRecipe.make(for: model.summary)
@@ -11,7 +19,8 @@ struct DaySummaryCardContent: View {
             DaySummaryTileCanvas(
                 model: model,
                 recipe: recipe,
-                size: proxy.size
+                size: proxy.size,
+                loadsDeferredContent: loadsDeferredContent
             )
         }
         .aspectRatio(
@@ -25,11 +34,16 @@ private struct DaySummaryTileCanvas: View {
     let model: DaySummaryRowModel
     let recipe: DaySummaryLayoutRecipe
     let size: CGSize
+    let loadsDeferredContent: Bool
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             ForEach(recipe.placements) { placement in
-                DaySummaryTile(model: model, tile: placement.tile)
+                DaySummaryTile(
+                    model: model,
+                    tile: placement.tile,
+                    loadsDeferredContent: loadsDeferredContent
+                )
                     .frame(
                         width: placement.frame.width * size.width,
                         height: placement.frame.height * size.width
@@ -46,12 +60,17 @@ private struct DaySummaryTileCanvas: View {
 private struct DaySummaryTile: View {
     let model: DaySummaryRowModel
     let tile: DaySummaryTileKind
+    let loadsDeferredContent: Bool
 
     var body: some View {
         ZStack {
             switch tile {
             case .overview:
-                DaySummaryOverviewMap(data: model.overviewData)
+                DaySummaryOverviewMap(
+                    cacheSlotID: "day-\(model.id.id)-overview",
+                    data: model.overviewData,
+                    loadsContent: loadsDeferredContent
+                )
             case .weather:
                 DaySummaryWeatherTile(
                     state: model.weatherState,
@@ -63,7 +82,10 @@ private struct DaySummaryTile: View {
                     needsReview: model.summary.peopleNeedReview
                 )
             case .photos:
-                DaySummaryPhotoTile(references: model.summary.photos)
+                DaySummaryPhotoTile(
+                    references: model.summary.photos,
+                    loadsContent: loadsDeferredContent
+                )
             case .movement:
                 if let movement = model.summary.movement {
                     DaySummaryMovementTile(movement: movement)
@@ -74,7 +96,9 @@ private struct DaySummaryTile: View {
                 }
             case .featuredPlace:
                 if let featuredPlace = model.summary.featuredPlace {
-                    DaySummaryPlaceMap(featuredPlace: featuredPlace)
+                    DaySummaryPlaceMap(
+                        featuredPlace: featuredPlace
+                    )
                 }
             case .review:
                 DaySummaryNeedsReviewTile()
@@ -94,7 +118,9 @@ private struct DaySummaryWeatherTile: View {
                 layout: proxy.size.height < 60 ? .compact : .large,
                 location: location,
                 timeZoneIdentifier: request?.timeZoneIdentifier
-                    ?? TimeZone.current.identifier
+                    ?? TimeZone.current.identifier,
+                isLoading: state == .idle || state == .loading,
+                presentationDate: request?.presentationDate
             )
         }
     }
@@ -174,6 +200,7 @@ private struct DaySummaryPeopleTile: View {
 
 private struct DaySummaryPhotoTile: View {
     let references: [PhotoReference]
+    let loadsContent: Bool
 
     var body: some View {
         GeometryReader { proxy in
@@ -193,7 +220,8 @@ private struct DaySummaryPhotoTile: View {
                     index, reference in
                     DaySummaryPhotoThumbnail(
                         reference: reference,
-                        previewIndex: index
+                        previewIndex: index,
+                        loadsContent: loadsContent
                     )
                         .overlay {
                             if index == 3, references.count > 4 {
@@ -219,9 +247,20 @@ private struct DaySummaryPhotoTile: View {
     }
 }
 
-private struct DaySummaryPhotoThumbnail: View {
+struct DaySummaryPhotoThumbnail: View {
     let reference: PhotoReference
     let previewIndex: Int
+    let loadsContent: Bool
+
+    init(
+        reference: PhotoReference,
+        previewIndex: Int,
+        loadsContent: Bool = true
+    ) {
+        self.reference = reference
+        self.previewIndex = previewIndex
+        self.loadsContent = loadsContent
+    }
 
     @ViewBuilder var body: some View {
 #if DEBUG
@@ -238,10 +277,18 @@ private struct DaySummaryPhotoThumbnail: View {
                     .foregroundStyle(.white.opacity(0.8))
             }
         } else {
-            TimelinePhotoThumbnail(reference: reference)
+            TimelinePhotoThumbnail(
+                reference: reference,
+                loadsContent: loadsContent,
+                usesSummaryCache: true
+            )
         }
 #else
-        TimelinePhotoThumbnail(reference: reference)
+        TimelinePhotoThumbnail(
+            reference: reference,
+            loadsContent: loadsContent,
+            usesSummaryCache: true
+        )
 #endif
     }
 
@@ -377,7 +424,7 @@ private struct DaySummaryMovementBadges: View {
     }
 }
 
-private struct DaySummaryMovementBadge: View {
+struct DaySummaryMovementBadge: View {
     let icon: DayMovementIcon
     let size: CGFloat
 
@@ -498,51 +545,106 @@ private struct DaySummaryWakeUpLabels: View {
     }
 }
 
-private struct DaySummaryOverviewMap: View {
+struct DaySummaryOverviewMap: View {
+    let cacheSlotID: String
     let data: TimelineOverviewData
-    @State private var position: MapCameraPosition = .automatic
+    let loadsContent: Bool
+
+    init(
+        cacheSlotID: String,
+        data: TimelineOverviewData,
+        loadsContent: Bool = true
+    ) {
+        self.cacheSlotID = cacheSlotID
+        self.data = data
+        self.loadsContent = loadsContent
+    }
 
     var body: some View {
-        Map(position: $position) {
-            ForEach(data.paths) { path in
-                switch path.kind {
-                case .transit(let transitType):
-                    MapPolyline(coordinates: path.coordinates)
-                        .stroke(
-                            TransitPresentationCatalog.presentation(
-                                for: transitType
-                            ).color.opacity(0.82),
-                            style: StrokeStyle(
-                                lineWidth: 3,
-                                lineCap: .round,
-                                lineJoin: .round
-                            )
-                        )
-                case .workout:
-                    MapPolyline(coordinates: path.coordinates)
-                        .stroke(.black.opacity(0.44), lineWidth: 6)
-                    MapPolyline(coordinates: path.coordinates)
-                        .stroke(Color(hex: 0xB6FF00), lineWidth: 3.5)
-                }
-            }
-
-            ForEach(data.markers) { marker in
-                PlaceMapFeature(
-                    name: marker.name,
-                    coordinate: marker.coordinate,
-                    systemImage: marker.systemImage,
-                    accuracyRadiusMeters: marker.accuracyRadiusMeters,
-                    radiusCenterCoordinate: marker.radiusCenterCoordinate
-                )
-            }
-        }
-        .mapStyle(.standard)
-        .onChange(of: data, initial: true) {
-            position = DaySummaryMapCamera.position(for: data)
-        }
+        SummaryMapSnapshotView(
+            cacheSlotID: cacheSlotID,
+            data: data,
+            loadsContent: loadsContent
+        )
         .allowsHitTesting(false)
         .clipShape(.rect(cornerRadius: 16))
         .accessibilityLabel("Map of the day’s places and movement")
+    }
+}
+
+struct SummaryMapSnapshotView: View {
+    let cacheSlotID: String
+    let data: TimelineOverviewData
+    let loadsContent: Bool
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.displayScale) private var displayScale
+    @State private var image: UIImage?
+
+    init(
+        cacheSlotID: String,
+        data: TimelineOverviewData,
+        loadsContent: Bool
+    ) {
+        self.cacheSlotID = cacheSlotID
+        self.data = data
+        self.loadsContent = loadsContent
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let request = request(for: proxy.size)
+            ZStack {
+                Color(uiColor: .secondarySystemGroupedBackground)
+                if let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                }
+            }
+            .task(id: taskID(for: request)) {
+                guard let request else { return }
+                if let cached = SummaryMapDecodedImageCache.image(
+                    for: request
+                ) {
+                    image = cached
+                    return
+                }
+                guard loadsContent else { return }
+                do {
+                    let data = try await SummaryMapSnapshotStore.shared.data(
+                        for: request
+                    )
+                    try Task.checkCancellation()
+                    SummaryMapDecodedImageCache.insert(
+                        data: data,
+                        for: request
+                    )
+                    image = SummaryMapDecodedImageCache.image(
+                        for: request
+                    )
+                } catch is CancellationError {
+                    return
+                } catch {
+                    image = nil
+                }
+            }
+        }
+    }
+
+    private func request(for size: CGSize) -> SummaryMapSnapshotRequest? {
+        SummaryMapSnapshotRequestFactory.overview(
+            slotID: cacheSlotID,
+            data: data,
+            size: size,
+            displayScale: displayScale,
+            appearance: colorScheme == .dark ? .dark : .light
+        )
+    }
+
+    private func taskID(
+        for request: SummaryMapSnapshotRequest?
+    ) -> String {
+        "\(request?.cacheKey ?? "none")-\(loadsContent)"
     }
 }
 
@@ -555,46 +657,6 @@ private struct DaySummaryPlaceMap: View {
             needsReview: featuredPlace.needsReview
         )
     }
-}
-
-private enum DaySummaryMapCamera {
-    static func position(for data: TimelineOverviewData) -> MapCameraPosition {
-        let coordinates = data.markers.map(\.coordinate)
-            + data.paths.flatMap(\.coordinates)
-        guard coordinates.count > 1 else {
-            if let coordinate = coordinates.first {
-                return .region(
-                    MKCoordinateRegion(
-                        center: coordinate,
-                        latitudinalMeters: 1_200,
-                        longitudinalMeters: 1_200
-                    )
-                )
-            }
-            return .automatic
-        }
-
-        var rect = MKMapRect.null
-        for coordinate in coordinates {
-            let point = MKMapPoint(coordinate)
-            rect = rect.union(
-                MKMapRect(
-                    origin: point,
-                    size: MKMapSize(width: 1, height: 1)
-                )
-            )
-        }
-        let latitude = coordinates.map(\.latitude).reduce(0, +)
-            / Double(coordinates.count)
-        let minimumPadding = 450
-            * MKMapPointsPerMeterAtLatitude(latitude)
-        let horizontalPadding = max(rect.width * 0.22, minimumPadding)
-        let verticalPadding = max(rect.height * 0.22, minimumPadding)
-        return .rect(
-            rect.insetBy(dx: -horizontalPadding, dy: -verticalPadding)
-        )
-    }
-
 }
 
 private struct DaySummaryNeedsReviewTile: View {

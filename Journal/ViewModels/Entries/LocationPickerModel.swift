@@ -84,14 +84,9 @@ final class EntryLocationPickerModel {
 
         do {
             let mapItem = try await search.resolve(suggestion)
-            let coordinate = mapItem.location.coordinate
-            let location = Location(
-                latitude: coordinate.latitude,
-                longitude: coordinate.longitude,
-                displayName: mapItem.name ?? suggestion.title,
-                formattedAddress: mapItem.address?.fullAddress,
-                compactAddress: LocationService.compactAddress(for: mapItem),
-                timeZoneIdentifier: mapItem.timeZone?.identifier
+            let location = LocationService.location(
+                for: mapItem,
+                fallbackName: suggestion.title
             )
             setSelection(EntryLocationSelection(
                 location: location,

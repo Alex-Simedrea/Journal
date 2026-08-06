@@ -175,7 +175,10 @@ final class WorkoutImportCoordinator {
             compactAddress: resolved.compactAddress
                 ?? location.compactAddress,
             timeZoneIdentifier: resolved.timeZoneIdentifier
-                ?? location.timeZoneIdentifier
+                ?? location.timeZoneIdentifier,
+            cityName: resolved.cityName ?? location.cityName,
+            countryName: resolved.countryName ?? location.countryName,
+            countryCode: resolved.countryCode ?? location.countryCode
         )
     }
 

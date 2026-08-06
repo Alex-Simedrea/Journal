@@ -495,6 +495,58 @@ struct DaySummaryTests {
         )
     }
 
+    @Test("Daily weather becomes durable only after the local day ends")
+    func dailyWeatherCompletionBoundary() {
+        let request = DayWeatherRequest(
+            day: day(12),
+            startDate: date("2026-07-12T00:00:00+03:00"),
+            endDate: date("2026-07-13T00:00:00+03:00"),
+            latitude: 44.43,
+            longitude: 26.10,
+            timeZoneIdentifier: bucharest
+        )
+
+        #expect(!request.isCompleted(
+            at: date("2026-07-12T23:59:59+03:00")
+        ))
+        #expect(request.isCompleted(
+            at: date("2026-07-13T00:00:00+03:00")
+        ))
+    }
+
+    @Test("Persisted daily weather validates its day and location")
+    func persistedDailyWeatherMatching() {
+        let request = DayWeatherRequest(
+            day: day(12),
+            startDate: date("2026-07-12T00:00:00+03:00"),
+            endDate: date("2026-07-13T00:00:00+03:00"),
+            latitude: 44.43,
+            longitude: 26.10,
+            timeZoneIdentifier: bucharest
+        )
+        let expected = DayWeatherSummary(
+            condition: "clear",
+            symbolName: "sun.max.fill",
+            highTemperatureCelsius: 31,
+            maximumHumidity: 0.7,
+            date: date("2026-07-12T12:00:00+03:00")
+        )
+        let record = PersistedDayWeather(request: request, summary: expected)
+
+        #expect(record.matches(request))
+        #expect(record.summary == expected)
+
+        let movedRequest = DayWeatherRequest(
+            day: request.day,
+            startDate: request.startDate,
+            endDate: request.endDate,
+            latitude: 45.0,
+            longitude: request.longitude,
+            timeZoneIdentifier: request.timeZoneIdentifier
+        )
+        #expect(!record.matches(movedRequest))
+    }
+
     @Test("Concurrent daily weather requests share one load and cache it")
     func weatherCaching() async throws {
         let counter = InvocationCounter()
@@ -528,6 +580,35 @@ struct DaySummaryTests {
         #expect(concurrent.1 == expected)
         #expect(cached == expected)
         #expect(await counter.value == 1)
+    }
+
+    @Test("An unfinished day is deduplicated in flight but not retained")
+    func unfinishedWeatherIsRefreshable() async throws {
+        let counter = InvocationCounter()
+        let expected = DayWeatherSummary(
+            condition: "clear",
+            symbolName: "sun.max.fill",
+            highTemperatureCelsius: 31,
+            maximumHumidity: 0.7,
+            date: .now
+        )
+        let client = WeatherKitDayClient { _ in
+            await counter.increment()
+            return expected
+        }
+        let request = DayWeatherRequest(
+            day: TimelineDayKey.today(),
+            startDate: .now.addingTimeInterval(-60),
+            endDate: .distantFuture,
+            latitude: 44.43,
+            longitude: 26.10,
+            timeZoneIdentifier: bucharest
+        )
+
+        _ = try await client.weather(for: request)
+        _ = try await client.weather(for: request)
+
+        #expect(await counter.value == 2)
     }
 
     private func summary(

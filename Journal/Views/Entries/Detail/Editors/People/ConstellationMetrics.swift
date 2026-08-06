@@ -11,7 +11,7 @@ nonisolated enum EntryDetailPeopleConstellationMetrics {
     static let gap: CGFloat = 2
 
     static func placements(count: Int) -> [EntryDetailPeopleBubblePlacement] {
-        makePlacements(count: min(max(count, 0), 12))
+        makePlacements(count: min(max(count, 0), 18))
     }
 
     static func scale(
@@ -90,12 +90,34 @@ nonisolated enum EntryDetailPeopleConstellationMetrics {
                 upperDiameters: [17, 23, 27, 23, 17],
                 lowerDiameters: [16, 21, 24, 24, 21, 16]
             )
-        default:
+        case 12:
             return stackedRows(
                 upperDiameters: [19, 24, 28, 24, 19],
                 lowerDiameters: [13, 17, 21, 23, 21, 17, 13]
             )
+        default:
+            return denseRows(count: count)
         }
+    }
+
+    private static func denseRows(
+        count: Int
+    ) -> [EntryDetailPeopleBubblePlacement] {
+        let upperCount = count / 2
+        let lowerCount = count - upperCount
+        func diameters(_ itemCount: Int, maximum: CGFloat) -> [CGFloat] {
+            (0..<itemCount).map { index in
+                let center = CGFloat(itemCount - 1) / 2
+                let distance = abs(CGFloat(index) - center)
+                    / max(1, center)
+                return maximum - distance * 5
+            }
+        }
+        return stackedRows(
+            upperDiameters: diameters(upperCount, maximum: 19),
+            lowerDiameters: diameters(lowerCount, maximum: 17),
+            archAngle: .pi / 55
+        )
     }
 
     private static var threeBubbleCluster: [EntryDetailPeopleBubblePlacement] {

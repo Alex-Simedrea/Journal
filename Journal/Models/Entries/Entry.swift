@@ -45,6 +45,7 @@ final class LogEntry {
     var photoReferences: [PhotoReference] = []
     var weather: EntryWeather?
     var endWeather: EntryWeather?
+    var dayWeatherRecords: [PersistedDayWeather] = []
     var wakeUpSourceSampleUUID: UUID?
     var sleepDurationSeconds: Double?
 
@@ -72,6 +73,7 @@ final class LogEntry {
         photoReferences: [PhotoReference] = [],
         weather: EntryWeather? = nil,
         endWeather: EntryWeather? = nil,
+        dayWeatherRecords: [PersistedDayWeather] = [],
         wakeUpSourceSampleUUID: UUID? = nil,
         sleepDurationSeconds: Double? = nil,
         entryKindReviewReason: String? = nil,
@@ -96,6 +98,7 @@ final class LogEntry {
         self.photoReferences = photoReferences
         self.weather = weather
         self.endWeather = endWeather
+        self.dayWeatherRecords = dayWeatherRecords
         self.wakeUpSourceSampleUUID = wakeUpSourceSampleUUID
         self.sleepDurationSeconds = sleepDurationSeconds
         self.entryKindReviewReason = entryKindReviewReason
@@ -118,6 +121,7 @@ final class LogEntry {
         photoReferences: [PhotoReference] = [],
         weather: EntryWeather? = nil,
         endWeather: EntryWeather? = nil,
+        dayWeatherRecords: [PersistedDayWeather] = [],
         wakeUpSourceSampleUUID: UUID? = nil,
         sleepDurationSeconds: Double? = nil,
         entryKindReviewReason: String? = nil,
@@ -141,6 +145,7 @@ final class LogEntry {
             photoReferences: photoReferences,
             weather: weather,
             endWeather: endWeather,
+            dayWeatherRecords: dayWeatherRecords,
             wakeUpSourceSampleUUID: wakeUpSourceSampleUUID,
             sleepDurationSeconds: sleepDurationSeconds,
             entryKindReviewReason: entryKindReviewReason,

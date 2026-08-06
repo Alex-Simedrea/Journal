@@ -157,6 +157,23 @@ struct EntryWeatherTests {
             humidity: 0.81,
             date: date.addingTimeInterval(600)
         )
+        entry.dayWeatherRecords = [
+            PersistedDayWeather(
+                year: 2026,
+                month: 7,
+                day: 12,
+                latitude: 45.64,
+                longitude: 25.59,
+                timeZoneIdentifier: "Europe/Bucharest",
+                weather: EntryWeather(
+                    condition: "clear",
+                    symbolName: "sun.max.fill",
+                    temperatureCelsius: 29,
+                    humidity: 0.72,
+                    date: date
+                )
+            )
+        ]
         context.insert(entry)
         try context.save()
 
@@ -169,5 +186,73 @@ struct EntryWeatherTests {
         #expect(fetched.weather?.date == date)
         #expect(fetched.endWeather?.condition == "rain")
         #expect(fetched.endWeather?.temperatureCelsius == 18)
+        #expect(fetched.dayWeatherRecords.count == 1)
+        #expect(fetched.dayWeatherRecords.first?.weather.temperatureCelsius == 29)
+    }
+
+    @Test("Completed day summaries hydrate from persisted weather")
+    func completedDaySummaryHydratesFromStorage() throws {
+        let schema = Schema([
+            LogEntry.self,
+            Person.self,
+            Place.self,
+            TransitDetails.self,
+            PlaceVisitDetails.self,
+            WorkoutDetails.self,
+            TransitType.self,
+        ])
+        let container = try ModelContainer(
+            for: schema,
+            configurations: [ModelConfiguration(isStoredInMemoryOnly: true)]
+        )
+        let context = ModelContext(container)
+        let start = try Date(
+            "2025-07-12T10:00:00+03:00",
+            strategy: .iso8601
+        )
+        let end = try Date(
+            "2025-07-12T12:00:00+03:00",
+            strategy: .iso8601
+        )
+        let place = Place(
+            name: "Cafe",
+            location: Location(latitude: 44.43, longitude: 26.10)
+        )
+        let entry = LogEntry(
+            kind: .placeVisit,
+            startTime: start,
+            endTime: end,
+            startTimeZoneIdentifier: "Europe/Bucharest",
+            endTimeZoneIdentifier: "Europe/Bucharest",
+            creationTimeZoneIdentifier: "Europe/Bucharest",
+            timeConfidence: .explicit,
+            needsReview: false
+        )
+        entry.placeVisitDetails = PlaceVisitDetails(place: place)
+        context.insert(entry)
+        try context.save()
+
+        let projected = try #require(
+            DaySummaryProjector.makeSummaries(
+                entries: [TimelineEntrySnapshot(entry: entry)]
+            ).first
+        )
+        let request = try #require(projected.weatherRequest)
+        let expected = DayWeatherSummary(
+            condition: "clear",
+            symbolName: "sun.max.fill",
+            highTemperatureCelsius: 30,
+            maximumHumidity: 0.68,
+            date: request.presentationDate
+        )
+        entry.dayWeatherRecords = [
+            PersistedDayWeather(request: request, summary: expected)
+        ]
+        try context.save()
+
+        let feed = HomeFeedModel()
+        feed.reload(in: context)
+        let row = try #require(feed.rows.first)
+        #expect(row.weatherState == .loaded(expected))
     }
 }

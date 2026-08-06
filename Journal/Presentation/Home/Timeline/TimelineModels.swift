@@ -104,6 +104,9 @@ struct TimelineLocationSnapshot: Hashable, Identifiable, Sendable {
     let accuracyRadiusMeters: Double
     let radiusCenterLatitude: Double?
     let radiusCenterLongitude: Double?
+    let cityName: String?
+    let countryName: String?
+    let countryCode: String?
 
     init(
         place: Place?,
@@ -120,6 +123,9 @@ struct TimelineLocationSnapshot: Hashable, Identifiable, Sendable {
         accuracyRadiusMeters = max(place?.accuracyRadiusMeters ?? 0, 0)
         radiusCenterLatitude = place?.location.latitude
         radiusCenterLongitude = place?.location.longitude
+        cityName = location?.cityName
+        countryName = location?.countryName
+        countryCode = location?.countryCode
         if let place {
             id = place.id.uuidString
         } else if let location {
@@ -137,7 +143,10 @@ struct TimelineLocationSnapshot: Hashable, Identifiable, Sendable {
         systemImage: PlaceSystemImage = .mappin,
         accuracyRadiusMeters: Double = 0,
         radiusCenterLatitude: Double? = nil,
-        radiusCenterLongitude: Double? = nil
+        radiusCenterLongitude: Double? = nil,
+        cityName: String? = nil,
+        countryName: String? = nil,
+        countryCode: String? = nil
     ) {
         self.savedPlaceID = savedPlaceID
         self.name = name
@@ -147,6 +156,9 @@ struct TimelineLocationSnapshot: Hashable, Identifiable, Sendable {
         self.accuracyRadiusMeters = max(accuracyRadiusMeters, 0)
         self.radiusCenterLatitude = radiusCenterLatitude
         self.radiusCenterLongitude = radiusCenterLongitude
+        self.cityName = cityName
+        self.countryName = countryName
+        self.countryCode = countryCode
         if let savedPlaceID {
             id = savedPlaceID.uuidString
         } else if latitude != 0 || longitude != 0 {

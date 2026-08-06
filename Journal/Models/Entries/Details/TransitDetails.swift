@@ -42,6 +42,9 @@ struct LocationCandidate: Codable, Hashable, Identifiable {
     var latitude: Double
     var longitude: Double
     var timeZoneIdentifier: String?
+    var cityName: String?
+    var countryName: String?
+    var countryCode: String?
     var distanceKilometers: Double?
     var walkingDurationMinutes: Double?
     var automobileDurationMinutes: Double?
@@ -53,6 +56,9 @@ struct LocationCandidate: Codable, Hashable, Identifiable {
         latitude: Double,
         longitude: Double,
         timeZoneIdentifier: String? = nil,
+        cityName: String? = nil,
+        countryName: String? = nil,
+        countryCode: String? = nil,
         distanceKilometers: Double? = nil,
         walkingDurationMinutes: Double? = nil,
         automobileDurationMinutes: Double? = nil
@@ -63,6 +69,9 @@ struct LocationCandidate: Codable, Hashable, Identifiable {
         self.latitude = latitude
         self.longitude = longitude
         self.timeZoneIdentifier = timeZoneIdentifier
+        self.cityName = cityName
+        self.countryName = countryName
+        self.countryCode = countryCode
         self.distanceKilometers = distanceKilometers
         self.walkingDurationMinutes = walkingDurationMinutes
         self.automobileDurationMinutes = automobileDurationMinutes
@@ -74,7 +83,10 @@ struct LocationCandidate: Codable, Hashable, Identifiable {
             longitude: longitude,
             displayName: name,
             formattedAddress: address,
-            timeZoneIdentifier: timeZoneIdentifier
+            timeZoneIdentifier: timeZoneIdentifier,
+            cityName: cityName,
+            countryName: countryName,
+            countryCode: countryCode
         )
     }
 }

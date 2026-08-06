@@ -13,6 +13,8 @@ struct TimelineWeatherTile: View {
     let layout: TimelineWeatherTileLayout
     let location: TimelineLocationSnapshot?
     let timeZoneIdentifier: String
+    var isLoading = false
+    var presentationDate: Date? = nil
 
     var body: some View {
         ZStack {
@@ -23,6 +25,8 @@ struct TimelineWeatherTile: View {
                 case .large:
                     TimelineLargeWeatherContent(weather: weather)
                 }
+            } else if isLoading {
+                TimelineLoadingWeatherContent(layout: layout)
             } else {
                 TimelineUnavailableWeatherContent(layout: layout)
             }
@@ -36,11 +40,28 @@ struct TimelineWeatherTile: View {
                 latitude: location?.latitude,
                 longitude: location?.longitude,
                 timeZoneIdentifier: timeZoneIdentifier,
-                colorScheme: colorScheme
+                colorScheme: colorScheme,
+                presentationDate: presentationDate
             ),
             in: .rect(cornerRadius: 16)
         )
         .accessibilityElement(children: .combine)
+    }
+}
+
+private struct TimelineLoadingWeatherContent: View {
+    let layout: TimelineWeatherTileLayout
+
+    var body: some View {
+        ProgressView()
+            .tint(.white)
+            .controlSize(layout == .large ? .regular : .small)
+            .frame(
+                maxWidth: .infinity,
+                maxHeight: .infinity,
+                alignment: .leading
+            )
+            .accessibilityLabel("Loading weather")
     }
 }
 

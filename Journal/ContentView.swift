@@ -23,7 +23,9 @@ import SwiftUI
 struct ContentView: View {
     var body: some View {
 #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-day-summary-gallery")
+        if ProcessInfo.processInfo.arguments.contains("-period-summary-gallery") {
+            PeriodSummaryDesignGallery()
+        } else if ProcessInfo.processInfo.arguments.contains("-day-summary-gallery")
             || ProcessInfo.processInfo.environment["DAY_SUMMARY_GALLERY"] == "1" {
             DaySummaryDesignGallery()
         } else {
@@ -43,15 +45,14 @@ private struct JournalApplicationContent: View {
     @State private var contentRevision = 0
 
     var body: some View {
-        NavigationStack {
-            HomeScreen(contentRevision: contentRevision)
-        }
+        HomeScreen(contentRevision: contentRevision)
         .task {
             _ = try? await ContactPersonSyncService
                 .synchronizeAllContacts(in: modelContext)
             await workoutImports.start(in: modelContext)
             await EntryWeatherService.populateMissing(in: modelContext)
             await TransitDistanceService.populateMissing(in: modelContext)
+            await LocationGeographyService.populateMissing(in: modelContext)
             contentRevision &+= 1
             boardingPassImports.loadNextIfNeeded()
         }
@@ -64,6 +65,9 @@ private struct JournalApplicationContent: View {
                         in: modelContext
                     )
                     await TransitDistanceService.populateMissing(
+                        in: modelContext
+                    )
+                    await LocationGeographyService.populateMissing(
                         in: modelContext
                     )
                     contentRevision &+= 1

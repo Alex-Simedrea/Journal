@@ -1,25 +1,121 @@
+import Foundation
 import SwiftData
 import SwiftUI
+import UIKit
+
+@MainActor
+@Observable
+private final class HomeFeedDeferredLoadingPolicy {
+    private(set) var allowsLoading = true
+
+    @ObservationIgnored
+    private var phase: ScrollPhase = .idle
+
+    @ObservationIgnored
+    private var previousOffset: CGFloat?
+
+    @ObservationIgnored
+    private var previousSampleTime: TimeInterval?
+
+    private static let pauseVelocity: CGFloat = 400
+    private static let resumeVelocity: CGFloat = 200
+
+    func phaseDidChange(
+        to newPhase: ScrollPhase,
+        offset: CGFloat,
+        velocity: CGFloat?,
+        at time: TimeInterval
+    ) {
+        phase = newPhase
+        previousOffset = offset
+        previousSampleTime = time
+
+        if newPhase == .idle {
+            allowsLoading = true
+        } else if newPhase == .animating {
+            allowsLoading = false
+        } else if let velocity {
+            updateLoadingState(for: abs(velocity))
+        }
+    }
+
+    func sampled(offset: CGFloat, at time: TimeInterval) {
+        defer {
+            previousOffset = offset
+            previousSampleTime = time
+        }
+        guard phase.isScrolling,
+              let previousOffset,
+              let previousSampleTime else {
+            return
+        }
+        let duration = time - previousSampleTime
+        guard duration > 0 else { return }
+        let velocity = abs(offset - previousOffset) / duration
+        updateLoadingState(for: velocity)
+    }
+
+    private func updateLoadingState(for velocity: CGFloat) {
+        if allowsLoading, velocity >= Self.pauseVelocity {
+            allowsLoading = false
+        } else if !allowsLoading, velocity <= Self.resumeVelocity {
+            allowsLoading = true
+        }
+    }
+}
+
+enum HomeTransitionSource: Hashable {
+    case day(TimelineDayKey)
+    case period(PeriodSummaryKey)
+    case today
+    case empty(TimelineDayKey)
+}
 
 private struct PresentedTimeline: Identifiable {
     let selectedDay: TimelineDayKey
-    let sourceDay: TimelineDayKey
+    let source: HomeTransitionSource
 
     var id: TimelineDayKey { selectedDay }
 }
 
+private enum HomeFeedAnchor: Hashable {
+    case day(TimelineDayKey)
+    case period(PeriodSummaryKey)
+}
+
+private enum HomeFeedScrollAlignment: Hashable {
+    case top
+    case bottom
+}
+
 private struct HomeFeedScrollRequest: Hashable {
     let id = UUID()
-    let day: TimelineDayKey
+    let anchor: HomeFeedAnchor
+    let alignment: HomeFeedScrollAlignment
+    let animated: Bool
+
+    init(
+        anchor: HomeFeedAnchor,
+        alignment: HomeFeedScrollAlignment,
+        animated: Bool = false
+    ) {
+        self.anchor = anchor
+        self.alignment = alignment
+        self.animated = animated
+    }
 }
 
 struct HomeScreen: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
-    @Namespace private var dayTransition
+    @Namespace private var timelineTransition
     @State private var model = HomeFeedModel()
+    @State private var scale: JournalSummaryScale = .days
     @State private var scrollRequest: HomeFeedScrollRequest?
+    @State private var pendingScaleTarget: HomeFeedAnchor?
     @State private var visibleDay: TimelineDayKey?
+    @State private var visibleMonth: MonthKey?
+    @State private var visibleYear: YearKey?
     @State private var isFeedReady = false
     @State private var emptyTransitionDay = TimelineDayKey.today()
     @State private var presentedTimeline: PresentedTimeline?
@@ -31,63 +127,39 @@ struct HomeScreen: View {
         self.contentRevision = contentRevision
     }
 
-    private var titleDay: TimelineDayKey {
-        visibleDay ?? scrollRequest?.day ?? .today()
-    }
-
     var body: some View {
-        Group {
-            if isFeedReady {
-                HomeFeedContent(
-                    model: model,
-                    namespace: dayTransition,
-                    emptyTransitionDay: emptyTransitionDay,
-                    scrollRequest: scrollRequest,
-                    onVisibleDayChange: { visibleDay = $0 },
-                    onOpenDay: presentTimeline,
-                    onStartToday: {
+        NavigationStack {
+            ZStack {
+                if isFeedReady {
+                    feed
+                } else {
+                    Color(uiColor: .systemGroupedBackground)
+                }
+            }
+            .navigationTitle(navigationTitle)
+            .toolbarTitleDisplayMode(.inlineLarge)
+            .toolbar {
+                topToolbar
+                HomeBottomToolbar(
+                    scale: $scale,
+                    namespace: timelineTransition,
+                    onToday: {
                         let today = TimelineDayKey.today()
-                        emptyTransitionDay = today
-                        presentTimeline(today)
-                    }
+                        presentTimeline(today, source: .today)
+                    },
+                    onScaleReselected: scrollToBottom,
+                    onSearch: {}
                 )
-            } else {
-                Color(uiColor: .systemGroupedBackground)
             }
+            .background(Color(uiColor: .systemGroupedBackground))
         }
-        .navigationTitle(
-            DaySummaryDatePresentation.monthTitle(for: titleDay)
-        )
-        .toolbarTitleDisplayMode(.inlineLarge)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    isCalendarPresented = true
-                } label: {
-                    Label("Choose date", systemImage: "calendar")
-                }
-            }
-
-            ToolbarSpacer(.fixed, placement: .topBarTrailing)
-
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    isProfilePresented = true
-                } label: {
-                    Label("Profile", systemImage: "person.fill")
-                }
-            }
-        }
-        .background(Color(uiColor: .systemGroupedBackground))
         .sheet(isPresented: $isCalendarPresented) {
-            TimelineCalendarSheet(selectedDay: titleDay) { selectedDay in
+            TimelineCalendarSheet(selectedDay: calendarDay) { selectedDay in
                 handleCalendarSelection(selectedDay)
             }
             .presentationDetents([.medium])
         }
-        .sheet(isPresented: $isProfilePresented, onDismiss: {
-            model.reload(in: modelContext)
-        }) {
+        .sheet(isPresented: $isProfilePresented, onDismiss: reloadFeed) {
             ProfileMenuSheet()
         }
         .fullScreenCover(
@@ -96,8 +168,8 @@ struct HomeScreen: View {
         ) { session in
             TimelineFullScreenCover(
                 initialDay: session.selectedDay,
-                initialSourceDay: session.sourceDay,
-                namespace: dayTransition,
+                initialSource: session.source,
+                namespace: timelineTransition,
                 onDayChange: timelineDayDidChange
             )
         }
@@ -106,9 +178,77 @@ struct HomeScreen: View {
             isFeedReady = true
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active {
-                reloadFeed()
+            if phase == .active { reloadFeed() }
+        }
+        .onChange(of: scale) { oldScale, newScale in
+            prepareScaleSwitch(from: oldScale, to: newScale)
+        }
+    }
+
+    private var feed: some View {
+        HomeFeedContent(
+            model: model,
+            scale: scale,
+            namespace: timelineTransition,
+            emptyTransitionDay: emptyTransitionDay,
+            scrollRequest: scrollRequest,
+            onVisibleAnchorChange: updateVisibleAnchor,
+            onOpenDay: {
+                presentTimeline($0, source: .day($0))
+            },
+            onOpenPeriod: openPeriod,
+            onOpenPeriodDay: { day, period in
+                presentTimeline(day, source: .period(period))
+            },
+            onStartToday: {
+                let today = TimelineDayKey.today()
+                emptyTransitionDay = today
+                presentTimeline(today, source: .empty(today))
             }
+        )
+    }
+
+    @ToolbarContentBuilder private var topToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Button {
+                isCalendarPresented = true
+            } label: {
+                Label("Choose date", systemImage: "calendar")
+            }
+        }
+
+        ToolbarSpacer(.fixed, placement: .topBarTrailing)
+
+        ToolbarItem(placement: .topBarTrailing) {
+            Button {
+                isProfilePresented = true
+            } label: {
+                Label("Profile", systemImage: "person.fill")
+            }
+        }
+    }
+
+    private var calendarDay: TimelineDayKey {
+        visibleDay
+            ?? visibleMonth.flatMap { model.firstDay(in: $0) }
+            ?? visibleYear.flatMap { year in
+                model.firstMonth(in: year).flatMap(model.firstDay)
+            }
+            ?? model.days.last
+            ?? .today()
+    }
+
+    private var navigationTitle: String {
+        switch scale {
+        case .days:
+            DaySummaryDatePresentation.monthTitle(
+                for: visibleDay ?? model.days.last ?? .today()
+            )
+        case .months:
+            String((visibleMonth ?? model.monthRows.last?.summary.monthKey)?.year
+                ?? Calendar.current.component(.year, from: .now))
+        case .years:
+            String(localized: "Years")
         }
     }
 
@@ -116,33 +256,170 @@ struct HomeScreen: View {
         model.reload(in: modelContext)
     }
 
-    private func handleCalendarSelection(_ selectedDay: TimelineDayKey) {
-        isCalendarPresented = false
-        if let target = model.nearestDay(to: selectedDay) {
-            scrollRequest = HomeFeedScrollRequest(day: target)
-            visibleDay = target
-        } else {
-            emptyTransitionDay = selectedDay
-            presentTimeline(selectedDay)
+    private func prepareScaleSwitch(
+        from oldScale: JournalSummaryScale,
+        to newScale: JournalSummaryScale
+    ) {
+        let target = pendingScaleTarget
+            ?? inferredTarget(from: oldScale, to: newScale)
+        pendingScaleTarget = nil
+        guard let target else { return }
+        scrollRequest = HomeFeedScrollRequest(
+            anchor: target,
+            alignment: .top
+        )
+    }
+
+    private func scrollToBottom(of selectedScale: JournalSummaryScale) {
+        guard selectedScale == scale else { return }
+
+        switch selectedScale {
+        case .days:
+            guard let day = model.days.last else { return }
+            scrollRequest = HomeFeedScrollRequest(
+                anchor: .day(day),
+                alignment: .bottom,
+                animated: true
+            )
+        case .months:
+            guard let key = model.monthRows.last?.id else { return }
+            scrollRequest = HomeFeedScrollRequest(
+                anchor: .period(key),
+                alignment: .bottom,
+                animated: true
+            )
+        case .years:
+            guard let key = model.yearRows.last?.id else { return }
+            scrollRequest = HomeFeedScrollRequest(
+                anchor: .period(key),
+                alignment: .bottom,
+                animated: true
+            )
         }
     }
 
-    private func presentTimeline(_ selectedDay: TimelineDayKey) {
-        let sourceDay = model.nearestDay(to: selectedDay) ?? selectedDay
+    private func inferredTarget(
+        from oldScale: JournalSummaryScale,
+        to newScale: JournalSummaryScale
+    ) -> HomeFeedAnchor? {
+        switch (oldScale, newScale) {
+        case (.days, .months):
+            let month = visibleDay.map(MonthKey.init)
+                ?? model.monthRows.last?.summary.monthKey
+            return month.map { .period(.month($0)) }
+        case (.days, .years):
+            let year = visibleDay.map { YearKey(year: $0.year) }
+                ?? model.yearRows.last?.summary.yearKey
+            return year.map { .period(.year($0)) }
+        case (.months, .days):
+            let day = visibleMonth.flatMap(model.firstDay) ?? model.days.last
+            return day.map(HomeFeedAnchor.day)
+        case (.months, .years):
+            let year = visibleMonth.map { YearKey(year: $0.year) }
+                ?? model.yearRows.last?.summary.yearKey
+            return year.map { .period(.year($0)) }
+        case (.years, .days):
+            let day = visibleYear.flatMap { model.firstMonth(in: $0) }
+                .flatMap(model.firstDay) ?? model.days.last
+            return day.map(HomeFeedAnchor.day)
+        case (.years, .months):
+            let month = visibleYear.flatMap(model.firstMonth)
+                ?? model.monthRows.last?.summary.monthKey
+            return month.map { .period(.month($0)) }
+        default:
+            return nil
+        }
+    }
+
+    private func updateVisibleAnchor(_ anchor: HomeFeedAnchor) {
+        switch anchor {
+        case .day(let day):
+            visibleDay = day
+        case .period(.month(let month)):
+            visibleMonth = month
+            visibleYear = YearKey(year: month.year)
+        case .period(.year(let year)):
+            visibleYear = year
+        }
+    }
+
+    private func handleCalendarSelection(_ selectedDay: TimelineDayKey) {
+        isCalendarPresented = false
+        guard let target = model.nearestDay(to: selectedDay) else {
+            emptyTransitionDay = selectedDay
+            presentTimeline(selectedDay, source: .empty(selectedDay))
+            return
+        }
+        visibleDay = target
+        if scale == .days {
+            scrollRequest = HomeFeedScrollRequest(
+                anchor: .day(target),
+                alignment: .top
+            )
+        } else {
+            pendingScaleTarget = .day(target)
+            scale = .days
+        }
+    }
+
+    private func openPeriod(_ summary: PeriodSummary) {
+        switch summary.key {
+        case .year(let year):
+            guard let month = model.firstMonth(in: year) else { return }
+            visibleMonth = month
+            if scale == .months {
+                scrollRequest = HomeFeedScrollRequest(
+                    anchor: .period(.month(month)),
+                    alignment: .top
+                )
+            } else {
+                pendingScaleTarget = .period(.month(month))
+                scale = .months
+            }
+        case .month(let month):
+            openMonth(month)
+        }
+    }
+
+    private func openMonth(_ month: MonthKey) {
+        guard let day = model.firstDay(in: month) else { return }
+        visibleDay = day
+        if scale == .days {
+            scrollRequest = HomeFeedScrollRequest(
+                anchor: .day(day),
+                alignment: .top
+            )
+        } else {
+            pendingScaleTarget = .day(day)
+            scale = .days
+        }
+    }
+
+    private func presentTimeline(
+        _ selectedDay: TimelineDayKey,
+        source: HomeTransitionSource
+    ) {
         presentedTimeline = PresentedTimeline(
             selectedDay: selectedDay,
-            sourceDay: sourceDay
+            source: source
         )
     }
 
     private func timelineDayDidChange(
         _ selectedDay: TimelineDayKey
-    ) -> TimelineDayKey {
-        if let nearest = model.nearestDay(to: selectedDay) {
-            return nearest
+    ) -> HomeTransitionSource {
+        guard let nearest = model.nearestDay(to: selectedDay) else {
+            emptyTransitionDay = selectedDay
+            return .empty(selectedDay)
         }
-        emptyTransitionDay = selectedDay
-        return selectedDay
+        switch scale {
+        case .days:
+            return .day(nearest)
+        case .months:
+            return .period(.month(MonthKey(day: nearest)))
+        case .years:
+            return .period(.year(YearKey(year: nearest.year)))
+        }
     }
 
     private func timelineDidDismiss() {
@@ -150,36 +427,191 @@ struct HomeScreen: View {
     }
 }
 
+struct HomeBottomToolbar: ToolbarContent {
+    @Binding var scale: JournalSummaryScale
+    let namespace: Namespace.ID
+    let onToday: () -> Void
+    let onScaleReselected: (JournalSummaryScale) -> Void
+    let onSearch: () -> Void
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .bottomBar) {
+            Button(action: onToday) {
+                Label("Today", systemImage: "text.rectangle.page")
+            }
+            .matchedTransitionSource(
+                id: HomeTransitionSource.today,
+                in: namespace
+            )
+        }
+
+        ToolbarSpacer(.flexible, placement: .bottomBar)
+
+        ToolbarItem(placement: .bottomBar) {
+            HomeScalePicker(
+                scale: $scale,
+                onReselect: onScaleReselected
+            )
+        }
+        .sharedBackgroundVisibility(.hidden)
+
+        ToolbarSpacer(.flexible, placement: .bottomBar)
+
+        ToolbarItem(placement: .bottomBar) {
+            Button(action: onSearch) {
+                Label("Search", systemImage: "magnifyingglass")
+            }
+            .accessibilityHint("Search is coming soon")
+        }
+    }
+}
+
+private struct HomeScalePicker: View {
+    @Environment(\.layoutDirection) private var layoutDirection
+    @Binding var scale: JournalSummaryScale
+    let onReselect: (JournalSummaryScale) -> Void
+
+    var body: some View {
+        Picker("Summary scale", selection: $scale) {
+            ForEach(JournalSummaryScale.allCases) { scale in
+                Text(scale.title)
+                    .tag(scale)
+            }
+        }
+        .pickerStyle(.segmented)
+        .gesture(
+            HomeScaleReselectGesture(
+                selectedScale: scale,
+                layoutDirection: layoutDirection,
+                onReselect: onReselect
+            )
+        )
+        .accessibilityAction(named: "Scroll to Latest") {
+            onReselect(scale)
+        }
+    }
+}
+
+private struct HomeScaleReselectGesture: UIGestureRecognizerRepresentable {
+    let selectedScale: JournalSummaryScale
+    let layoutDirection: LayoutDirection
+    let onReselect: (JournalSummaryScale) -> Void
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
+        Coordinator(onReselect: onReselect)
+    }
+
+    func makeUIGestureRecognizer(context: Context) -> ReselectRecognizer {
+        let recognizer = ReselectRecognizer()
+        recognizer.cancelsTouchesInView = false
+        recognizer.delegate = context.coordinator
+        return recognizer
+    }
+
+    func updateUIGestureRecognizer(
+        _ recognizer: ReselectRecognizer,
+        context: Context
+    ) {
+        recognizer.currentSelection = selectedScale
+        context.coordinator.onReselect = onReselect
+    }
+
+    func handleUIGestureRecognizerAction(
+        _ recognizer: ReselectRecognizer,
+        context: Context
+    ) {
+        guard recognizer.state == .ended,
+              let originalSelection = recognizer.selectionAtTouchStart,
+              let view = recognizer.view,
+              view.bounds.width > 0 else { return }
+
+        let scales = JournalSummaryScale.allCases
+        let location = recognizer.location(in: view)
+        let rawIndex = min(
+            scales.count - 1,
+            max(0, Int(location.x / view.bounds.width * CGFloat(scales.count)))
+        )
+        let index = layoutDirection == .rightToLeft
+            ? scales.count - 1 - rawIndex
+            : rawIndex
+        let tappedScale = scales[index]
+
+        guard tappedScale == originalSelection else { return }
+        context.coordinator.onReselect(tappedScale)
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var onReselect: (JournalSummaryScale) -> Void
+
+        init(onReselect: @escaping (JournalSummaryScale) -> Void) {
+            self.onReselect = onReselect
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            true
+        }
+    }
+
+    final class ReselectRecognizer: UITapGestureRecognizer {
+        var currentSelection: JournalSummaryScale = .days
+        private(set) var selectionAtTouchStart: JournalSummaryScale?
+
+        override func touchesBegan(
+            _ touches: Set<UITouch>,
+            with event: UIEvent
+        ) {
+            selectionAtTouchStart = currentSelection
+            super.touchesBegan(touches, with: event)
+        }
+    }
+}
+
+private struct HomeFeedScrollSample: Equatable {
+    let offset: CGFloat
+    let contentWidth: CGFloat
+}
+
+private struct HomeFeedMapPrewarmKey: Hashable {
+    let revision: Int
+    let pixelWidth: Int
+    let appearance: SummaryMapSnapshotRequest.Appearance
+}
+
 private struct HomeFeedContent: View {
     let model: HomeFeedModel
+    let scale: JournalSummaryScale
     let namespace: Namespace.ID
     let emptyTransitionDay: TimelineDayKey
     let scrollRequest: HomeFeedScrollRequest?
-    let onVisibleDayChange: (TimelineDayKey) -> Void
+    let onVisibleAnchorChange: (HomeFeedAnchor) -> Void
     let onOpenDay: (TimelineDayKey) -> Void
+    let onOpenPeriod: (PeriodSummary) -> Void
+    let onOpenPeriodDay: (TimelineDayKey, PeriodSummaryKey) -> Void
     let onStartToday: () -> Void
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.displayScale) private var displayScale
+    @State private var deferredLoading = HomeFeedDeferredLoadingPolicy()
+    @State private var contentWidth: CGFloat = 0
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 32) {
-                    if let errorMessage = model.errorMessage {
-                        HomeFeedErrorView(message: errorMessage)
-                    } else if model.rows.isEmpty {
-                        HomeFeedEmptyView(onStartToday: onStartToday)
-                            .matchedTransitionSource(
-                                id: emptyTransitionDay,
-                                in: namespace
-                            )
-                    } else {
-                        ForEach(model.rows) { rowModel in
-                            HomeFeedDayRow(
-                                model: rowModel,
-                                namespace: namespace,
-                                onOpen: { onOpenDay(rowModel.id) }
-                            )
-                            .id(rowModel.id)
-                        }
+                LazyVStack(
+                    alignment: .leading,
+                    spacing: scale == .days ? 32 : 34
+                ) {
+                    switch scale {
+                    case .days:
+                        dayRows
+                    case .months:
+                        periodRows(model.monthRows)
+                    case .years:
+                        periodRows(model.yearRows)
                     }
                 }
                 .scrollTargetLayout()
@@ -188,57 +620,192 @@ private struct HomeFeedContent: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
             }
-            .contentMargins(.bottom, 100, for: .scrollContent)
+            .contentMargins(.bottom, 16, for: .scrollContent)
+            .defaultScrollAnchor(.bottom, for: .initialOffset)
+            .scrollEdgeEffectStyle(.soft, for: [.top, .bottom])
             .onScrollTargetVisibilityChange(
-                idType: TimelineDayKey.self,
+                idType: HomeFeedAnchor.self,
                 threshold: 0.1
-            ) { visibleDays in
-                if let first = visibleDays.first {
-                    onVisibleDayChange(first)
+            ) { visible in
+                if let first = visible.first {
+                    onVisibleAnchorChange(first)
                 }
+            }
+            .onScrollGeometryChange(for: HomeFeedScrollSample.self) { geometry in
+                HomeFeedScrollSample(
+                    offset: geometry.contentOffset.y,
+                    contentWidth: min(440, max(0, geometry.containerSize.width - 32))
+                )
+            } action: { _, sample in
+                if abs(contentWidth - sample.contentWidth) > 0.5 {
+                    contentWidth = sample.contentWidth
+                }
+                deferredLoading.sampled(
+                    offset: sample.offset,
+                    at: ProcessInfo.processInfo.systemUptime
+                )
+            }
+            .onScrollPhaseChange { _, newPhase, context in
+                deferredLoading.phaseDidChange(
+                    to: newPhase,
+                    offset: context.geometry.contentOffset.y,
+                    velocity: context.velocity?.dy,
+                    at: ProcessInfo.processInfo.systemUptime
+                )
             }
             .background(Color(uiColor: .systemGroupedBackground))
             .scrollContentBackground(.hidden)
-            .task {
-                guard let lastDay = model.rows.last?.id else { return }
-                proxy.scrollTo(lastDay, anchor: .bottom)
-            }
             .task(id: scrollRequest?.id) {
                 guard let scrollRequest else { return }
-                withAnimation(.smooth) {
-                    proxy.scrollTo(scrollRequest.day)
-                }
+                jump(proxy, using: scrollRequest)
+            }
+            .task(id: mapPrewarmKey) {
+                guard contentWidth > 1 else { return }
+                await model.prewarmMapSnapshots(
+                    contentWidth: contentWidth,
+                    displayScale: displayScale,
+                    appearance: colorScheme == .dark ? .dark : .light
+                )
             }
         }
-        .background(Color(uiColor: .systemGroupedBackground))
+    }
+
+    private var mapPrewarmKey: HomeFeedMapPrewarmKey {
+        HomeFeedMapPrewarmKey(
+            revision: model.mapSnapshotRevision,
+            pixelWidth: Int((contentWidth * displayScale).rounded()),
+            appearance: colorScheme == .dark ? .dark : .light
+        )
+    }
+
+    @ViewBuilder
+    private var dayRows: some View {
+        if let errorMessage = model.errorMessage {
+            HomeFeedErrorView(message: errorMessage)
+        } else if model.rows.isEmpty {
+            HomeFeedEmptyView(onStartToday: onStartToday)
+                .matchedTransitionSource(
+                    id: HomeTransitionSource.empty(emptyTransitionDay),
+                    in: namespace
+                )
+        } else {
+            ForEach(model.rows) { rowModel in
+                HomeFeedDayRow(
+                    model: rowModel,
+                    namespace: namespace,
+                    loadsDeferredContent: deferredLoading.allowsLoading,
+                    onOpen: { onOpenDay(rowModel.id) }
+                )
+                .id(HomeFeedAnchor.day(rowModel.id))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func periodRows(_ rows: [PeriodSummaryRowModel]) -> some View {
+        ForEach(rows) { row in
+            PeriodFeedRow(
+                model: row,
+                namespace: namespace,
+                loadsDeferredContent: deferredLoading.allowsLoading,
+                onOpen: { onOpenPeriod(row.summary) },
+                onOpenDay: { onOpenPeriodDay($0, row.summary.key) }
+            )
+            .id(HomeFeedAnchor.period(row.id))
+        }
+    }
+
+    private func jump(
+        _ proxy: ScrollViewProxy,
+        using request: HomeFeedScrollRequest
+    ) {
+        if request.animated {
+            withAnimation(.smooth) {
+                proxy.scrollTo(
+                    request.anchor,
+                    anchor: request.alignment == .top ? .top : .bottom
+                )
+            }
+            return
+        }
+
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            proxy.scrollTo(
+                request.anchor,
+                anchor: request.alignment == .top ? .top : .bottom
+            )
+        }
     }
 }
 
 private struct HomeFeedDayRow: View {
     let model: DaySummaryRowModel
     let namespace: Namespace.ID
+    let loadsDeferredContent: Bool
     let onOpen: () -> Void
 
     var body: some View {
         Button(action: onOpen) {
             VStack(alignment: .leading, spacing: 8) {
-                Text(
-                    DaySummaryDatePresentation.dayTitle(
-                        for: model.summary.day
-                    )
+                Text(DaySummaryDatePresentation.dayTitle(for: model.summary.day))
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary)
+                DaySummaryCardContent(
+                    model: model,
+                    loadsDeferredContent: loadsDeferredContent
                 )
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(.primary)
-
-                DaySummaryCardContent(model: model)
             }
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .matchedTransitionSource(id: model.id, in: namespace)
+        .matchedTransitionSource(
+            id: HomeTransitionSource.day(model.id),
+            in: namespace
+        )
         .accessibilityHint("Opens this day’s timeline")
-        .task {
+        .task(id: loadsDeferredContent) {
+            guard loadsDeferredContent else { return }
             await model.loadEnrichment()
+        }
+    }
+}
+
+private struct PeriodFeedRow: View {
+    let model: PeriodSummaryRowModel
+    let namespace: Namespace.ID
+    let loadsDeferredContent: Bool
+    let onOpen: () -> Void
+    let onOpenDay: (TimelineDayKey) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.title2.weight(.bold))
+            PeriodSummaryCardContent(
+                model: model,
+                loadsDeferredContent: loadsDeferredContent,
+                onOpenDay: onOpenDay
+            )
+        }
+        .contentShape(.rect)
+        .onTapGesture(perform: onOpen)
+        .matchedTransitionSource(
+            id: HomeTransitionSource.period(model.summary.key),
+            in: namespace
+        )
+        .accessibilityHint("Opens the next level of this period")
+        .task(id: loadsDeferredContent) {
+            guard loadsDeferredContent else { return }
+            await model.loadEnrichment()
+        }
+    }
+
+    private var title: String {
+        switch model.summary.key {
+        case .month(let month): PeriodSummaryDatePresentation.title(for: month)
+        case .year(let year): PeriodSummaryDatePresentation.title(for: year)
         }
     }
 }
@@ -274,18 +841,18 @@ private struct HomeFeedErrorView: View {
 
 private struct TimelineFullScreenCover: View {
     @State private var selectedDay: TimelineDayKey
-    @State private var sourceDay: TimelineDayKey
+    @State private var source: HomeTransitionSource
     let namespace: Namespace.ID
-    let onDayChange: (TimelineDayKey) -> TimelineDayKey
+    let onDayChange: (TimelineDayKey) -> HomeTransitionSource
 
     init(
         initialDay: TimelineDayKey,
-        initialSourceDay: TimelineDayKey,
+        initialSource: HomeTransitionSource,
         namespace: Namespace.ID,
-        onDayChange: @escaping (TimelineDayKey) -> TimelineDayKey
+        onDayChange: @escaping (TimelineDayKey) -> HomeTransitionSource
     ) {
         _selectedDay = State(initialValue: initialDay)
-        _sourceDay = State(initialValue: initialSourceDay)
+        _source = State(initialValue: initialSource)
         self.namespace = namespace
         self.onDayChange = onDayChange
     }
@@ -294,9 +861,9 @@ private struct TimelineFullScreenCover: View {
         NavigationStack {
             DayTimelineScreen(selectedDay: $selectedDay)
         }
-        .navigationTransition(.zoom(sourceID: sourceDay, in: namespace))
-        .onChange(of: selectedDay) { _, selectedDay in
-            sourceDay = onDayChange(selectedDay)
+        .navigationTransition(.zoom(sourceID: source, in: namespace))
+        .onChange(of: selectedDay) { _, day in
+            source = onDayChange(day)
         }
     }
 }
@@ -312,7 +879,6 @@ private struct ProfileMenuSheet: View {
                 } label: {
                     Label("Library", systemImage: "square.stack")
                 }
-
                 NavigationLink {
                     SettingsScreen()
                 } label: {
