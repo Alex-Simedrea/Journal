@@ -11,7 +11,7 @@ struct ShareBoardingPassView: View {
                 phase: model.phase,
                 onImport: onImport
             )
-            .navigationTitle("Import Boarding Pass")
+            .navigationTitle("Import Journey")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -54,7 +54,7 @@ private struct BoardingPassShareLoadingView: View {
     var body: some View {
         VStack(spacing: 14) {
             ProgressView()
-            Text("Reading boarding pass…")
+            Text("Reading shared journey…")
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -133,7 +133,7 @@ private struct BoardingPassShareSourceSection: View {
     let pendingImport: PendingBoardingPassImport
 
     var body: some View {
-        Section("Pass") {
+        Section("Source") {
             if let organizationName = pendingImport.organizationName {
                 LabeledContent("Issuer", value: organizationName)
             }
@@ -149,7 +149,7 @@ private struct BoardingPassShareErrorView: View {
 
     var body: some View {
         ContentUnavailableView {
-            Label("Couldn’t Read Pass", systemImage: "exclamationmark.triangle")
+            Label("Couldn’t Read Journey", systemImage: "exclamationmark.triangle")
         } description: {
             Text(message)
         }

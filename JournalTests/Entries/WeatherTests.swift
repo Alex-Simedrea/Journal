@@ -255,4 +255,80 @@ struct EntryWeatherTests {
         let row = try #require(feed.rows.first)
         #expect(row.weatherState == .loaded(expected))
     }
+
+    @Test("Future day forecasts persist as refreshable cache")
+    func futureDayForecastPersists() async throws {
+        let schema = Schema([
+            LogEntry.self,
+            Person.self,
+            Place.self,
+            TransitDetails.self,
+            PlaceVisitDetails.self,
+            WorkoutDetails.self,
+            TransitType.self,
+        ])
+        let container = try ModelContainer(
+            for: schema,
+            configurations: [ModelConfiguration(isStoredInMemoryOnly: true)]
+        )
+        let context = ModelContext(container)
+        let timeZone = TimeZone(identifier: "Europe/Bucharest") ?? .current
+        let tomorrow = TimelineDayKey.today(timeZone: timeZone).addingDays(1)
+        let interval = try #require(tomorrow.dateInterval(in: timeZone))
+        let place = Place(
+            name: "Cafe",
+            location: Location(latitude: 44.43, longitude: 26.10)
+        )
+        let entry = LogEntry(
+            kind: .placeVisit,
+            startTime: interval.start.addingTimeInterval(10 * 60 * 60),
+            endTime: interval.start.addingTimeInterval(12 * 60 * 60),
+            startTimeZoneIdentifier: timeZone.identifier,
+            endTimeZoneIdentifier: timeZone.identifier,
+            creationTimeZoneIdentifier: timeZone.identifier,
+            timeConfidence: .explicit,
+            needsReview: false
+        )
+        entry.placeVisitDetails = PlaceVisitDetails(place: place)
+        context.insert(entry)
+        try context.save()
+
+        let feed = HomeFeedModel()
+        feed.reload(in: context)
+        let row = try #require(feed.rows.first)
+        let request = try #require(row.summary.weatherRequest)
+        let expected = DayWeatherSummary(
+            condition: "clear",
+            symbolName: "sun.max.fill",
+            highTemperatureCelsius: 30,
+            maximumHumidity: 0.68,
+            date: request.presentationDate
+        )
+
+        await row.loadEnrichment(
+            weatherClient: ImmediateDayWeatherClient(result: expected),
+            routeClient: EmptyDayWorkoutRouteClient()
+        )
+
+        let record = try #require(entry.dayWeatherRecords.first)
+        #expect(record.summary == expected)
+        #expect(record.needsRefresh)
+        #expect(row.weatherState == .loaded(expected))
+    }
+}
+
+private struct ImmediateDayWeatherClient: DayWeatherProviding {
+    let result: DayWeatherSummary
+
+    func weather(for request: DayWeatherRequest) async throws
+        -> DayWeatherSummary {
+        result
+    }
+}
+
+private struct EmptyDayWorkoutRouteClient: DayWorkoutRouteProviding {
+    func route(for workoutUUID: UUID) async throws
+        -> [WorkoutCoordinateSnapshot] {
+        []
+    }
 }

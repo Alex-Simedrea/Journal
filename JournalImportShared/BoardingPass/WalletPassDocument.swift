@@ -24,6 +24,7 @@ struct WalletBoardingPass: Decodable {
     var primaryFields: [WalletPassField] = []
     var secondaryFields: [WalletPassField] = []
     var auxiliaryFields: [WalletPassField] = []
+    var backFields: [WalletPassField] = []
     var transitType: String?
 
     private enum CodingKeys: String, CodingKey {
@@ -31,6 +32,7 @@ struct WalletBoardingPass: Decodable {
         case primaryFields
         case secondaryFields
         case auxiliaryFields
+        case backFields
         case transitType
     }
 
@@ -51,6 +53,10 @@ struct WalletBoardingPass: Decodable {
         auxiliaryFields = try container.decodeIfPresent(
             [WalletPassField].self,
             forKey: .auxiliaryFields
+        ) ?? []
+        backFields = try container.decodeIfPresent(
+            [WalletPassField].self,
+            forKey: .backFields
         ) ?? []
         transitType = try container.decodeIfPresent(
             String.self,

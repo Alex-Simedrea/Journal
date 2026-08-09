@@ -10,6 +10,7 @@ struct BoardingPassImportReviewSheet: View {
     let onCancel: (PendingBoardingPassImport) -> Void
 
     @State private var model: BoardingPassReviewModel
+    @State private var draftEntry: LogEntry?
 
     init(
         pendingImport: PendingBoardingPassImport,
@@ -26,60 +27,16 @@ struct BoardingPassImportReviewSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                BoardingPassImportSourceSection(
-                    organizationName: model.pendingImport.organizationName,
-                    serviceIdentifier: model.pendingImport.serviceIdentifier,
-                    warnings: model.pendingImport.warnings
-                )
-                BoardingPassImportRouteSection(
-                    model: model,
-                    places: places,
-                    transitTypes: transitTypes
-                )
-                BoardingPassImportTimeSection(
-                    model: model,
-                    originTimeZoneIdentifier: model.timeZoneIdentifier(
-                        for: .origin,
-                        places: places
-                    ),
-                    destinationTimeZoneIdentifier: model.timeZoneIdentifier(
-                        for: .destination,
-                        places: places
-                    )
-                )
-            }
-            .navigationTitle("Review Boarding Pass")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(role: .cancel) {
-                        onCancel(model.pendingImport)
-                    } label: {
-                        Image(systemName: "xmark")
-                    }
-                    .accessibilityLabel("Discard Boarding Pass")
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(role: .confirm) {
-                        Task {
-                            if await model.save(
-                                places: places,
-                                in: modelContext
-                            ) {
-                                onComplete(model.pendingImport)
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "checkmark")
-                    }
-                    .accessibilityLabel("Import Boarding Pass")
-                    .disabled(!model.canSave)
-                }
-            }
+        if let draftEntry {
+            EntryDetailSheet(
+                draftEntry: draftEntry,
+                title: "Review Journey",
+                isConfirming: model.isSaving,
+                onCancel: { onCancel(model.pendingImport) },
+                onConfirm: commit
+            )
             .alert(
-                "Couldn’t Import Boarding Pass",
+                "Couldn’t Import Journey",
                 isPresented: Binding(
                     get: { model.errorMessage != nil },
                     set: { if !$0 { model.errorMessage = nil } }
@@ -89,124 +46,33 @@ struct BoardingPassImportReviewSheet: View {
             } message: {
                 Text(model.errorMessage ?? "An unknown error occurred.")
             }
+        } else {
+            DynamicSheet {
+                ProgressView("Preparing journey…")
+                    .frame(maxWidth: .infinity)
+                    .padding(32)
+            }
+            .interactiveDismissDisabled()
             .task(id: BoardingPassPreparationID(
                 placeIDs: places.map(\.id),
                 transitTypeNames: transitTypes.map(\.canonicalName)
             )) {
-                model.prepare(places: places, transitTypes: transitTypes)
-            }
-            .sheet(item: $model.placeBeingAdded) { endpoint in
-                AddPlaceSheet(
-                    initialName: model.name(for: endpoint),
-                    initialSearchQuery: model.name(for: endpoint)
-                ) { place in
-                    model.didAddPlace(place, for: endpoint)
-                }
+                await model.prepare(places: places, transitTypes: transitTypes)
+                draftEntry = model.makeDraftEntry(places: places)
             }
         }
-        .interactiveDismissDisabled()
+    }
+
+    private func commit(_ entry: LogEntry) {
+        Task {
+            if await model.commit(entry, in: modelContext) {
+                onComplete(model.pendingImport)
+            }
+        }
     }
 }
 
 private struct BoardingPassPreparationID: Equatable {
     let placeIDs: [UUID]
     let transitTypeNames: [String]
-}
-
-private struct BoardingPassImportSourceSection: View {
-    let organizationName: String?
-    let serviceIdentifier: String?
-    let warnings: [String]
-
-    var body: some View {
-        Section("Boarding Pass") {
-            if let organizationName {
-                LabeledContent("Issuer", value: organizationName)
-            }
-            if let serviceIdentifier {
-                LabeledContent("Service", value: serviceIdentifier)
-            }
-            ForEach(warnings, id: \.self) { warning in
-                Label(warning, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-            }
-        }
-    }
-}
-
-private struct BoardingPassImportRouteSection: View {
-    @Bindable var model: BoardingPassReviewModel
-    let places: [Place]
-    let transitTypes: [TransitType]
-
-    var body: some View {
-        Section("Route") {
-            Picker("Type", selection: $model.transitType) {
-                ForEach(transitTypes) { transitType in
-                    Text(transitType.canonicalName)
-                        .tag(transitType.canonicalName)
-                }
-            }
-
-            BoardingPassEndpointPicker(
-                title: "From",
-                rawName: model.originName,
-                selection: $model.originPlaceID,
-                places: places,
-                onAdd: { model.beginAddingPlace(for: .origin) }
-            )
-            BoardingPassEndpointPicker(
-                title: "To",
-                rawName: model.destinationName,
-                selection: $model.destinationPlaceID,
-                places: places,
-                onAdd: { model.beginAddingPlace(for: .destination) }
-            )
-        }
-    }
-}
-
-private struct BoardingPassEndpointPicker: View {
-    let title: LocalizedStringResource
-    let rawName: String
-    @Binding var selection: UUID?
-    let places: [Place]
-    let onAdd: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Picker(title, selection: $selection) {
-                Text("Not linked — \(rawName)").tag(nil as UUID?)
-                ForEach(places) { place in
-                    Text(place.name).tag(place.id as UUID?)
-                }
-            }
-
-            if selection == nil {
-                Button("Add \(rawName) to Places", action: onAdd)
-                    .font(.subheadline)
-            }
-        }
-    }
-}
-
-private struct BoardingPassImportTimeSection: View {
-    @Bindable var model: BoardingPassReviewModel
-    let originTimeZoneIdentifier: String
-    let destinationTimeZoneIdentifier: String
-
-    var body: some View {
-        Section("Time") {
-            DatePicker("Departure", selection: $model.startTime)
-                .environment(
-                    \.timeZone,
-                    TimeZone(identifier: originTimeZoneIdentifier) ?? .current
-                )
-            DatePicker("Arrival", selection: $model.endTime, in: model.startTime...)
-                .environment(
-                    \.timeZone,
-                    TimeZone(identifier: destinationTimeZoneIdentifier) ?? .current
-                )
-        }
-    }
 }

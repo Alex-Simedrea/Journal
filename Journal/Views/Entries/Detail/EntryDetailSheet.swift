@@ -6,6 +6,13 @@
 import SwiftData
 import SwiftUI
 
+struct EntryDetailDraftPresentation {
+    let title: LocalizedStringResource
+    let isConfirming: Bool
+    let onCancel: () -> Void
+    let onConfirm: (LogEntry) -> Void
+}
+
 struct EntryDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -17,6 +24,7 @@ struct EntryDetailSheet: View {
         [TransitType]
 
     let entry: LogEntry
+    let draftPresentation: EntryDetailDraftPresentation?
 
     @State private var coordinator: EntryDetailCoordinator
     @State private var routeModel = WorkoutRouteModel()
@@ -32,6 +40,24 @@ struct EntryDetailSheet: View {
 
     init(entry: LogEntry) {
         self.entry = entry
+        draftPresentation = nil
+        _coordinator = State(initialValue: EntryDetailCoordinator(entry: entry))
+    }
+
+    init(
+        draftEntry: LogEntry,
+        title: LocalizedStringResource,
+        isConfirming: Bool = false,
+        onCancel: @escaping () -> Void,
+        onConfirm: @escaping (LogEntry) -> Void
+    ) {
+        entry = draftEntry
+        draftPresentation = EntryDetailDraftPresentation(
+            title: title,
+            isConfirming: isConfirming,
+            onCancel: onCancel,
+            onConfirm: onConfirm
+        )
         _coordinator = State(initialValue: EntryDetailCoordinator(entry: entry))
     }
 
@@ -47,7 +73,7 @@ struct EntryDetailSheet: View {
                 routeContent
             } leading: {
                 if coordinator.route == .details {
-                    Button(action: { dismiss() }) {
+                    Button(action: close) {
                         Image(systemName: "xmark")
                             .font(.title2)
                             .frame(width: 32, height: 32)
@@ -66,7 +92,27 @@ struct EntryDetailSheet: View {
                     .accessibilityLabel("Back")
                 }
             } trailing: {
-                if coordinator.route == .details,
+                if coordinator.route == .details, let draftPresentation {
+                    Button {
+                        draftPresentation.onConfirm(entry)
+                    } label: {
+                        if draftPresentation.isConfirming {
+                            ProgressView()
+                                .frame(width: 32, height: 32)
+                        } else {
+                            Image(systemName: "checkmark")
+                                .font(.title2)
+                                .frame(width: 32, height: 32)
+                        }
+                    }
+                    .buttonStyle(.glassProminent)
+                    .buttonBorderShape(.circle)
+                    .tint(.blue)
+                    .disabled(
+                        draftPresentation.isConfirming || !canConfirmDraft
+                    )
+                    .accessibilityLabel("Import Journey")
+                } else if coordinator.route == .details,
                     entry.entryKindReviewReason != nil
                 {
                     Button(action: { coordinator.present(.entryKind) }) {
@@ -138,7 +184,9 @@ struct EntryDetailSheet: View {
                 }
             }
         }
-        .interactiveDismissDisabled(coordinator.isDirty)
+        .interactiveDismissDisabled(
+            draftPresentation != nil || coordinator.isDirty
+        )
         .confirmationDialog(
             "Delete Entry?",
             isPresented: $isDeleteConfirmationPresented,
@@ -203,7 +251,10 @@ struct EntryDetailSheet: View {
     }
 
     private var headerTitle: LocalizedStringResource {
-        coordinator.route == .details
+        if coordinator.route == .details, let draftPresentation {
+            return draftPresentation.title
+        }
+        return coordinator.route == .details
             ? entry.kind.detailTitle
             : coordinator.route.title
     }
@@ -218,7 +269,8 @@ struct EntryDetailSheet: View {
                 topContentInset: chromeHeight,
                 isScrolled: $contentIsScrolled,
                 onPresent: coordinator.present,
-                onDelete: { isDeleteConfirmationPresented = true }
+                onDelete: { isDeleteConfirmationPresented = true },
+                showsDestructiveActions: draftPresentation == nil
             )
         case .time:
             EntryDetailEditorViewport(
@@ -295,7 +347,7 @@ struct EntryDetailSheet: View {
                     addPlaceModel = PlaceEditorModel(
                         initialName: name,
                         initialLocation: selection?.location,
-                        allowsCurrentLocationCapture: false
+                        allowsCurrentLocationCapture: true
                     )
                     coordinator.present(.addPlace(role))
                 }
@@ -394,18 +446,50 @@ private struct EntryDetailEditorViewport<Content: View>: View {
 }
 
 private extension EntryDetailSheet {
+    private func close() {
+        if let draftPresentation {
+            draftPresentation.onCancel()
+        } else {
+            dismiss()
+        }
+    }
+
+    private var canConfirmDraft: Bool {
+        guard let details = entry.transitDetails,
+              !details.type.trimmingCharacters(
+                in: .whitespacesAndNewlines
+              ).isEmpty,
+              let startTime = entry.startTime,
+              let endTime = entry.endTime else {
+            return false
+        }
+        let hasOrigin = details.originPlace != nil
+            || details.originLocation != nil
+            || !(details.originRawText ?? "").trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ).isEmpty
+        let hasDestination = details.destinationPlace != nil
+            || details.destinationLocation != nil
+            || !(details.destinationRawText ?? "").trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ).isEmpty
+        return hasOrigin && hasDestination && endTime > startTime
+    }
+
     private var peopleUsageCounts: [UUID: Int] {
         EntryDetailPeopleUsage.counts(in: allEntries)
     }
 
     private func saveCurrentRoute() {
+        let persist = draftPresentation == nil
         do {
             switch coordinator.route {
             case .time:
                 try EntryDetailEditingService.saveTime(
                     entry: entry,
                     session: coordinator.session,
-                    in: modelContext
+                    in: modelContext,
+                    persist: persist
                 )
                 coordinator.returnToDetails(entry: entry)
             case .timeZone(let endpoint):
@@ -416,21 +500,24 @@ private extension EntryDetailSheet {
                     entry: entry,
                     session: coordinator.session,
                     people: people,
-                    in: modelContext
+                    in: modelContext,
+                    persist: persist
                 )
                 coordinator.returnToDetails(entry: entry)
             case .photos:
                 try EntryDetailEditingService.savePhotos(
                     entry: entry,
                     session: coordinator.session,
-                    in: modelContext
+                    in: modelContext,
+                    persist: persist
                 )
                 coordinator.returnToDetails(entry: entry)
             case .transitMetadata:
                 try EntryDetailEditingService.saveTransitMetadata(
                     entry: entry,
                     session: coordinator.session,
-                    in: modelContext
+                    in: modelContext,
+                    persist: persist
                 )
                 coordinator.returnToDetails(entry: entry)
             case .location(let role):
@@ -439,7 +526,8 @@ private extension EntryDetailSheet {
                     role: role,
                     session: coordinator.session,
                     places: places,
-                    in: modelContext
+                    in: modelContext,
+                    persist: persist
                 )
                 if role == .place {
                     coordinator.returnToDetails(entry: entry)

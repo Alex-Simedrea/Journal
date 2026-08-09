@@ -290,30 +290,6 @@ private struct LocationMapCaption: View {
     }
 }
 
-private struct CurrentLocationMapButton: View {
-    let isResolving: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            ZStack {
-                Image(systemName: "location.fill")
-                    .opacity(isResolving ? 0 : 1)
-                if isResolving {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-            }
-            .font(.title3.weight(.medium))
-            .frame(width: 30, height: 30)
-        }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
-        .disabled(isResolving)
-        .accessibilityLabel("Current Location")
-    }
-}
-
 private struct SavePlaceButton: View {
     let action: () -> Void
 

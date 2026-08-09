@@ -81,6 +81,7 @@ nonisolated extension PersistedDayWeather {
         longitude = request.longitude
         timeZoneIdentifier = request.timeZoneIdentifier
         weather = summary.entryWeather
+        isFinal = request.isCompleted()
     }
 
     func matches(_ request: DayWeatherRequest) -> Bool {
@@ -100,6 +101,10 @@ nonisolated extension PersistedDayWeather {
             maximumHumidity: weather.humidity,
             date: weather.date
         )
+    }
+
+    var needsRefresh: Bool {
+        isFinal == false
     }
 }
 

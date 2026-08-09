@@ -163,6 +163,17 @@ private struct PlaceEditorSelectedLocation: View {
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
+            .overlay(alignment: .topTrailing) {
+                if model.allowsCurrentLocationCapture {
+                    CurrentLocationMapButton(
+                        isResolving: model.isLoadingLocation
+                            || model.isResolvingSearch
+                    ) {
+                        Task { await model.captureCurrentLocation() }
+                    }
+                    .padding(12)
+                }
+            }
             .frame(height: 220)
             .clipShape(.rect(cornerRadius: 16))
             .padding(10)

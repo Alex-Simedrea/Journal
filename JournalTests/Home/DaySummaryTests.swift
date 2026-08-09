@@ -470,6 +470,52 @@ struct DaySummaryTests {
         #expect(row.weatherState == .loaded(expected))
     }
 
+    @Test("Weather refresh keeps the previous forecast visible")
+    @MainActor
+    func weatherRefreshRetainsCachedValue() async throws {
+        let summary = summary(
+            photoCount: 0,
+            hasPeople: false,
+            hasMovement: false,
+            hasFeaturedPlace: true,
+            hasWakeUp: false
+        )
+        let cached = DayWeatherSummary(
+            condition: "cloudy",
+            symbolName: "cloud.fill",
+            highTemperatureCelsius: 24,
+            maximumHumidity: 0.8,
+            date: date("2026-07-12T12:00:00+03:00")
+        )
+        let refreshed = DayWeatherSummary(
+            condition: "clear",
+            symbolName: "sun.max.fill",
+            highTemperatureCelsius: 28,
+            maximumHumidity: 0.65,
+            date: date("2026-07-12T12:00:00+03:00")
+        )
+        let client = ControllableDayWeatherClient(result: refreshed)
+        let row = DaySummaryRowModel(
+            summary: summary,
+            weatherState: .loaded(cached),
+            needsWeatherRefresh: true
+        )
+
+        let refresh = Task {
+            await row.loadEnrichment(
+                weatherClient: client,
+                routeClient: StubDayWorkoutRouteClient()
+            )
+        }
+        await client.waitUntilStarted()
+
+        #expect(row.weatherState == .refreshing(cached))
+
+        await client.finish()
+        await refresh.value
+        #expect(row.weatherState == .loaded(refreshed))
+    }
+
     @Test("Daily weather presentation is anchored in local daytime")
     func dailyWeatherPresentationDate() {
         let request = DayWeatherRequest(
@@ -512,6 +558,31 @@ struct DaySummaryTests {
         #expect(request.isCompleted(
             at: date("2026-07-13T00:00:00+03:00")
         ))
+    }
+
+    @Test("Cached forecasts remain refreshable until their day is complete")
+    func provisionalWeatherCache() {
+        let now = Date.now
+        let request = DayWeatherRequest(
+            day: .today(),
+            startDate: now.addingTimeInterval(-60),
+            endDate: now.addingTimeInterval(86_400),
+            latitude: 44.43,
+            longitude: 26.10,
+            timeZoneIdentifier: bucharest
+        )
+        let forecast = DayWeatherSummary(
+            condition: "clear",
+            symbolName: "sun.max.fill",
+            highTemperatureCelsius: 31,
+            maximumHumidity: 0.7,
+            date: now
+        )
+
+        let record = PersistedDayWeather(request: request, summary: forecast)
+
+        #expect(record.summary == forecast)
+        #expect(record.needsRefresh)
     }
 
     @Test("Persisted daily weather validates its day and location")
@@ -778,6 +849,36 @@ private actor InvocationCounter {
 
     func increment() {
         value += 1
+    }
+}
+
+private actor ControllableDayWeatherClient: DayWeatherProviding {
+    let result: DayWeatherSummary
+    private var started = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    init(result: DayWeatherSummary) {
+        self.result = result
+    }
+
+    func weather(for request: DayWeatherRequest) async throws
+        -> DayWeatherSummary {
+        started = true
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+        return result
+    }
+
+    func waitUntilStarted() async {
+        while !started {
+            await Task.yield()
+        }
+    }
+
+    func finish() {
+        continuation?.resume()
+        continuation = nil
     }
 }
 

@@ -45,7 +45,8 @@ enum EntryDetailEditingService {
     static func saveTime(
         entry: LogEntry,
         session: EntryDetailEditSession,
-        in modelContext: ModelContext
+        in modelContext: ModelContext,
+        persist: Bool = true
     ) throws {
         guard entry.kind != .workout,
               session.endTime > session.startTime else {
@@ -62,15 +63,18 @@ enum EntryDetailEditingService {
         entry.weather = nil
         entry.endWeather = nil
         updateNeedsReview(entry)
-        try save(modelContext)
-        EntryWeatherService.refreshInBackground(entry, in: modelContext)
+        if persist {
+            try save(modelContext)
+            EntryWeatherService.refreshInBackground(entry, in: modelContext)
+        }
     }
 
     static func savePeople(
         entry: LogEntry,
         session: EntryDetailEditSession,
         people: [Person],
-        in modelContext: ModelContext
+        in modelContext: ModelContext,
+        persist: Bool = true
     ) throws {
         entry.people = people.filter {
             session.selectedPeopleIDs.contains($0.id)
@@ -86,22 +90,24 @@ enum EntryDetailEditingService {
             break
         }
         updateNeedsReview(entry)
-        try save(modelContext)
+        if persist { try save(modelContext) }
     }
 
     static func savePhotos(
         entry: LogEntry,
         session: EntryDetailEditSession,
-        in modelContext: ModelContext
+        in modelContext: ModelContext,
+        persist: Bool = true
     ) throws {
         entry.photoReferences = session.photoReferences
-        try save(modelContext)
+        if persist { try save(modelContext) }
     }
 
     static func saveTransitMetadata(
         entry: LogEntry,
         session: EntryDetailEditSession,
-        in modelContext: ModelContext
+        in modelContext: ModelContext,
+        persist: Bool = true
     ) throws {
         guard let details = entry.transitDetails,
               !session.transitType.trimmingCharacters(
@@ -116,8 +122,8 @@ enum EntryDetailEditingService {
             session.transitServiceIdentifier.nilIfBlank
         details.fieldReviews.removeAll { $0.field == .transitType }
         updateNeedsReview(entry)
-        try save(modelContext)
-        if previousType != details.type {
+        if persist { try save(modelContext) }
+        if persist, previousType != details.type {
             TransitDistanceService.refreshInBackground(entry, in: modelContext)
         }
     }
@@ -127,7 +133,8 @@ enum EntryDetailEditingService {
         role: EntryDetailLocationRole,
         session: EntryDetailEditSession,
         places: [Place],
-        in modelContext: ModelContext
+        in modelContext: ModelContext,
+        persist: Bool = true
     ) throws {
         guard let selection = session.selection(for: role) else {
             throw EntryDetailEditingError.missingLocation
@@ -188,12 +195,12 @@ enum EntryDetailEditingService {
         }
 
         updateNeedsReview(entry)
-        try save(modelContext)
+        if persist { try save(modelContext) }
 
-        if entry.kind == .transit {
+        if persist, entry.kind == .transit {
             TransitDistanceService.refreshInBackground(entry, in: modelContext)
         }
-        if entry.kind != .workout {
+        if persist, entry.kind != .workout {
             EntryWeatherService.refreshInBackground(entry, in: modelContext)
         }
     }

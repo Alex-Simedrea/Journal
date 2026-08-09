@@ -15,6 +15,24 @@ enum TransitEntryStore {
         sourceServiceIdentifier: String? = nil,
         in modelContext: ModelContext
     ) throws -> LogEntry {
+        let entry = makeEntry(
+            draft: draft,
+            rawInput: rawInput,
+            modelExchange: modelExchange,
+            sourceOrganizationName: sourceOrganizationName,
+            sourceServiceIdentifier: sourceServiceIdentifier
+        )
+        try insert(entry, in: modelContext)
+        return entry
+    }
+
+    static func makeEntry(
+        draft: ResolvedTransitDraft,
+        rawInput: String?,
+        modelExchange: EntryModelExchange? = nil,
+        sourceOrganizationName: String? = nil,
+        sourceServiceIdentifier: String? = nil
+    ) -> LogEntry {
         let originLocation = draft.originLocation?
             .withFallbackDisplayName(draft.originPlace?.name)
         let destinationLocation = draft.destinationLocation?
@@ -63,9 +81,12 @@ enum TransitEntryStore {
         entry.transitDetails = details
         entry.people = draft.people
 
+        return entry
+    }
+
+    static func insert(_ entry: LogEntry, in modelContext: ModelContext) throws {
         modelContext.insert(entry)
         try modelContext.save()
         TransitDistanceService.refreshInBackground(entry, in: modelContext)
-        return entry
     }
 }

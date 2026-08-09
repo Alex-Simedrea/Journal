@@ -90,15 +90,18 @@ private enum HomeFeedScrollAlignment: Hashable {
 
 private struct HomeFeedScrollRequest: Hashable {
     let id = UUID()
+    let scale: JournalSummaryScale
     let anchor: HomeFeedAnchor
     let alignment: HomeFeedScrollAlignment
     let animated: Bool
 
     init(
+        scale: JournalSummaryScale,
         anchor: HomeFeedAnchor,
         alignment: HomeFeedScrollAlignment,
         animated: Bool = false
     ) {
+        self.scale = scale
         self.anchor = anchor
         self.alignment = alignment
         self.animated = animated
@@ -110,13 +113,16 @@ struct HomeScreen: View {
     @Environment(\.scenePhase) private var scenePhase
     @Namespace private var timelineTransition
     @State private var model = HomeFeedModel()
+    @State private var selectedScale: JournalSummaryScale = .days
     @State private var scale: JournalSummaryScale = .days
+    @State private var scrollPosition: HomeFeedAnchor?
     @State private var scrollRequest: HomeFeedScrollRequest?
     @State private var pendingScaleTarget: HomeFeedAnchor?
     @State private var visibleDay: TimelineDayKey?
     @State private var visibleMonth: MonthKey?
     @State private var visibleYear: YearKey?
     @State private var isFeedReady = false
+    @State private var isFeedPositioned = false
     @State private var emptyTransitionDay = TimelineDayKey.today()
     @State private var presentedTimeline: PresentedTimeline?
     @State private var isCalendarPresented = false
@@ -141,7 +147,7 @@ struct HomeScreen: View {
             .toolbar {
                 topToolbar
                 HomeBottomToolbar(
-                    scale: $scale,
+                    scale: $selectedScale,
                     namespace: timelineTransition,
                     onToday: {
                         let today = TimelineDayKey.today()
@@ -175,12 +181,15 @@ struct HomeScreen: View {
         }
         .task(id: contentRevision) {
             reloadFeed()
+            if !isFeedReady {
+                prepareInitialFeedPosition()
+            }
             isFeedReady = true
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { reloadFeed() }
         }
-        .onChange(of: scale) { oldScale, newScale in
+        .onChange(of: selectedScale) { oldScale, newScale in
             prepareScaleSwitch(from: oldScale, to: newScale)
         }
     }
@@ -191,8 +200,11 @@ struct HomeScreen: View {
             scale: scale,
             namespace: timelineTransition,
             emptyTransitionDay: emptyTransitionDay,
+            scrollPosition: $scrollPosition,
             scrollRequest: scrollRequest,
             onVisibleAnchorChange: updateVisibleAnchor,
+            onScrollRequestApplied: scrollRequestDidApply,
+            onUserScroll: userDidScrollFeed,
             onOpenDay: {
                 presentTimeline($0, source: .day($0))
             },
@@ -206,6 +218,8 @@ struct HomeScreen: View {
                 presentTimeline(today, source: .empty(today))
             }
         )
+        .opacity(isFeedPositioned ? 1 : 0)
+        .allowsHitTesting(isFeedPositioned)
     }
 
     @ToolbarContentBuilder private var topToolbar: some ToolbarContent {
@@ -256,18 +270,45 @@ struct HomeScreen: View {
         model.reload(in: modelContext)
     }
 
+    private func prepareInitialFeedPosition() {
+        guard let day = model.days.last else {
+            isFeedPositioned = true
+            return
+        }
+        setVisibleAnchor(.day(day))
+        scrollRequest = HomeFeedScrollRequest(
+            scale: .days,
+            anchor: .day(day),
+            alignment: .bottom
+        )
+    }
+
     private func prepareScaleSwitch(
-        from oldScale: JournalSummaryScale,
+        from _: JournalSummaryScale,
         to newScale: JournalSummaryScale
     ) {
+        guard scale != newScale else { return }
         let target = pendingScaleTarget
-            ?? inferredTarget(from: oldScale, to: newScale)
+            ?? inferredTarget(from: scale, to: newScale)
         pendingScaleTarget = nil
-        guard let target else { return }
-        scrollRequest = HomeFeedScrollRequest(
-            anchor: target,
-            alignment: .top
-        )
+        let request = target.map {
+            HomeFeedScrollRequest(
+                scale: newScale,
+                anchor: $0,
+                alignment: .top
+            )
+        }
+
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            if let target {
+                setVisibleAnchor(target)
+            }
+            scrollPosition = target
+            scrollRequest = request
+            scale = newScale
+        }
     }
 
     private func scrollToBottom(of selectedScale: JournalSummaryScale) {
@@ -276,21 +317,27 @@ struct HomeScreen: View {
         switch selectedScale {
         case .days:
             guard let day = model.days.last else { return }
+            setVisibleAnchor(.day(day))
             scrollRequest = HomeFeedScrollRequest(
+                scale: .days,
                 anchor: .day(day),
                 alignment: .bottom,
                 animated: true
             )
         case .months:
             guard let key = model.monthRows.last?.id else { return }
+            setVisibleAnchor(.period(key))
             scrollRequest = HomeFeedScrollRequest(
+                scale: .months,
                 anchor: .period(key),
                 alignment: .bottom,
                 animated: true
             )
         case .years:
             guard let key = model.yearRows.last?.id else { return }
+            setVisibleAnchor(.period(key))
             scrollRequest = HomeFeedScrollRequest(
+                scale: .years,
                 anchor: .period(key),
                 alignment: .bottom,
                 animated: true
@@ -331,7 +378,28 @@ struct HomeScreen: View {
         }
     }
 
-    private func updateVisibleAnchor(_ anchor: HomeFeedAnchor) {
+    private func updateVisibleAnchor(
+        _ reportedScale: JournalSummaryScale,
+        _ anchor: HomeFeedAnchor
+    ) {
+        guard reportedScale == scale else { return }
+        if let scrollRequest,
+           scrollRequest.scale == reportedScale,
+           scrollRequest.anchor != anchor {
+            return
+        }
+
+        switch (reportedScale, anchor) {
+        case (.days, .day(_)),
+             (.months, .period(.month(_))),
+             (.years, .period(.year(_))):
+            setVisibleAnchor(anchor)
+        default:
+            break
+        }
+    }
+
+    private func setVisibleAnchor(_ anchor: HomeFeedAnchor) {
         switch anchor {
         case .day(let day):
             visibleDay = day
@@ -343,6 +411,15 @@ struct HomeScreen: View {
         }
     }
 
+    private func userDidScrollFeed() {
+        scrollRequest = nil
+    }
+
+    private func scrollRequestDidApply(_ requestID: UUID) {
+        guard scrollRequest?.id == requestID else { return }
+        isFeedPositioned = true
+    }
+
     private func handleCalendarSelection(_ selectedDay: TimelineDayKey) {
         isCalendarPresented = false
         guard let target = model.nearestDay(to: selectedDay) else {
@@ -352,13 +429,15 @@ struct HomeScreen: View {
         }
         visibleDay = target
         if scale == .days {
+            scrollPosition = .day(target)
             scrollRequest = HomeFeedScrollRequest(
+                scale: .days,
                 anchor: .day(target),
                 alignment: .top
             )
         } else {
             pendingScaleTarget = .day(target)
-            scale = .days
+            selectedScale = .days
         }
     }
 
@@ -368,13 +447,15 @@ struct HomeScreen: View {
             guard let month = model.firstMonth(in: year) else { return }
             visibleMonth = month
             if scale == .months {
+                scrollPosition = .period(.month(month))
                 scrollRequest = HomeFeedScrollRequest(
+                    scale: .months,
                     anchor: .period(.month(month)),
                     alignment: .top
                 )
             } else {
                 pendingScaleTarget = .period(.month(month))
-                scale = .months
+                selectedScale = .months
             }
         case .month(let month):
             openMonth(month)
@@ -385,13 +466,15 @@ struct HomeScreen: View {
         guard let day = model.firstDay(in: month) else { return }
         visibleDay = day
         if scale == .days {
+            scrollPosition = .day(day)
             scrollRequest = HomeFeedScrollRequest(
+                scale: .days,
                 anchor: .day(day),
                 alignment: .top
             )
         } else {
             pendingScaleTarget = .day(day)
-            scale = .days
+            selectedScale = .days
         }
     }
 
@@ -570,33 +653,22 @@ private struct HomeScaleReselectGesture: UIGestureRecognizerRepresentable {
     }
 }
 
-private struct HomeFeedScrollSample: Equatable {
-    let offset: CGFloat
-    let contentWidth: CGFloat
-}
-
-private struct HomeFeedMapPrewarmKey: Hashable {
-    let revision: Int
-    let pixelWidth: Int
-    let appearance: SummaryMapSnapshotRequest.Appearance
-}
-
 private struct HomeFeedContent: View {
     let model: HomeFeedModel
     let scale: JournalSummaryScale
     let namespace: Namespace.ID
     let emptyTransitionDay: TimelineDayKey
+    @Binding var scrollPosition: HomeFeedAnchor?
     let scrollRequest: HomeFeedScrollRequest?
-    let onVisibleAnchorChange: (HomeFeedAnchor) -> Void
+    let onVisibleAnchorChange: (JournalSummaryScale, HomeFeedAnchor) -> Void
+    let onScrollRequestApplied: (UUID) -> Void
+    let onUserScroll: () -> Void
     let onOpenDay: (TimelineDayKey) -> Void
     let onOpenPeriod: (PeriodSummary) -> Void
     let onOpenPeriodDay: (TimelineDayKey, PeriodSummaryKey) -> Void
     let onStartToday: () -> Void
 
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.displayScale) private var displayScale
     @State private var deferredLoading = HomeFeedDeferredLoadingPolicy()
-    @State private var contentWidth: CGFloat = 0
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -621,31 +693,28 @@ private struct HomeFeedContent: View {
                 .padding(.top, 16)
             }
             .contentMargins(.bottom, 16, for: .scrollContent)
-            .defaultScrollAnchor(.bottom, for: .initialOffset)
+            .scrollPosition(id: $scrollPosition, anchor: .top)
             .scrollEdgeEffectStyle(.soft, for: [.top, .bottom])
             .onScrollTargetVisibilityChange(
                 idType: HomeFeedAnchor.self,
-                threshold: 0.1
+                threshold: scale == .days ? 0.1 : 0.2
             ) { visible in
                 if let first = visible.first {
-                    onVisibleAnchorChange(first)
+                    onVisibleAnchorChange(scale, first)
                 }
             }
-            .onScrollGeometryChange(for: HomeFeedScrollSample.self) { geometry in
-                HomeFeedScrollSample(
-                    offset: geometry.contentOffset.y,
-                    contentWidth: min(440, max(0, geometry.containerSize.width - 32))
-                )
-            } action: { _, sample in
-                if abs(contentWidth - sample.contentWidth) > 0.5 {
-                    contentWidth = sample.contentWidth
-                }
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentOffset.y
+            } action: { _, newOffset in
                 deferredLoading.sampled(
-                    offset: sample.offset,
+                    offset: newOffset,
                     at: ProcessInfo.processInfo.systemUptime
                 )
             }
             .onScrollPhaseChange { _, newPhase, context in
+                if newPhase == .interacting {
+                    onUserScroll()
+                }
                 deferredLoading.phaseDidChange(
                     to: newPhase,
                     offset: context.geometry.contentOffset.y,
@@ -656,26 +725,19 @@ private struct HomeFeedContent: View {
             .background(Color(uiColor: .systemGroupedBackground))
             .scrollContentBackground(.hidden)
             .task(id: scrollRequest?.id) {
-                guard let scrollRequest else { return }
+                guard let scrollRequest,
+                      scrollRequest.scale == scale else { return }
+                await Task.yield()
+                guard !Task.isCancelled else { return }
                 jump(proxy, using: scrollRequest)
-            }
-            .task(id: mapPrewarmKey) {
-                guard contentWidth > 1 else { return }
-                await model.prewarmMapSnapshots(
-                    contentWidth: contentWidth,
-                    displayScale: displayScale,
-                    appearance: colorScheme == .dark ? .dark : .light
-                )
+                await Task.yield()
+                guard !Task.isCancelled else { return }
+                jump(proxy, using: scrollRequest)
+                await Task.yield()
+                guard !Task.isCancelled else { return }
+                onScrollRequestApplied(scrollRequest.id)
             }
         }
-    }
-
-    private var mapPrewarmKey: HomeFeedMapPrewarmKey {
-        HomeFeedMapPrewarmKey(
-            revision: model.mapSnapshotRevision,
-            pixelWidth: Int((contentWidth * displayScale).rounded()),
-            appearance: colorScheme == .dark ? .dark : .light
-        )
     }
 
     @ViewBuilder
@@ -765,11 +827,23 @@ private struct HomeFeedDayRow: View {
             in: namespace
         )
         .accessibilityHint("Opens this day’s timeline")
-        .task(id: loadsDeferredContent) {
+        .task(id: enrichmentTaskID) {
             guard loadsDeferredContent else { return }
             await model.loadEnrichment()
         }
     }
+
+    private var enrichmentTaskID: DayEnrichmentTaskID {
+        DayEnrichmentTaskID(
+            loadsDeferredContent: loadsDeferredContent,
+            revision: model.enrichmentRevision
+        )
+    }
+}
+
+private struct DayEnrichmentTaskID: Hashable {
+    let loadsDeferredContent: Bool
+    let revision: Int
 }
 
 private struct PeriodFeedRow: View {

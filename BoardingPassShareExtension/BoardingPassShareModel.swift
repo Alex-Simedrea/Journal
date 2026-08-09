@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UniformTypeIdentifiers
 
 enum BoardingPassSharePhase: Equatable {
     case loading
@@ -17,9 +18,14 @@ final class BoardingPassShareModel {
         phase = .loading
 
         do {
-            let provider = try boardingPassProvider(in: extensionItems)
-            let data = try await loadBoardingPassData(from: provider)
-            phase = .ready(try BoardingPassImporter.parse(data: data))
+            if let provider = boardingPassProvider(in: extensionItems) {
+                let data = try await loadBoardingPassData(from: provider)
+                phase = .ready(try BoardingPassImporter.parse(data: data))
+            } else {
+                phase = .ready(
+                    try await loadFlightSummary(from: extensionItems)
+                )
+            }
         } catch {
             phase = .failed(error.localizedDescription)
         }
@@ -40,16 +46,61 @@ final class BoardingPassShareModel {
 
     private func boardingPassProvider(
         in extensionItems: [NSExtensionItem]
-    ) throws -> NSItemProvider {
+    ) -> NSItemProvider? {
         let providers = extensionItems.flatMap { $0.attachments ?? [] }
-        guard let provider = providers.first(where: {
+        return providers.first(where: {
             $0.hasItemConformingToTypeIdentifier(
                 JournalImportConfiguration.boardingPassTypeIdentifier
             )
-        }) else {
-            throw BoardingPassImportError.noBoardingPassAttachment
+        })
+    }
+
+    private func textProviders(
+        in extensionItems: [NSExtensionItem]
+    ) -> [NSItemProvider] {
+        extensionItems.flatMap { $0.attachments ?? [] }.filter {
+            $0.hasItemConformingToTypeIdentifier(UTType.plainText.identifier)
+                || $0.hasItemConformingToTypeIdentifier(UTType.text.identifier)
         }
-        return provider
+    }
+
+    private func attributedTexts(
+        in extensionItems: [NSExtensionItem]
+    ) -> [String] {
+        extensionItems
+            .compactMap(\.attributedContentText?.string)
+            .filter { !$0.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ).isEmpty }
+    }
+
+    private func loadFlightSummary(
+        from extensionItems: [NSExtensionItem]
+    ) async throws -> PendingBoardingPassImport {
+        var candidates = attributedTexts(in: extensionItems)
+        var lastError: (any Error)?
+
+        for provider in textProviders(in: extensionItems) {
+            do {
+                candidates.append(
+                    try await SharedPlainTextLoader.load(from: provider)
+                )
+            } catch {
+                lastError = error
+            }
+        }
+
+        var triedCandidates = Set<String>()
+        for candidate in candidates where triedCandidates.insert(candidate).inserted {
+            do {
+                return try BoardingPassImporter.parse(flightSummary: candidate)
+            } catch {
+                lastError = error
+            }
+        }
+
+        if let lastError { throw lastError }
+        throw BoardingPassImportError.noBoardingPassAttachment
     }
 
     private func loadBoardingPassData(

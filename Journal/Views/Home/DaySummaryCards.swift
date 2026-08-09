@@ -119,14 +119,15 @@ private struct DaySummaryWeatherTile: View {
                 location: location,
                 timeZoneIdentifier: request?.timeZoneIdentifier
                     ?? TimeZone.current.identifier,
-                isLoading: state == .idle || state == .loading,
+                isLoading: state.summary == nil
+                    && (state == .idle || state == .loading),
                 presentationDate: request?.presentationDate
             )
         }
     }
 
     private var weather: EntryWeather? {
-        guard case .loaded(let weather) = state else { return nil }
+        guard let weather = state.summary else { return nil }
         return EntryWeather(
             condition: weather.condition,
             symbolName: weather.symbolName,

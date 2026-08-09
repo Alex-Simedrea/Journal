@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import MapKit
 import SwiftData
 import Testing
 
@@ -8,6 +9,56 @@ import Testing
 @Suite("Entry attachments and transit editing")
 @MainActor
 struct EntryEditingTests {
+    @Test("Draft entry edits stay transient until the final insert")
+    func draftEntryEditsDoNotPersistEarly() throws {
+        let context = try makeContext()
+        let person = Person(name: "Alex")
+        context.insert(person)
+        try context.save()
+
+        let entry = LogEntry(
+            kind: .transit,
+            startTime: Date(timeIntervalSince1970: 1_000),
+            endTime: Date(timeIntervalSince1970: 2_000),
+            needsReview: false
+        )
+        entry.transitDetails = TransitDetails(type: "Flight")
+        let session = EntryDetailEditSession(entry: entry)
+        session.endTime = Date(timeIntervalSince1970: 3_000)
+        session.transitServiceIdentifier = "AF6634"
+        session.selectedPeopleIDs = [person.id]
+
+        try EntryDetailEditingService.saveTime(
+            entry: entry,
+            session: session,
+            in: context,
+            persist: false
+        )
+        try EntryDetailEditingService.saveTransitMetadata(
+            entry: entry,
+            session: session,
+            in: context,
+            persist: false
+        )
+        try EntryDetailEditingService.savePeople(
+            entry: entry,
+            session: session,
+            people: [person],
+            in: context,
+            persist: false
+        )
+        try context.save()
+
+        #expect(try context.fetch(FetchDescriptor<LogEntry>()).isEmpty)
+        #expect(entry.endTime == Date(timeIntervalSince1970: 3_000))
+        #expect(entry.transitDetails?.sourceServiceIdentifier == "AF6634")
+        #expect(entry.people.map(\.id) == [person.id])
+
+        try TransitEntryStore.insert(entry, in: context)
+
+        #expect(try context.fetch(FetchDescriptor<LogEntry>()).count == 1)
+    }
+
     @Test("Photo attachments persist as asset references")
     func photoReferencesPersist() throws {
         let context = try makeContext()
@@ -561,6 +612,56 @@ struct EntryEditingTests {
         #expect(place.location == location)
         #expect(place.systemImage == .house)
         #expect(place.accuracyRadiusMeters == 250)
+    }
+
+    @Test("Manual place selection wins over automatic location capture")
+    func manualPlaceSelectionWinsOverCapture() async {
+        let initialLocation = Location(latitude: 41.90, longitude: 12.49)
+        let capturedLocation = Location(latitude: 44.44, longitude: 26.11)
+        let selectedLocation = Location(latitude: 48.86, longitude: 2.35)
+        let model = PlaceEditorModel(
+            initialLocation: initialLocation,
+            currentLocationProvider: {
+                try await Task.sleep(for: .milliseconds(50))
+                return capturedLocation
+            }
+        )
+
+        let captureTask = Task { await model.captureCurrentLocation() }
+        while !model.isLoadingLocation {
+            await Task.yield()
+        }
+
+        model.setUserSelectedLocation(selectedLocation, mapMeters: 500)
+        await captureTask.value
+
+        #expect(model.location == selectedLocation)
+        #expect(!model.isLoadingLocation)
+    }
+
+    @Test("Programmatic place map movement preserves the selection")
+    func programmaticPlaceMapMovement() {
+        let selectedLocation = Location(latitude: 48.86, longitude: 2.35)
+        let model = PlaceEditorModel(
+            initialLocation: selectedLocation,
+            allowsCurrentLocationCapture: false
+        )
+        let coordinate = CLLocationCoordinate2D(
+            latitude: 44.43,
+            longitude: 26.10
+        )
+
+        model.mapCameraChanged(
+            to: coordinate,
+            region: MKCoordinateRegion(
+                center: coordinate,
+                latitudinalMeters: 700,
+                longitudinalMeters: 700
+            ),
+            positionedByUser: false
+        )
+
+        #expect(model.location == selectedLocation)
     }
 
     private func makeContext() throws -> ModelContext {

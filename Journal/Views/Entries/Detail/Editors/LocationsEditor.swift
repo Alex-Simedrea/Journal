@@ -17,9 +17,21 @@ struct EntryDetailLocationsEditor: View {
                 EntryLocationHubButton(
                     role: role,
                     selection: session.selection(for: role),
+                    fallbackTitle: fallbackTitle(for: role),
                     onSelect: onSelect
                 )
             }
+        }
+    }
+
+    private func fallbackTitle(for role: EntryDetailLocationRole) -> String? {
+        switch role {
+        case .origin:
+            entry.transitDetails?.originRawText
+        case .destination:
+            entry.transitDetails?.destinationRawText
+        case .place:
+            entry.placeVisitDetails?.placeRawText
         }
     }
 }
@@ -27,6 +39,7 @@ struct EntryDetailLocationsEditor: View {
 private struct EntryLocationHubButton: View {
     let role: EntryDetailLocationRole
     let selection: EntryLocationSelection?
+    let fallbackTitle: String?
     let onSelect: (EntryDetailLocationRole) -> Void
 
     var body: some View {
@@ -46,7 +59,11 @@ private struct EntryLocationHubButton: View {
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(role.title).font(.headline)
-                    Text(selection?.title ?? String(localized: "Needs review"))
+                    Text(
+                        selection?.title
+                            ?? fallbackTitle
+                            ?? String(localized: "Needs review")
+                    )
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }

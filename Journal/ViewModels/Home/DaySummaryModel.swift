@@ -6,7 +6,15 @@ nonisolated enum DayWeatherLoadState: Equatable, Sendable {
     case idle
     case loading
     case loaded(DayWeatherSummary)
+    case refreshing(DayWeatherSummary)
     case unavailable
+
+    var summary: DayWeatherSummary? {
+        switch self {
+        case .loaded(let summary), .refreshing(let summary): summary
+        case .idle, .loading, .unavailable: nil
+        }
+    }
 }
 
 nonisolated protocol DayWorkoutRouteProviding: Sendable {
@@ -80,6 +88,7 @@ final class DaySummaryRowModel: Identifiable {
     let summary: DaySummary
     private(set) var overviewData: TimelineOverviewData
     private(set) var weatherState: DayWeatherLoadState = .idle
+    private(set) var enrichmentRevision = 0
 
     @ObservationIgnored
     private var didLoadRoutes = false
@@ -87,30 +96,41 @@ final class DaySummaryRowModel: Identifiable {
     @ObservationIgnored
     private var persistWeather: ((DayWeatherRequest, DayWeatherSummary) -> Void)?
 
+    @ObservationIgnored
+    private var needsWeatherRefresh: Bool
+
     var id: TimelineDayKey { summary.day }
 
     init(
         summary: DaySummary,
         weatherState: DayWeatherLoadState = .idle,
+        needsWeatherRefresh: Bool? = nil,
         persistWeather: ((DayWeatherRequest, DayWeatherSummary) -> Void)? = nil
     ) {
         self.summary = summary
         overviewData = summary.overviewData
         self.weatherState = weatherState
+        self.needsWeatherRefresh = needsWeatherRefresh
+            ?? (summary.weatherRequest != nil && weatherState.summary == nil)
         self.persistWeather = persistWeather
     }
 
     func prepareForReload(
         persistedWeather: DayWeatherSummary?,
+        weatherNeedsRefresh: Bool,
         persistWeather: ((DayWeatherRequest, DayWeatherSummary) -> Void)?
     ) {
         self.persistWeather = persistWeather
-        if let persistedWeather {
-            weatherState = .loaded(persistedWeather)
-        } else if weatherState != .loading {
-            // The current day is intentionally volatile, and failed completed
-            // requests should be eligible for another attempt after a reload.
-            weatherState = .idle
+        guard weatherState != .loading else { return }
+        if case .refreshing = weatherState { return }
+
+        let cachedWeather = weatherState.summary ?? persistedWeather
+        needsWeatherRefresh = weatherNeedsRefresh || cachedWeather == nil
+        if needsWeatherRefresh {
+            weatherState = cachedWeather.map(DayWeatherLoadState.loaded) ?? .idle
+            enrichmentRevision &+= 1
+        } else if let cachedWeather {
+            weatherState = .loaded(cachedWeather)
         }
     }
 
@@ -137,23 +157,32 @@ final class DaySummaryRowModel: Identifiable {
     private func loadWeather(
         using client: any DayWeatherProviding
     ) async {
-        guard weatherState == .idle,
-              let request = summary.weatherRequest else { return }
-        weatherState = .loading
+        guard needsWeatherRefresh,
+              let request = summary.weatherRequest,
+              weatherState != .loading else { return }
+        if case .refreshing = weatherState { return }
+
+        let cachedWeather = weatherState.summary
+        weatherState = cachedWeather.map(DayWeatherLoadState.refreshing)
+            ?? .loading
+        needsWeatherRefresh = false
         do {
             let weather = try await client.weather(for: request)
             guard !Task.isCancelled else {
-                weatherState = .idle
+                weatherState = cachedWeather.map(DayWeatherLoadState.loaded)
+                    ?? .idle
+                needsWeatherRefresh = true
                 return
             }
             weatherState = .loaded(weather)
-            if request.isCompleted() {
-                persistWeather?(request, weather)
-            }
+            persistWeather?(request, weather)
         } catch is CancellationError {
-            weatherState = .idle
+            weatherState = cachedWeather.map(DayWeatherLoadState.loaded)
+                ?? .idle
+            needsWeatherRefresh = true
         } catch {
-            weatherState = .unavailable
+            weatherState = cachedWeather.map(DayWeatherLoadState.loaded)
+                ?? .unavailable
         }
     }
 
@@ -245,7 +274,9 @@ final class HomeFeedModel {
                 if let existing = existingRows[summary.day],
                    existing.summary == summary {
                     existing.prepareForReload(
-                        persistedWeather: persistedWeather,
+                        persistedWeather: persistedWeather?.summary,
+                        weatherNeedsRefresh: persistedWeather?.needsRefresh
+                            ?? (summary.weatherRequest != nil),
                         persistWeather: persistence
                     )
                     return existing
@@ -253,8 +284,10 @@ final class HomeFeedModel {
                 return DaySummaryRowModel(
                     summary: summary,
                     weatherState: persistedWeather.map {
-                        .loaded($0)
+                        .loaded($0.summary)
                     } ?? .idle,
+                    needsWeatherRefresh: persistedWeather?.needsRefresh
+                        ?? (summary.weatherRequest != nil),
                     persistWeather: persistence
                 )
             }
@@ -314,9 +347,8 @@ final class HomeFeedModel {
     private func persistedWeather(
         for summary: DaySummary,
         entriesByID: [UUID: LogEntry]
-    ) -> DayWeatherSummary? {
-        guard let request = summary.weatherRequest,
-              request.isCompleted() else { return nil }
+    ) -> PersistedDayWeather? {
+        guard let request = summary.weatherRequest else { return nil }
         for occurrence in summary.occurrences {
             guard let entry = entriesByID[occurrence.entryID],
                   let record = entry.dayWeatherRecords.first(where: {
@@ -324,7 +356,7 @@ final class HomeFeedModel {
                   }) else {
                 continue
             }
-            return record.summary
+            return record
         }
         return nil
     }
@@ -340,7 +372,6 @@ final class HomeFeedModel {
             return nil
         }
         return { request, weather in
-            guard request.isCompleted() else { return }
             let record = PersistedDayWeather(
                 request: request,
                 summary: weather

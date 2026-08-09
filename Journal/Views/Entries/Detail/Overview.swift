@@ -8,6 +8,7 @@ struct EntryDetailOverview: View {
     @Binding var isScrolled: Bool
     let onPresent: (EntryDetailRoute) -> Void
     let onDelete: () -> Void
+    let showsDestructiveActions: Bool
 
     var body: some View {
         DynamicSheetScrollView(
@@ -51,31 +52,33 @@ struct EntryDetailOverview: View {
                 )
                 EntryDetailPhotoGrid(references: entry.photoReferences)
 
-                Button {
-                    onPresent(.advanced)
-                } label: {
-                    HStack {
-                        Label("Advanced", systemImage: "hammer")
-                        Spacer()
-                        DisclosureChevron()
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
-                    .background(.background, in: .rect(cornerRadius: 16))
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 24)
-                Button {
-                    onDelete()
-                } label: {
-                    Label("Delete entry", systemImage: "trash")
+                if showsDestructiveActions {
+                    Button {
+                        onPresent(.advanced)
+                    } label: {
+                        HStack {
+                            Label("Advanced", systemImage: "hammer")
+                            Spacer()
+                            DisclosureChevron()
+                        }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding()
                         .background(.background, in: .rect(cornerRadius: 16))
-                        .foregroundStyle(.red)
-                }
-                .buttonStyle(.plain)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 24)
 
+                    Button {
+                        onDelete()
+                    } label: {
+                        Label("Delete entry", systemImage: "trash")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding()
+                            .background(.background, in: .rect(cornerRadius: 16))
+                            .foregroundStyle(.red)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 18)
