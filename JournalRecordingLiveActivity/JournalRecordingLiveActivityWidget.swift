@@ -12,19 +12,23 @@ struct JournalRecordingLiveActivityWidget: Widget {
                 startedAt: context.attributes.startedAt,
                 state: context.state
             )
-            .activityBackgroundTint(.black.opacity(0.82))
-            .activitySystemActionForegroundColor(.white)
+            .activityBackgroundTint(.clear)
+            .activitySystemActionForegroundColor(.orange)
             .widgetURL(URL(string: "attractivestar-journal://recording"))
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     JournalRecordingIslandLeadingView(
-                        phase: context.state.phase
+                        startedAt: context.attributes.startedAt,
+                        phase: context.state.phase,
+                        distanceMeters: context.state.distanceMeters,
+                        movementDescription: context.state.movementDescription,
+                        needsForegroundLaunch: context.state
+                            .needsForegroundLaunch
                     )
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     JournalRecordingIslandTrailingView(
-                        startedAt: context.attributes.startedAt,
                         phase: context.state.phase
                     )
                 }
@@ -36,11 +40,9 @@ struct JournalRecordingLiveActivityWidget: Widget {
                 }
             } compactLeading: {
                 JournalRecordingCompactIcon(phase: context.state.phase)
+                    .padding(.leading, 4)
             } compactTrailing: {
-                JournalRecordingCompactTrailingView(
-                    startedAt: context.attributes.startedAt,
-                    phase: context.state.phase
-                )
+                EmptyView()
             } minimal: {
                 JournalRecordingCompactIcon(phase: context.state.phase)
             }
@@ -57,7 +59,12 @@ private struct JournalRecordingLockScreenView: View {
         Group {
             switch state.phase {
             case .recording:
-                JournalRecordingActiveView(startedAt: startedAt, state: state)
+                JournalRecordingActiveView(
+                    startedAt: startedAt,
+                    distanceMeters: state.distanceMeters,
+                    movementDescription: state.movementDescription,
+                    needsForegroundLaunch: state.needsForegroundLaunch
+                )
             case .finalizing:
                 JournalRecordingSavingView()
             case .completed:
@@ -70,35 +77,25 @@ private struct JournalRecordingLockScreenView: View {
 
 private struct JournalRecordingActiveView: View {
     let startedAt: Date
-    let state: JournalRecordingActivityAttributes.ContentState
+    let distanceMeters: Double
+    let movementDescription: String
+    let needsForegroundLaunch: Bool
 
     var body: some View {
         HStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
-                JournalRecordingActivityTitle()
+            VStack(alignment: .leading, spacing: 3) {
                 JournalRecordingMetricsView(
-                    distanceMeters: state.distanceMeters,
-                    movementDescription: state.movementDescription,
-                    needsForegroundLaunch: state.needsForegroundLaunch
+                    distanceMeters: distanceMeters,
+                    movementDescription: movementDescription,
+                    needsForegroundLaunch: needsForegroundLaunch
                 )
+                Text(startedAt, style: .timer)
+                    .font(.title.monospacedDigit().weight(.medium))
+                    .foregroundStyle(.orange)
             }
             Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 8) {
-                Text(startedAt, style: .timer)
-                    .font(.title2.monospacedDigit())
-                JournalRecordingStopButton()
-            }
+            JournalRecordingStopButton(diameter: 58)
         }
-    }
-}
-
-private struct JournalRecordingActivityTitle: View {
-    var body: some View {
-        Label("Journal Recording", systemImage: "record.circle.fill")
-            .font(.headline)
-            .foregroundStyle(.primary)
-            .symbolRenderingMode(.palette)
-            .foregroundStyle(.white, .red)
     }
 }
 
@@ -109,47 +106,53 @@ private struct JournalRecordingMetricsView: View {
 
     var body: some View {
         if needsForegroundLaunch {
-            Label("Open Journal to begin tracking", systemImage: "location.slash")
-                .font(.caption)
-                .foregroundStyle(.yellow)
+            Label(
+                "Open Journal to begin tracking",
+                systemImage: "location.slash"
+            )
+            .font(.caption)
+            .foregroundStyle(.yellow)
         } else {
-            HStack(spacing: 10) {
+            HStack(spacing: 0) {
                 Text(
                     Measurement(value: distanceMeters, unit: UnitLength.meters),
                     format: .measurement(width: .abbreviated, usage: .road)
                 )
-                Text(movementDescription)
+                Text(" • " + movementDescription)
             }
-            .font(.caption)
+            .font(.caption.weight(.medium))
             .foregroundStyle(.secondary)
         }
     }
 }
 
 private struct JournalRecordingStopButton: View {
+    let diameter: CGFloat
+
     var body: some View {
         Button(intent: StopJournalRecordingIntent()) {
-            Label("Stop", systemImage: "stop.fill")
+            Image(systemName: "stop.fill")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(.orange)
+                .frame(width: diameter, height: diameter)
+                .background(.orange.opacity(0.22), in: Circle())
         }
-        .buttonStyle(.borderedProminent)
-        .tint(.red)
-        .font(.caption.weight(.semibold))
+        .buttonStyle(.plain)
+        .accessibilityLabel("Stop Recording")
     }
 }
 
 private struct JournalRecordingSavingView: View {
     var body: some View {
-        HStack(spacing: 12) {
-            ProgressView()
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Saving Recording…")
-                    .font(.headline)
-                Text("Creating your journal entry")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
+        VStack(alignment: .leading, spacing: 3) {
+            Text("Saving Recording…")
+                .font(.headline)
+                .foregroundStyle(.orange)
+            Text("Creating your journal entry")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -158,11 +161,11 @@ private struct JournalRecordingSummaryView: View {
     let state: JournalRecordingActivityAttributes.ContentState
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill")
-                .font(.title2)
+                .font(.title)
                 .foregroundStyle(.green)
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 0) {
                 if let title = state.summaryTitle {
                     Text(title)
                         .font(.headline)
@@ -224,36 +227,43 @@ private struct JournalRecordingDistanceView: View {
 }
 
 private struct JournalRecordingIslandLeadingView: View {
+    let startedAt: Date
     let phase: JournalRecordingActivityPhase
+    let distanceMeters: Double
+    let movementDescription: String
+    let needsForegroundLaunch: Bool
 
     var body: some View {
         switch phase {
         case .recording:
-            Label("Recording", systemImage: "record.circle.fill")
-                .foregroundStyle(.red)
+            VStack(alignment: .leading, spacing: 0) {
+                JournalRecordingMetricsView(
+                    distanceMeters: distanceMeters,
+                    movementDescription: movementDescription,
+                    needsForegroundLaunch: needsForegroundLaunch
+                )
+                Text(startedAt, style: .timer)
+                    .font(.title.monospacedDigit().weight(.medium))
+                    .foregroundStyle(.orange)
+            }
+            .padding(.leading, 8)
         case .finalizing:
-            Label("Saving", systemImage: "hourglass")
-                .foregroundStyle(.yellow)
+            EmptyView()
         case .completed:
-            Label("Saved", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+            EmptyView()
         }
     }
 }
 
 private struct JournalRecordingIslandTrailingView: View {
-    let startedAt: Date
     let phase: JournalRecordingActivityPhase
 
     var body: some View {
-        if phase == .recording {
-            Text(startedAt, style: .timer)
-                .monospacedDigit()
-        } else if phase == .finalizing {
-            ProgressView()
-        } else {
-            Image(systemName: "checkmark")
-                .foregroundStyle(.green)
+        switch phase {
+        case .recording:
+            JournalRecordingStopButton(diameter: 46)
+        case .finalizing, .completed:
+            EmptyView()
         }
     }
 }
@@ -265,19 +275,12 @@ private struct JournalRecordingIslandBottomView: View {
     var body: some View {
         switch state.phase {
         case .recording:
-            HStack(spacing: 12) {
-                JournalRecordingMetricsView(
-                    distanceMeters: state.distanceMeters,
-                    movementDescription: state.movementDescription,
-                    needsForegroundLaunch: state.needsForegroundLaunch
-                )
-                Spacer(minLength: 4)
-                JournalRecordingStopButton()
-            }
+            EmptyView()
         case .finalizing:
-            Text("Creating your journal entry…")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Text("Saving…")
+                .font(.title2.weight(.medium))
+                .foregroundStyle(.orange)
+                .frame(maxWidth: .infinity, alignment: .leading)
         case .completed:
             JournalRecordingSummaryView(startedAt: startedAt, state: state)
         }
@@ -291,7 +294,7 @@ private struct JournalRecordingCompactIcon: View {
         switch phase {
         case .recording:
             Image(systemName: "record.circle.fill")
-                .foregroundStyle(.red)
+                .foregroundStyle(.orange)
         case .finalizing:
             Image(systemName: "hourglass")
                 .foregroundStyle(.yellow)
@@ -302,21 +305,119 @@ private struct JournalRecordingCompactIcon: View {
     }
 }
 
-private struct JournalRecordingCompactTrailingView: View {
-    let startedAt: Date
-    let phase: JournalRecordingActivityPhase
-
-    var body: some View {
-        if phase == .recording {
-            Text(startedAt, style: .timer)
-                .monospacedDigit()
-                .frame(maxWidth: 52)
-        } else if phase == .finalizing {
-            Text("Saving")
-                .font(.caption2)
-        } else {
-            Text("Saved")
-                .font(.caption2)
+#if DEBUG
+    extension JournalRecordingActivityAttributes {
+        fileprivate nonisolated static var preview: Self {
+            JournalRecordingActivityAttributes(
+                sessionID: UUID(
+                    uuidString: "68C913F1-54BA-4CB1-853D-D73A1F2D56C2"
+                )!,
+                startedAt: .now.addingTimeInterval(-23 * 60)
+            )
         }
     }
-}
+
+    extension JournalRecordingActivityAttributes.ContentState {
+        fileprivate nonisolated static var recordingPreview: Self {
+            JournalRecordingActivityAttributes.ContentState(
+                phase: .recording,
+                distanceMeters: 2_400,
+                movementDescription: "Walking",
+                needsForegroundLaunch: false,
+                endedAt: nil,
+                summaryTitle: nil,
+                summaryDetail: nil,
+                showsDistance: true
+            )
+        }
+
+        fileprivate nonisolated static var savingPreview: Self {
+            JournalRecordingActivityAttributes.ContentState(
+                phase: .finalizing,
+                distanceMeters: 2_400,
+                movementDescription: "Walking",
+                needsForegroundLaunch: false,
+                endedAt: nil,
+                summaryTitle: nil,
+                summaryDetail: nil,
+                showsDistance: true
+            )
+        }
+
+        fileprivate nonisolated static var visitPreview: Self {
+            JournalRecordingActivityAttributes.ContentState(
+                phase: .completed,
+                distanceMeters: 24,
+                movementDescription: "Stationary",
+                needsForegroundLaunch: false,
+                endedAt: .now,
+                summaryTitle: "Place Visit",
+                summaryDetail: "Romanian Athenaeum",
+                showsDistance: false
+            )
+        }
+
+        fileprivate nonisolated static var transitPreview: Self {
+            JournalRecordingActivityAttributes.ContentState(
+                phase: .completed,
+                distanceMeters: 5_200,
+                movementDescription: "Walking",
+                needsForegroundLaunch: false,
+                endedAt: .now,
+                summaryTitle: "Walk",
+                summaryDetail: "Home → Romanian Athenaeum",
+                showsDistance: true
+            )
+        }
+    }
+
+    #Preview(
+        "Lock Screen",
+        as: .content,
+        using: JournalRecordingActivityAttributes.preview
+    ) {
+        JournalRecordingLiveActivityWidget()
+    } contentStates: {
+        JournalRecordingActivityAttributes.ContentState.recordingPreview
+        JournalRecordingActivityAttributes.ContentState.savingPreview
+        JournalRecordingActivityAttributes.ContentState.visitPreview
+        JournalRecordingActivityAttributes.ContentState.transitPreview
+    }
+
+    #Preview(
+        "Dynamic Island · Expanded",
+        as: .dynamicIsland(.expanded),
+        using: JournalRecordingActivityAttributes.preview
+    ) {
+        JournalRecordingLiveActivityWidget()
+    } contentStates: {
+        JournalRecordingActivityAttributes.ContentState.recordingPreview
+        JournalRecordingActivityAttributes.ContentState.savingPreview
+        JournalRecordingActivityAttributes.ContentState.visitPreview
+        JournalRecordingActivityAttributes.ContentState.transitPreview
+    }
+
+    #Preview(
+        "Dynamic Island · Compact",
+        as: .dynamicIsland(.compact),
+        using: JournalRecordingActivityAttributes.preview
+    ) {
+        JournalRecordingLiveActivityWidget()
+    } contentStates: {
+        JournalRecordingActivityAttributes.ContentState.recordingPreview
+        JournalRecordingActivityAttributes.ContentState.savingPreview
+        JournalRecordingActivityAttributes.ContentState.visitPreview
+    }
+
+    #Preview(
+        "Dynamic Island · Minimal",
+        as: .dynamicIsland(.minimal),
+        using: JournalRecordingActivityAttributes.preview
+    ) {
+        JournalRecordingLiveActivityWidget()
+    } contentStates: {
+        JournalRecordingActivityAttributes.ContentState.recordingPreview
+        JournalRecordingActivityAttributes.ContentState.savingPreview
+        JournalRecordingActivityAttributes.ContentState.visitPreview
+    }
+#endif
