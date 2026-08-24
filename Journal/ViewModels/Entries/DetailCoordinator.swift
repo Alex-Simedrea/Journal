@@ -36,6 +36,26 @@ enum EntryTimeZoneEndpoint: String, Hashable, Identifiable, Sendable {
     }
 }
 
+enum EntryDetailDestructiveAction: String, Hashable, Sendable {
+    case deleteEntry
+    case dismissCandidate
+
+    var title: LocalizedStringResource {
+        switch self {
+        case .deleteEntry: "Delete Entry"
+        case .dismissCandidate: "Dismiss Candidate"
+        }
+    }
+
+    var message: LocalizedStringResource {
+        switch self {
+        case .deleteEntry: "This action cannot be undone."
+        case .dismissCandidate:
+            "This candidate won’t appear in the timeline again."
+        }
+    }
+}
+
 enum EntryDetailLocationRouting {
     static func roles(
         for kind: LogKind,
@@ -84,6 +104,7 @@ enum EntryDetailRoute: Hashable, Identifiable, Sendable {
     case addPlace(EntryDetailLocationRole)
     case placeSymbol(EntryDetailLocationRole)
     case advanced
+    case destructiveConfirmation(EntryDetailDestructiveAction)
 
     var id: String {
         switch self {
@@ -100,6 +121,8 @@ enum EntryDetailRoute: Hashable, Identifiable, Sendable {
         case .addPlace(let role): "add-place-\(role.rawValue)"
         case .placeSymbol(let role): "place-symbol-\(role.rawValue)"
         case .advanced: "advanced"
+        case .destructiveConfirmation(let action):
+            "destructive-confirmation-\(action.rawValue)"
         }
     }
 
@@ -118,6 +141,7 @@ enum EntryDetailRoute: Hashable, Identifiable, Sendable {
         case .addPlace: "New Place"
         case .placeSymbol: "Symbol"
         case .advanced: "Advanced"
+        case .destructiveConfirmation(let action): action.title
         }
     }
 
@@ -126,7 +150,8 @@ enum EntryDetailRoute: Hashable, Identifiable, Sendable {
         case .time, .timeZone, .people, .photos, .transitMetadata, .location,
              .entryKind, .addPerson, .addPlace:
             true
-        case .details, .locations, .placeSymbol, .advanced:
+        case .details, .locations, .placeSymbol, .advanced,
+             .destructiveConfirmation:
             false
         }
     }
@@ -246,7 +271,8 @@ final class EntryDetailEditSession {
         case .addPlace:
             newPlaceName = ""
             newPlaceSystemImage = .mappin
-        case .details, .timeZone, .locations, .placeSymbol, .advanced:
+        case .details, .timeZone, .locations, .placeSymbol, .advanced,
+             .destructiveConfirmation:
             break
         }
     }
@@ -278,7 +304,8 @@ final class EntryDetailEditSession {
             !newPlaceName.trimmingCharacters(
                 in: .whitespacesAndNewlines
             ).isEmpty || newPlaceSystemImage != .mappin
-        case .details, .timeZone, .locations, .placeSymbol, .advanced:
+        case .details, .timeZone, .locations, .placeSymbol, .advanced,
+             .destructiveConfirmation:
             false
         }
     }

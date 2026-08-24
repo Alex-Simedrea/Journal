@@ -13,6 +13,20 @@ enum PlaceVisitEntryStore {
         modelExchange: EntryModelExchange? = nil,
         in modelContext: ModelContext
     ) throws -> LogEntry {
+        let entry = makeEntry(
+            draft: draft,
+            rawInput: rawInput,
+            modelExchange: modelExchange
+        )
+        try insert(entry, in: modelContext)
+        return entry
+    }
+
+    static func makeEntry(
+        draft: ResolvedPlaceVisitDraft,
+        rawInput: String?,
+        modelExchange: EntryModelExchange? = nil
+    ) -> LogEntry {
         let location = draft.location?.withFallbackDisplayName(
             draft.place?.name
         )
@@ -48,9 +62,11 @@ enum PlaceVisitEntryStore {
         )
         entry.placeVisitDetails = details
         entry.people = draft.people
+        return entry
+    }
 
+    static func insert(_ entry: LogEntry, in modelContext: ModelContext) throws {
         modelContext.insert(entry)
         try modelContext.save()
-        return entry
     }
 }

@@ -20,6 +20,7 @@ struct TimelineProjectionTests {
             PlaceVisitDetails.self,
             WorkoutDetails.self,
             TransitType.self,
+            AutomationCandidate.self,
         ])
         let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(

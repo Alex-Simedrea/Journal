@@ -115,6 +115,9 @@ final class LocationService {
             latitude: coordinate.latitude,
             longitude: coordinate.longitude,
             displayName: mapItem.name ?? fallbackName,
+            systemImage: PlaceSystemImage(
+                pointOfInterestCategory: mapItem.pointOfInterestCategory
+            ) ?? .mappin,
             formattedAddress: mapItem.address?.fullAddress,
             compactAddress: compactAddress(for: mapItem),
             timeZoneIdentifier: mapItem.timeZone?.identifier,

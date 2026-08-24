@@ -304,7 +304,7 @@ enum EntryDetailEditingService {
             details.fieldReviews.removeAll { $0.field == .origin }
             entry.startTimeZoneIdentifier =
                 selection.location.timeZoneIdentifier
-                ?? entry.creationTimeZoneIdentifier
+                ?? entry.startTimeZoneIdentifier
             entry.weather = nil
         case .destination:
             details.destinationPlace = place
@@ -316,7 +316,7 @@ enum EntryDetailEditingService {
             details.destinationCandidates = []
             details.fieldReviews.removeAll { $0.field == .destination }
             entry.endTimeZoneIdentifier = selection.location.timeZoneIdentifier
-                ?? entry.creationTimeZoneIdentifier
+                ?? entry.endTimeZoneIdentifier
             entry.endWeather = nil
         case .place:
             throw EntryDetailEditingError.missingLocation

@@ -54,6 +54,9 @@ nonisolated struct TransitMapSearchResult: Sendable, Equatable {
             latitude: latitude,
             longitude: longitude,
             displayName: name,
+            systemImage: PlaceSystemImage(
+                pointOfInterestCategory: pointOfInterestCategory
+            ) ?? .mappin,
             formattedAddress: address,
             timeZoneIdentifier: timeZoneIdentifier,
             cityName: cityName,
@@ -143,7 +146,9 @@ nonisolated enum TransitMapKitService {
             )
 
             results.append(TransitMapSearchResult(
-                name: item.name ?? query,
+                name: completion.title.trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                ).nilIfBlank ?? item.name ?? query,
                 address: item.address?.fullAddress,
                 latitude: coordinate.latitude,
                 longitude: coordinate.longitude,
@@ -253,6 +258,12 @@ nonisolated enum TransitMapKitService {
             distanceMeters: route.distance,
             expectedTravelTime: route.expectedTravelTime
         )
+    }
+}
+
+nonisolated private extension String {
+    var nilIfBlank: String? {
+        isEmpty ? nil : self
     }
 }
 

@@ -129,12 +129,8 @@ enum WorkoutLocationPresentation {
         if let place {
             return place.name
         }
-        if let address = location?.compactAddress,
-           !address.isEmpty {
-            return address
-        }
-        if let address = compactFallback(location?.formattedAddress) {
-            return address
+        if let name = location?.preferredName {
+            return name
         }
         guard let location else {
             return String(localized: "Location unavailable")
@@ -148,12 +144,4 @@ enum WorkoutLocationPresentation {
         )
     }
 
-    private static func compactFallback(_ address: String?) -> String? {
-        guard let address else { return nil }
-        let parts = address.split(separator: ",", omittingEmptySubsequences: true)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        guard !parts.isEmpty else { return nil }
-        return parts.prefix(2).joined(separator: ", ")
-    }
 }

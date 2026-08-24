@@ -9,6 +9,7 @@ nonisolated struct Location: Hashable, Sendable {
     var latitude: Double
     var longitude: Double
     var displayName: String?
+    var systemImage: PlaceSystemImage?
     var formattedAddress: String?
     var compactAddress: String?
     var timeZoneIdentifier: String?
@@ -20,6 +21,7 @@ nonisolated struct Location: Hashable, Sendable {
         latitude: Double,
         longitude: Double,
         displayName: String? = nil,
+        systemImage: PlaceSystemImage? = nil,
         formattedAddress: String? = nil,
         compactAddress: String? = nil,
         timeZoneIdentifier: String? = nil,
@@ -30,6 +32,7 @@ nonisolated struct Location: Hashable, Sendable {
         self.latitude = latitude
         self.longitude = longitude
         self.displayName = displayName
+        self.systemImage = systemImage
         self.formattedAddress = formattedAddress
         self.compactAddress = compactAddress
         self.timeZoneIdentifier = timeZoneIdentifier
@@ -43,9 +46,9 @@ nonisolated struct Location: Hashable, Sendable {
     }
 
     var preferredName: String? {
-        compactAddress?.nilIfBlank
+        displayName?.nilIfBlank
+            ?? compactAddress?.nilIfBlank
             ?? formattedAddress?.nilIfBlank
-            ?? displayName?.nilIfBlank
     }
 
     var presentationAddress: String? {
@@ -70,6 +73,10 @@ nonisolated struct Location: Hashable, Sendable {
         guard let first = parts.first else { return nil }
         guard parts.count > 1, containsDigit(parts[1]) else { return first }
         return parts.prefix(2).joined(separator: ", ")
+    }
+
+    var timelineName: String? {
+        displayName?.nilIfBlank ?? timelineAddress
     }
 
     func withFallbackDisplayName(_ name: String?) -> Location {

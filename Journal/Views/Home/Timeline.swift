@@ -5,9 +5,11 @@ struct HomeTimeline: View {
     let selectedDay: TimelineDayKey
     let rows: [TimelineRow]
     let unplacedOccurrences: [TimelineOccurrence]
+    let automationCandidates: [AutomationCandidateSnapshot]
     let overviewData: TimelineOverviewData
     let errorMessage: String?
     let onSelect: (UUID) -> Void
+    let onSelectCandidate: (AutomationCandidateSnapshot) -> Void
 
     var body: some View {
         ScrollView {
@@ -20,18 +22,29 @@ struct HomeTimeline: View {
 
                 if let errorMessage {
                     TimelineLoadingErrorView(message: errorMessage)
-                } else if rows.isEmpty, unplacedOccurrences.isEmpty {
+                } else if rows.isEmpty,
+                          unplacedOccurrences.isEmpty,
+                          automationCandidates.isEmpty {
                     TimelineEmptyView(selectedDay: selectedDay)
                 } else {
-                    TimelineRulerSequence(
-                        rows: rows,
-                        onSelect: onSelect
-                    )
+                    if !rows.isEmpty {
+                        TimelineRulerSequence(
+                            rows: rows,
+                            onSelect: onSelect
+                        )
+                    }
 
                     if !unplacedOccurrences.isEmpty {
                         TimelineUnplacedSection(
                             occurrences: unplacedOccurrences,
                             onSelect: onSelect
+                        )
+                    }
+
+                    if !automationCandidates.isEmpty {
+                        TimelineAutomationCandidateSection(
+                            candidates: automationCandidates,
+                            onSelect: onSelectCandidate
                         )
                     }
                 }

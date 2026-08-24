@@ -21,16 +21,18 @@ struct PlaceVisitDetailSheet: View {
                 if let details = entry.placeVisitDetails {
                     PlaceVisitMapSection(
                         name: details.place?.name
-                            ?? details.location?.presentationAddress
+                            ?? details.location?.preferredName
                             ?? "Visited place",
-                        systemImage: details.place?.systemImage ?? .mappin,
+                        systemImage: details.place?.systemImage
+                            ?? details.location?.systemImage
+                            ?? .mappin,
                         location: details.location
                             ?? details.place?.location
                             ?? details.candidates.first?.location
                     )
                     PlaceVisitSummarySection(
                         placeName: details.place?.name
-                            ?? details.location?.presentationAddress,
+                            ?? details.location?.preferredName,
                         startTime: entry.startTime,
                         endTime: entry.endTime,
                         timeZoneIdentifier: entry.startTimeZoneIdentifier,
@@ -136,7 +138,7 @@ private struct PlaceVisitSavedPlaceAction: View {
                         id: "visit",
                         label: "Save Location as Place",
                         name: details.place?.name
-                            ?? location.presentationAddress
+                            ?? location.preferredName
                             ?? String(localized: "Location"),
                         location: location,
                         isAlreadySaved: details.place != nil

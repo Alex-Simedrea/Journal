@@ -74,13 +74,15 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
         transitSourceOrganizationName = transit?.sourceOrganizationName
         transitSourceServiceIdentifier = transit?.sourceServiceIdentifier
         origin = transit?.originPlace?.name
-            ?? transit?.originLocation?.timelineAddress
+            ?? transit?.originLocation?.timelineName
+            ?? transit?.originRawText?.nilIfBlank
             ?? String(
                 localized: "Unknown origin",
                 comment: "Fallback name for a transit origin without a location"
             )
         destination = transit?.destinationPlace?.name
-            ?? transit?.destinationLocation?.timelineAddress
+            ?? transit?.destinationLocation?.timelineName
+            ?? transit?.destinationRawText?.nilIfBlank
             ?? String(
                 localized: "Unknown destination",
                 comment: "Fallback name for a transit destination without a location"
@@ -116,9 +118,11 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
 
         let visit = entry.placeVisitDetails
         visitPlace = visit?.place?.name
-            ?? visit?.location?.timelineAddress
+            ?? visit?.location?.timelineName
             ?? "Unknown place"
-        visitSystemImage = visit?.place?.systemImage ?? .mappin
+        visitSystemImage = visit?.place?.systemImage
+            ?? visit?.location?.systemImage
+            ?? .mappin
         visitLocation = Self.location(
             place: visit?.place,
             fallbackName: visitPlace,
@@ -306,7 +310,7 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
         location: Location?
     ) -> String {
         place?.name
-            ?? location?.timelineAddress
+            ?? location?.timelineName
             ?? String(localized: "Location unavailable")
     }
 
@@ -375,6 +379,13 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
         case .origin: .origin
         case .destination: .destination
         }
+    }
+}
+
+nonisolated private extension String {
+    var nilIfBlank: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 

@@ -119,7 +119,9 @@ struct TimelineLocationSnapshot: Hashable, Identifiable, Sendable {
         name = place?.name ?? fallbackName
         latitude = location?.latitude ?? 0
         longitude = location?.longitude ?? 0
-        systemImage = place?.systemImage ?? fallbackSystemImage
+        systemImage = place?.systemImage
+            ?? location?.systemImage
+            ?? fallbackSystemImage
         accuracyRadiusMeters = max(place?.accuracyRadiusMeters ?? 0, 0)
         radiusCenterLatitude = place?.location.latitude
         radiusCenterLongitude = place?.location.longitude

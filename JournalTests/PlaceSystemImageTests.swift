@@ -1,3 +1,4 @@
+import Foundation
 import MapKit
 import Testing
 
@@ -64,5 +65,51 @@ struct PlaceSystemImageTests {
         #expect(
             PlaceSystemImage(pointOfInterestCategory: .restroom) == nil
         )
+    }
+
+    @Test("MapKit locations retain landmark names, addresses, and symbols")
+    func mapKitLocationMetadata() throws {
+        let result = TransitMapSearchResult(
+            name: "Reyna Beach",
+            address: "Strada Pescarilor 1, Constanța",
+            latitude: 44.21,
+            longitude: 28.65,
+            timeZoneIdentifier: "Europe/Bucharest",
+            pointOfInterestCategory: .beach,
+            distanceKilometers: 2.4,
+            walkingDurationMinutes: nil,
+            automobileDurationMinutes: nil
+        )
+
+        let location = result.location
+        #expect(location.preferredName == "Reyna Beach")
+        #expect(
+            location.presentationAddress
+                == "Strada Pescarilor 1, Constanța"
+        )
+        #expect(location.systemImage == .beach)
+
+        let data = try JSONEncoder().encode(location)
+        let restored = try JSONDecoder().decode(Location.self, from: data)
+        #expect(restored.displayName == "Reyna Beach")
+        #expect(restored.systemImage == .beach)
+    }
+
+    @Test("Historical locations decode without landmark symbols")
+    func historicalLocationCompatibility() throws {
+        let data = try #require(
+            """
+            {
+              "latitude": 44.21,
+              "longitude": 28.65,
+              "displayName": "Reyna Beach",
+              "formattedAddress": "Strada Pescarilor 1, Constanța"
+            }
+            """.data(using: .utf8)
+        )
+
+        let location = try JSONDecoder().decode(Location.self, from: data)
+        #expect(location.preferredName == "Reyna Beach")
+        #expect(location.systemImage == nil)
     }
 }

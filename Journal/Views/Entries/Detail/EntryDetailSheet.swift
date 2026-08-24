@@ -10,6 +10,7 @@ struct EntryDetailDraftPresentation {
     let title: LocalizedStringResource
     let isConfirming: Bool
     let onCancel: () -> Void
+    let onDismiss: (() -> Void)?
     let onConfirm: (LogEntry) -> Void
 }
 
@@ -30,7 +31,6 @@ struct EntryDetailSheet: View {
     @State private var routeModel = WorkoutRouteModel()
     @State private var locationPickerModel = EntryLocationPickerModel()
     @State private var addPlaceModel: PlaceEditorModel?
-    @State private var isDeleteConfirmationPresented = false
     @State private var contentIsScrolled = false
     @State private var chromeHeight: CGFloat = 0
     @State private var peopleSearchText = ""
@@ -49,6 +49,7 @@ struct EntryDetailSheet: View {
         title: LocalizedStringResource,
         isConfirming: Bool = false,
         onCancel: @escaping () -> Void,
+        onDismiss: (() -> Void)? = nil,
         onConfirm: @escaping (LogEntry) -> Void
     ) {
         entry = draftEntry
@@ -56,6 +57,7 @@ struct EntryDetailSheet: View {
             title: title,
             isConfirming: isConfirming,
             onCancel: onCancel,
+            onDismiss: onDismiss,
             onConfirm: onConfirm
         )
         _coordinator = State(initialValue: EntryDetailCoordinator(entry: entry))
@@ -111,7 +113,7 @@ struct EntryDetailSheet: View {
                     .disabled(
                         draftPresentation.isConfirming || !canConfirmDraft
                     )
-                    .accessibilityLabel("Import Journey")
+                    .accessibilityLabel("Confirm Entry")
                 } else if coordinator.route == .details,
                     entry.entryKindReviewReason != nil
                 {
@@ -187,16 +189,6 @@ struct EntryDetailSheet: View {
         .interactiveDismissDisabled(
             draftPresentation != nil || coordinator.isDirty
         )
-        .confirmationDialog(
-            "Delete Entry?",
-            isPresented: $isDeleteConfirmationPresented,
-            titleVisibility: .visible
-        ) {
-            Button("Delete Entry", role: .destructive, action: deleteEntry)
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This action cannot be undone.")
-        }
         .alert(
             "Couldn’t Save Changes",
             isPresented: Binding(
@@ -269,8 +261,8 @@ struct EntryDetailSheet: View {
                 topContentInset: chromeHeight,
                 isScrolled: $contentIsScrolled,
                 onPresent: coordinator.present,
-                onDelete: { isDeleteConfirmationPresented = true },
-                showsDestructiveActions: draftPresentation == nil
+                showsDestructiveActions: draftPresentation == nil,
+                showsDismissAction: draftPresentation?.onDismiss != nil
             )
         case .time:
             EntryDetailEditorViewport(
@@ -347,6 +339,7 @@ struct EntryDetailSheet: View {
                     addPlaceModel = PlaceEditorModel(
                         initialName: name,
                         initialLocation: selection?.location,
+                        initialSymbol: selection?.systemImage ?? .mappin,
                         allowsCurrentLocationCapture: true
                     )
                     coordinator.present(.addPlace(role))
@@ -408,9 +401,52 @@ struct EntryDetailSheet: View {
             ) {
                 EntryDetailAdvancedEditor(entry: entry)
             }
+        case .destructiveConfirmation(let action):
+            EntryDetailDestructiveConfirmation(
+                action: action,
+                topContentInset: chromeHeight,
+                onCancel: { coordinator.goBack() },
+                onDelete: { performDestructiveAction(action) }
+            )
         }
     }
 
+}
+
+private struct EntryDetailDestructiveConfirmation: View {
+    let action: EntryDetailDestructiveAction
+    let topContentInset: CGFloat
+    let onCancel: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text(action.message)
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+
+            HStack(spacing: 10) {
+                Button(action: onCancel) {
+                    Text("Cancel")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glass)
+
+                Button(role: .destructive, action: onDelete) {
+                    Text("Delete")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent)
+                .tint(.red)
+            }
+            .controlSize(.large)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, topContentInset - 8)
+        .padding(.bottom, -12)
+    }
 }
 
 private struct EntryDetailEditorViewport<Content: View>: View {
@@ -455,25 +491,37 @@ private extension EntryDetailSheet {
     }
 
     private var canConfirmDraft: Bool {
-        guard let details = entry.transitDetails,
-              !details.type.trimmingCharacters(
-                in: .whitespacesAndNewlines
-              ).isEmpty,
-              let startTime = entry.startTime,
+        guard let startTime = entry.startTime,
               let endTime = entry.endTime else {
             return false
         }
-        let hasOrigin = details.originPlace != nil
-            || details.originLocation != nil
-            || !(details.originRawText ?? "").trimmingCharacters(
-                in: .whitespacesAndNewlines
-            ).isEmpty
-        let hasDestination = details.destinationPlace != nil
-            || details.destinationLocation != nil
-            || !(details.destinationRawText ?? "").trimmingCharacters(
-                in: .whitespacesAndNewlines
-            ).isEmpty
-        return hasOrigin && hasDestination && endTime > startTime
+        guard endTime > startTime else { return false }
+
+        switch entry.kind {
+        case .transit:
+            guard let details = entry.transitDetails,
+                  !details.type.trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                  ).isEmpty else {
+                return false
+            }
+            let hasOrigin = details.originPlace != nil
+                || details.originLocation != nil
+                || !(details.originRawText ?? "").trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                ).isEmpty
+            let hasDestination = details.destinationPlace != nil
+                || details.destinationLocation != nil
+                || !(details.destinationRawText ?? "").trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                ).isEmpty
+            return hasOrigin && hasDestination
+        case .placeVisit:
+            guard let details = entry.placeVisitDetails else { return false }
+            return details.place != nil || details.location != nil
+        case .workout, .wakeUp:
+            return false
+        }
     }
 
     private var peopleUsageCounts: [UUID: Int] {
@@ -546,11 +594,23 @@ private extension EntryDetailSheet {
                 try addPerson()
             case .addPlace(let role):
                 addPlace(for: role)
-            case .details, .locations, .placeSymbol, .advanced:
+            case .details, .locations, .placeSymbol, .advanced,
+                 .destructiveConfirmation:
                 break
             }
         } catch {
             coordinator.errorMessage = error.localizedDescription
+        }
+    }
+
+    private func performDestructiveAction(
+        _ action: EntryDetailDestructiveAction
+    ) {
+        switch action {
+        case .deleteEntry:
+            deleteEntry()
+        case .dismissCandidate:
+            draftPresentation?.onDismiss?()
         }
     }
 

@@ -2,20 +2,13 @@ import SwiftData
 import SwiftUI
 
 @main struct MyApp: App {
+    @UIApplicationDelegateAdaptor(JournalAppDelegate.self)
+    private var appDelegate
+
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .modelContainer(
-                    for: [
-                        LogEntry.self,
-                        Person.self,
-                        Place.self,
-                        TransitDetails.self,
-                        PlaceVisitDetails.self,
-                        WorkoutDetails.self,
-                        TransitType.self,
-                    ]
-                )
+                .modelContainer(JournalModelContainer.shared)
         }
     }
 }
@@ -42,11 +35,13 @@ private struct JournalApplicationContent: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var boardingPassImports = BoardingPassImportCoordinator()
     @State private var workoutImports = WorkoutImportCoordinator()
+    @State private var automation = AutomationCoordinator.shared
     @State private var contentRevision = 0
 
     var body: some View {
         HomeScreen(contentRevision: contentRevision)
         .task {
+            await automation.start(in: modelContext)
             _ = try? await ContactPersonSyncService
                 .synchronizeAllContacts(in: modelContext)
             await workoutImports.start(in: modelContext)
@@ -60,6 +55,7 @@ private struct JournalApplicationContent: View {
             if newPhase == .active {
                 boardingPassImports.loadNextIfNeeded()
                 Task {
+                    await automation.synchronize(in: modelContext)
                     await workoutImports.synchronize(in: modelContext)
                     await EntryWeatherService.populateMissing(
                         in: modelContext
@@ -72,6 +68,8 @@ private struct JournalApplicationContent: View {
                     )
                     contentRevision &+= 1
                 }
+            } else {
+                automation.pauseLiveUpdates()
             }
         }
         .onOpenURL { url in

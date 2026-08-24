@@ -7,7 +7,10 @@ struct DayTimelineScreen: View {
     @Binding var selectedDay: TimelineDayKey
     @State private var presentation = HomePresentationModel()
     @State private var isCalendarPresented = false
+    @State private var selectedAutomationCandidate:
+        AutomationCandidateSnapshot?
     var showsCloseButton = true
+    var contentRevision = 0
 
     private var displayedDate: Date { selectedDay.displayDate() }
     private var isToday: Bool { selectedDay == .today() }
@@ -34,11 +37,19 @@ struct DayTimelineScreen: View {
             selectedDay: selectedDay,
             rows: presentation.timelineRows,
             unplacedOccurrences: presentation.reviewOccurrences,
+            automationCandidates: presentation.automationCandidates,
             overviewData: presentation.overviewData,
             errorMessage: presentation.timelineErrorMessage,
             onSelect: { entryID in
-                presentation.sheet = .details(entryID)
-            }
+                if let candidate = presentation.automationCandidates.first(
+                    where: { $0.id == entryID }
+                ) {
+                    selectedAutomationCandidate = candidate
+                } else {
+                    presentation.sheet = .details(entryID)
+                }
+            },
+            onSelectCandidate: { selectedAutomationCandidate = $0 }
         )
         .navigationTitle(title)
         .navigationSubtitle(
@@ -88,6 +99,15 @@ struct DayTimelineScreen: View {
                 entryProvider: presentation.entry(withID:)
             )
         }
+        .sheet(
+            item: $selectedAutomationCandidate,
+            onDismiss: reloadTimelineAndRoutes
+        ) { candidate in
+            AutomationCandidateReviewSheet(candidateID: candidate.id) {
+                selectedAutomationCandidate = nil
+                reloadTimelineAndRoutes()
+            }
+        }
         .alert(
             "Couldn’t Prepare Timeline",
             isPresented: Binding(
@@ -109,9 +129,19 @@ struct DayTimelineScreen: View {
                 presentation.setupErrorMessage = error.localizedDescription
             }
         }
-        .task(id: selectedDay) {
+        .task(id: TimelineReloadID(
+            day: selectedDay,
+            contentRevision: contentRevision
+        )) {
             reloadTimeline()
             await presentation.loadWorkoutRoutes(for: selectedDay)
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: .automationCandidatesDidChange
+            )
+        ) { _ in
+            reloadTimelineAndRoutes()
         }
     }
 
@@ -125,6 +155,11 @@ struct DayTimelineScreen: View {
             await presentation.loadWorkoutRoutes(for: selectedDay)
         }
     }
+}
+
+private struct TimelineReloadID: Equatable {
+    let day: TimelineDayKey
+    let contentRevision: Int
 }
 
 #Preview {

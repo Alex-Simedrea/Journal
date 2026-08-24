@@ -28,12 +28,12 @@ struct EntryLocationSelection: Identifiable, Hashable {
     init(
         location: Location,
         title: String? = nil,
-        systemImage: PlaceSystemImage = .mappin
+        systemImage: PlaceSystemImage? = nil
     ) {
         placeID = nil
         self.location = location
         self.title = title ?? location.preferredName ?? String(localized: "Location")
-        self.systemImage = systemImage
+        self.systemImage = systemImage ?? location.systemImage ?? .mappin
     }
 }
 
@@ -84,13 +84,14 @@ final class EntryLocationPickerModel {
 
         do {
             let mapItem = try await search.resolve(suggestion)
-            let location = LocationService.location(
+            var location = LocationService.location(
                 for: mapItem,
                 fallbackName: suggestion.title
             )
+            location.displayName = suggestion.title
             setSelection(EntryLocationSelection(
                 location: location,
-                title: mapItem.name ?? suggestion.title
+                title: suggestion.title
             ))
             searchText = ""
             search.clear()

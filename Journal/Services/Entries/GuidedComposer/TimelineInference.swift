@@ -952,7 +952,9 @@ enum GuidedComposerTimelineInference {
             displayName: displayName,
             aliases: place?.aliases ?? [],
             location: location.withFallbackDisplayName(displayName),
-            systemImage: place?.systemImage ?? .mappin,
+            systemImage: place?.systemImage
+                ?? location.systemImage
+                ?? .mappin,
             accuracyRadiusMeters: place?.accuracyRadiusMeters ?? 0,
             source: .timeline,
             searchTerms: searchTerms

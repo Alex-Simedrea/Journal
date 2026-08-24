@@ -1931,10 +1931,7 @@ final class GuidedEntryComposerModel {
                     id: "map-\(result.latitude)-\(result.longitude)-\(index)",
                     displayName: result.name,
                     location: result.location,
-                    systemImage: PlaceSystemImage(
-                        pointOfInterestCategory:
-                            result.pointOfInterestCategory
-                    ) ?? .mappin,
+                    systemImage: result.location.systemImage ?? .mappin,
                     source: .mapKit,
                     searchTerms: [result.address].compactMap { $0 }
                 )

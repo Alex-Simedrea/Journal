@@ -155,6 +155,9 @@ final class PlaceEditorModel {
             do {
                 let mapItem = try await locationSearch.resolve(suggestion)
                 let coordinate = mapItem.location.coordinate
+                let inferredSymbol = PlaceSystemImage(
+                    pointOfInterestCategory: mapItem.pointOfInterestCategory
+                )
 
                 guard !Task.isCancelled else { return }
 
@@ -162,6 +165,8 @@ final class PlaceEditorModel {
                     Location(
                         latitude: coordinate.latitude,
                         longitude: coordinate.longitude,
+                        displayName: suggestion.title,
+                        systemImage: inferredSymbol ?? .mappin,
                         formattedAddress: mapItem.address?.fullAddress,
                         compactAddress: LocationService.compactAddress(
                             for: mapItem
@@ -172,12 +177,10 @@ final class PlaceEditorModel {
                 )
 
                 if trimmedName.isEmpty {
-                    name = mapItem.name ?? suggestion.title
+                    name = suggestion.title
                 }
 
-                if let inferredSymbol = PlaceSystemImage(
-                    pointOfInterestCategory: mapItem.pointOfInterestCategory
-                ) {
+                if let inferredSymbol {
                     selectedSymbol = inferredSymbol
                 }
 

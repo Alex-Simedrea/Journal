@@ -175,6 +175,7 @@ struct HomeScreen: View {
             TimelineFullScreenCover(
                 initialDay: session.selectedDay,
                 initialSource: session.source,
+                contentRevision: contentRevision,
                 namespace: timelineTransition,
                 onDayChange: timelineDayDidChange
             )
@@ -200,6 +201,7 @@ struct HomeScreen: View {
             scale: scale,
             namespace: timelineTransition,
             emptyTransitionDay: emptyTransitionDay,
+            prewarmingEnabled: isFeedPositioned,
             scrollPosition: $scrollPosition,
             scrollRequest: scrollRequest,
             onVisibleAnchorChange: updateVisibleAnchor,
@@ -653,11 +655,51 @@ private struct HomeScaleReselectGesture: UIGestureRecognizerRepresentable {
     }
 }
 
+private struct HomeFeedPrewarmKey: Hashable {
+    let revision: Int
+    let pixelWidth: Int
+    let appearance: SummaryMapSnapshotRequest.Appearance
+}
+
+private struct HomeFeedPrewarmingModifier: ViewModifier {
+    let model: HomeFeedModel
+    let isEnabled: Bool
+    let contentWidth: CGFloat
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.displayScale) private var displayScale
+
+    func body(content: Content) -> some View {
+        content.task(id: taskKey) {
+            guard taskKey != nil else { return }
+            await model.prewarmMapSnapshots(
+                contentWidth: contentWidth,
+                displayScale: displayScale,
+                appearance: appearance
+            )
+        }
+    }
+
+    private var taskKey: HomeFeedPrewarmKey? {
+        guard isEnabled, contentWidth > 1 else { return nil }
+        return HomeFeedPrewarmKey(
+            revision: model.mapSnapshotRevision,
+            pixelWidth: Int((contentWidth * displayScale).rounded()),
+            appearance: appearance
+        )
+    }
+
+    private var appearance: SummaryMapSnapshotRequest.Appearance {
+        colorScheme == .dark ? .dark : .light
+    }
+}
+
 private struct HomeFeedContent: View {
     let model: HomeFeedModel
     let scale: JournalSummaryScale
     let namespace: Namespace.ID
     let emptyTransitionDay: TimelineDayKey
+    let prewarmingEnabled: Bool
     @Binding var scrollPosition: HomeFeedAnchor?
     let scrollRequest: HomeFeedScrollRequest?
     let onVisibleAnchorChange: (JournalSummaryScale, HomeFeedAnchor) -> Void
@@ -671,72 +713,81 @@ private struct HomeFeedContent: View {
     @State private var deferredLoading = HomeFeedDeferredLoadingPolicy()
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(
-                    alignment: .leading,
-                    spacing: scale == .days ? 32 : 34
-                ) {
-                    switch scale {
-                    case .days:
-                        dayRows
-                    case .months:
-                        periodRows(model.monthRows)
-                    case .years:
-                        periodRows(model.yearRows)
+        GeometryReader { container in
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(
+                        alignment: .leading,
+                        spacing: scale == .days ? 32 : 34
+                    ) {
+                        switch scale {
+                        case .days:
+                            dayRows
+                        case .months:
+                            periodRows(model.monthRows)
+                        case .years:
+                            periodRows(model.yearRows)
+                        }
+                    }
+                    .scrollTargetLayout()
+                    .frame(maxWidth: 440)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+                }
+                .contentMargins(.bottom, 16, for: .scrollContent)
+                .scrollPosition(id: $scrollPosition, anchor: .top)
+                .scrollEdgeEffectStyle(.soft, for: [.top, .bottom])
+                .onScrollTargetVisibilityChange(
+                    idType: HomeFeedAnchor.self,
+                    threshold: scale == .days ? 0.1 : 0.2
+                ) { visible in
+                    if let first = visible.first {
+                        onVisibleAnchorChange(scale, first)
                     }
                 }
-                .scrollTargetLayout()
-                .frame(maxWidth: 440)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 16)
-                .padding(.top, 16)
-            }
-            .contentMargins(.bottom, 16, for: .scrollContent)
-            .scrollPosition(id: $scrollPosition, anchor: .top)
-            .scrollEdgeEffectStyle(.soft, for: [.top, .bottom])
-            .onScrollTargetVisibilityChange(
-                idType: HomeFeedAnchor.self,
-                threshold: scale == .days ? 0.1 : 0.2
-            ) { visible in
-                if let first = visible.first {
-                    onVisibleAnchorChange(scale, first)
+                .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                    geometry.contentOffset.y
+                } action: { _, newOffset in
+                    deferredLoading.sampled(
+                        offset: newOffset,
+                        at: ProcessInfo.processInfo.systemUptime
+                    )
+                }
+                .onScrollPhaseChange { _, newPhase, context in
+                    if newPhase == .interacting {
+                        onUserScroll()
+                    }
+                    deferredLoading.phaseDidChange(
+                        to: newPhase,
+                        offset: context.geometry.contentOffset.y,
+                        velocity: context.velocity?.dy,
+                        at: ProcessInfo.processInfo.systemUptime
+                    )
+                }
+                .background(Color(uiColor: .systemGroupedBackground))
+                .scrollContentBackground(.hidden)
+                .task(id: scrollRequest?.id) {
+                    guard let scrollRequest,
+                          scrollRequest.scale == scale else { return }
+                    await Task.yield()
+                    guard !Task.isCancelled else { return }
+                    jump(proxy, using: scrollRequest)
+                    await Task.yield()
+                    guard !Task.isCancelled else { return }
+                    jump(proxy, using: scrollRequest)
+                    await Task.yield()
+                    guard !Task.isCancelled else { return }
+                    onScrollRequestApplied(scrollRequest.id)
                 }
             }
-            .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                geometry.contentOffset.y
-            } action: { _, newOffset in
-                deferredLoading.sampled(
-                    offset: newOffset,
-                    at: ProcessInfo.processInfo.systemUptime
+            .modifier(
+                HomeFeedPrewarmingModifier(
+                    model: model,
+                    isEnabled: prewarmingEnabled,
+                    contentWidth: min(440, max(0, container.size.width - 32))
                 )
-            }
-            .onScrollPhaseChange { _, newPhase, context in
-                if newPhase == .interacting {
-                    onUserScroll()
-                }
-                deferredLoading.phaseDidChange(
-                    to: newPhase,
-                    offset: context.geometry.contentOffset.y,
-                    velocity: context.velocity?.dy,
-                    at: ProcessInfo.processInfo.systemUptime
-                )
-            }
-            .background(Color(uiColor: .systemGroupedBackground))
-            .scrollContentBackground(.hidden)
-            .task(id: scrollRequest?.id) {
-                guard let scrollRequest,
-                      scrollRequest.scale == scale else { return }
-                await Task.yield()
-                guard !Task.isCancelled else { return }
-                jump(proxy, using: scrollRequest)
-                await Task.yield()
-                guard !Task.isCancelled else { return }
-                jump(proxy, using: scrollRequest)
-                await Task.yield()
-                guard !Task.isCancelled else { return }
-                onScrollRequestApplied(scrollRequest.id)
-            }
+            )
         }
     }
 
@@ -916,24 +967,30 @@ private struct HomeFeedErrorView: View {
 private struct TimelineFullScreenCover: View {
     @State private var selectedDay: TimelineDayKey
     @State private var source: HomeTransitionSource
+    let contentRevision: Int
     let namespace: Namespace.ID
     let onDayChange: (TimelineDayKey) -> HomeTransitionSource
 
     init(
         initialDay: TimelineDayKey,
         initialSource: HomeTransitionSource,
+        contentRevision: Int,
         namespace: Namespace.ID,
         onDayChange: @escaping (TimelineDayKey) -> HomeTransitionSource
     ) {
         _selectedDay = State(initialValue: initialDay)
         _source = State(initialValue: initialSource)
+        self.contentRevision = contentRevision
         self.namespace = namespace
         self.onDayChange = onDayChange
     }
 
     var body: some View {
         NavigationStack {
-            DayTimelineScreen(selectedDay: $selectedDay)
+            DayTimelineScreen(
+                selectedDay: $selectedDay,
+                contentRevision: contentRevision
+            )
         }
         .navigationTransition(.zoom(sourceID: source, in: namespace))
         .onChange(of: selectedDay) { _, day in

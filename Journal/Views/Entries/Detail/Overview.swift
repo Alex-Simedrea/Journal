@@ -7,8 +7,8 @@ struct EntryDetailOverview: View {
     let topContentInset: CGFloat
     @Binding var isScrolled: Bool
     let onPresent: (EntryDetailRoute) -> Void
-    let onDelete: () -> Void
     let showsDestructiveActions: Bool
+    let showsDismissAction: Bool
 
     var body: some View {
         DynamicSheetScrollView(
@@ -68,16 +68,26 @@ struct EntryDetailOverview: View {
                     .buttonStyle(.plain)
                     .padding(.top, 24)
 
-                    Button {
-                        onDelete()
-                    } label: {
-                        Label("Delete entry", systemImage: "trash")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding()
-                            .background(.background, in: .rect(cornerRadius: 16))
-                            .foregroundStyle(.red)
-                    }
-                    .buttonStyle(.plain)
+                    EntryDetailDestructiveButton(
+                        title: "Delete entry",
+                        action: {
+                            onPresent(
+                                .destructiveConfirmation(.deleteEntry)
+                            )
+                        }
+                    )
+                }
+
+                if showsDismissAction {
+                    EntryDetailDestructiveButton(
+                        title: "Dismiss Candidate",
+                        action: {
+                            onPresent(
+                                .destructiveConfirmation(.dismissCandidate)
+                            )
+                        }
+                    )
+                    .padding(.top, 24)
                 }
             }
             .padding(.horizontal, 16)
@@ -117,6 +127,26 @@ struct EntryDetailOverview: View {
         }
     }
 
+}
+
+private struct EntryDetailDestructiveButton: View {
+    let title: LocalizedStringResource
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label {
+                Text(title)
+            } icon: {
+                Image(systemName: "trash")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
+            .background(.background, in: .rect(cornerRadius: 16))
+            .foregroundStyle(.red)
+        }
+        .buttonStyle(.plain)
+    }
 }
 
 extension LogKind {

@@ -33,9 +33,9 @@ struct TransitDetailSheet: View {
                         sourceOrganizationName: details.sourceOrganizationName,
                         sourceServiceIdentifier: details.sourceServiceIdentifier,
                         origin: details.originPlace?.name
-                            ?? details.originLocation?.presentationAddress,
+                            ?? details.originLocation?.preferredName,
                         destination: details.destinationPlace?.name
-                            ?? details.destinationLocation?.presentationAddress,
+                            ?? details.destinationLocation?.preferredName,
                         startTime: entry.startTime,
                         endTime: entry.endTime,
                         startTimeZoneIdentifier: entry.startTimeZoneIdentifier,
@@ -146,7 +146,7 @@ struct TransitSavedPlaceActions: View {
                     id: "origin",
                     label: "Save Origin as Place",
                     name: details.originPlace?.name
-                        ?? location.presentationAddress
+                        ?? location.preferredName
                         ?? String(localized: "Origin"),
                     location: location,
                     isAlreadySaved: details.originPlace != nil
@@ -159,7 +159,7 @@ struct TransitSavedPlaceActions: View {
                     id: "destination",
                     label: "Save Destination as Place",
                     name: details.destinationPlace?.name
-                        ?? location.presentationAddress
+                        ?? location.preferredName
                         ?? String(localized: "Destination"),
                     location: location,
                     isAlreadySaved: details.destinationPlace != nil

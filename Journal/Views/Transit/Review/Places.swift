@@ -15,8 +15,9 @@ struct TransitOriginReviewSection: View {
             EntryLocationSelectionButton(
                 label: "Location",
                 title: places.first(where: { $0.id == model.originPlaceID })?.name
-                    ?? model.originLocation?.presentationAddress,
+                    ?? model.originLocation?.preferredName,
                 systemImage: places.first(where: { $0.id == model.originPlaceID })?.systemImage
+                    ?? model.originLocation?.systemImage
                     ?? .mappin,
                 action: onChooseLocation
             )
@@ -49,8 +50,9 @@ struct TransitDestinationReviewSection: View {
             EntryLocationSelectionButton(
                 label: "Location",
                 title: places.first(where: { $0.id == model.destinationPlaceID })?.name
-                    ?? model.destinationLocation?.presentationAddress,
+                    ?? model.destinationLocation?.preferredName,
                 systemImage: places.first(where: { $0.id == model.destinationPlaceID })?.systemImage
+                    ?? model.destinationLocation?.systemImage
                     ?? .mappin,
                 action: onChooseLocation
             )

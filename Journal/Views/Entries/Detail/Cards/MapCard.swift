@@ -161,7 +161,9 @@ private struct EntryDetailMapContent: View {
         return EntryDetailMapEndpoint(
             name: details.place?.name ?? location.preferredName ?? "Place",
             location: location,
-            systemImage: details.place?.systemImage ?? .mappin,
+            systemImage: details.place?.systemImage
+                ?? location.systemImage
+                ?? .mappin,
             accuracyRadiusMeters: details.place?.accuracyRadiusMeters ?? 0,
             radiusCenterCoordinate: details.place?.location.coordinate
         )
@@ -177,7 +179,9 @@ private struct EntryDetailMapContent: View {
                 ?? location.preferredName
                 ?? "Origin",
             location: location,
-            systemImage: details.originPlace?.systemImage ?? .mappin,
+            systemImage: details.originPlace?.systemImage
+                ?? location.systemImage
+                ?? .mappin,
             accuracyRadiusMeters:
                 details.originPlace?.accuracyRadiusMeters ?? 0,
             radiusCenterCoordinate: details.originPlace?.location.coordinate
@@ -194,7 +198,9 @@ private struct EntryDetailMapContent: View {
                 ?? location.preferredName
                 ?? "Destination",
             location: location,
-            systemImage: details.destinationPlace?.systemImage ?? .mappin,
+            systemImage: details.destinationPlace?.systemImage
+                ?? location.systemImage
+                ?? .mappin,
             accuracyRadiusMeters:
                 details.destinationPlace?.accuracyRadiusMeters ?? 0,
             radiusCenterCoordinate:
@@ -215,6 +221,7 @@ private struct EntryDetailMapContent: View {
             name: entry.workoutDetails?.originPlace?.name ?? "Origin",
             location: location,
             systemImage: entry.workoutDetails?.originPlace?.systemImage
+                ?? location.systemImage
                 ?? .mappin,
             accuracyRadiusMeters:
                 entry.workoutDetails?.originPlace?.accuracyRadiusMeters ?? 0,
@@ -239,6 +246,7 @@ private struct EntryDetailMapContent: View {
                 ?? "Destination",
             location: location,
             systemImage: entry.workoutDetails?.destinationPlace?.systemImage
+                ?? location.systemImage
                 ?? .mappin,
             accuracyRadiusMeters:
                 entry.workoutDetails?.destinationPlace?.accuracyRadiusMeters
@@ -256,7 +264,9 @@ private struct EntryDetailMapContent: View {
         return EntryDetailMapEndpoint(
             name: entry.workoutDetails?.place?.name ?? "Workout location",
             location: location,
-            systemImage: entry.workoutDetails?.place?.systemImage ?? .mappin,
+            systemImage: entry.workoutDetails?.place?.systemImage
+                ?? location.systemImage
+                ?? .mappin,
             accuracyRadiusMeters:
                 entry.workoutDetails?.place?.accuracyRadiusMeters ?? 0,
             radiusCenterCoordinate:

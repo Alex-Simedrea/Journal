@@ -1,4 +1,5 @@
 import MapKit
+import SwiftData
 import Testing
 
 @testable import Journal
@@ -94,6 +95,22 @@ struct DetailLocationEditorTests {
         #expect(model.selection?.title == "Studio")
     }
 
+    @Test("Unsaved selections retain MapKit landmark metadata")
+    func unsavedLocationMetadata() {
+        let selection = EntryLocationSelection(
+            location: Location(
+                latitude: 44.21,
+                longitude: 28.65,
+                displayName: "Reyna Beach",
+                systemImage: .beach,
+                formattedAddress: "Strada Pescarilor 1, Constanța"
+            )
+        )
+
+        #expect(selection.title == "Reyna Beach")
+        #expect(selection.systemImage == .beach)
+    }
+
     @Test("Programmatic map movement retains a saved-place association")
     @MainActor
     func programmaticMapMovement() {
@@ -120,5 +137,60 @@ struct DetailLocationEditorTests {
 
         #expect(model.selection?.placeID == place.id)
         #expect(model.selection?.title == "Home")
+    }
+
+    @Test("A location without zone metadata preserves the endpoint zone")
+    @MainActor
+    func missingLocationZoneDoesNotResetEndpointZone() throws {
+        let context = try makeContext()
+        let entry = LogEntry(
+            kind: .transit,
+            startTime: .now,
+            endTime: .now.addingTimeInterval(3_600),
+            startTimeZoneIdentifier: "Europe/London",
+            endTimeZoneIdentifier: "America/New_York",
+            needsReview: true
+        )
+        entry.transitDetails = TransitDetails(
+            type: "Car",
+            originLocation: Location(latitude: 51.50, longitude: -0.12),
+            destinationLocation: Location(latitude: 40.76, longitude: -73.98)
+        )
+        let session = EntryDetailEditSession(entry: entry)
+        session.setSelection(
+            EntryLocationSelection(
+                location: Location(latitude: 40.77, longitude: -73.97)
+            ),
+            for: .destination
+        )
+
+        try EntryDetailEditingService.saveLocation(
+            entry: entry,
+            role: .destination,
+            session: session,
+            places: [],
+            in: context,
+            persist: false
+        )
+
+        #expect(entry.endTimeZoneIdentifier == "America/New_York")
+    }
+
+    @MainActor
+    private func makeContext() throws -> ModelContext {
+        let schema = Schema([
+            LogEntry.self,
+            Person.self,
+            Place.self,
+            TransitDetails.self,
+            PlaceVisitDetails.self,
+            WorkoutDetails.self,
+        ])
+        let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(
+            for: schema,
+            configurations: [configuration]
+        )
+        return ModelContext(container)
     }
 }

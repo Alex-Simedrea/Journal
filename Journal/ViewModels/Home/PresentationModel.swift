@@ -27,6 +27,7 @@ final class HomePresentationModel {
     private(set) var timelineItems: [TimelineListItem] = []
     private(set) var timelineRows: [TimelineRow] = []
     private(set) var reviewOccurrences: [TimelineOccurrence] = []
+    private(set) var automationCandidates: [AutomationCandidateSnapshot] = []
     private(set) var overviewData = TimelineOverviewData()
     private(set) var selectedDayEntries: [LogEntry] = []
     private(set) var timelineRevision = 0
@@ -45,7 +46,9 @@ final class HomePresentationModel {
     }
 
     var hasTimelineContent: Bool {
-        !timelineItems.isEmpty || !reviewOccurrences.isEmpty
+        !timelineItems.isEmpty
+            || !reviewOccurrences.isEmpty
+            || !automationCandidates.isEmpty
     }
 
     func entry(withID id: UUID) -> LogEntry? {
@@ -77,6 +80,17 @@ final class HomePresentationModel {
 
         do {
             let entries = try modelContext.fetch(descriptor)
+            let places = try modelContext.fetch(FetchDescriptor<Place>())
+            let placesByID = Dictionary(
+                uniqueKeysWithValues: places.map { ($0.id, $0) }
+            )
+            automationCandidates = try modelContext.fetch(
+                FetchDescriptor<AutomationCandidate>(
+                    sortBy: [SortDescriptor(\.startTime)]
+                )
+            ).compactMap {
+                AutomationCandidateSnapshot($0, placesByID: placesByID)
+            }.filter { $0.day == selectedDay }
             let projection = TimelineProjection.project(
                 entries: entries.map(TimelineEntrySnapshot.init),
                 for: selectedDay
@@ -107,6 +121,7 @@ final class HomePresentationModel {
             timelineItems = []
             timelineRows = []
             reviewOccurrences = []
+            automationCandidates = []
             overviewData = TimelineOverviewData()
             overviewOccurrences = []
             overviewDay = nil

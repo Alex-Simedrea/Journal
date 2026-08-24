@@ -76,6 +76,7 @@ private struct SaveLocationPlaceEditorStep: View {
             initialValue: PlaceEditorModel(
                 initialName: request.name,
                 initialLocation: request.location,
+                initialSymbol: request.location.systemImage ?? .mappin,
                 allowsCurrentLocationCapture: false
             )
         )
