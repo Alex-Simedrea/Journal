@@ -129,7 +129,7 @@ enum WorkoutLocationPresentation {
         if let place {
             return place.name
         }
-        if let name = location?.preferredName {
+        if let name = location?.placeAndCityName {
             return name
         }
         guard let location else {

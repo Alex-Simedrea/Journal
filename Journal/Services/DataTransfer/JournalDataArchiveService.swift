@@ -58,6 +58,7 @@ struct JournalDataArchive: Codable {
         let modelToolTranscript: String?
         let modelResponse: String?
         let automationCandidateID: UUID?
+        let journalRecordingID: UUID?
         let needsReview: Bool
         let entryKindReviewReason: String?
         let photoReferences: [PhotoReference]
@@ -84,6 +85,9 @@ struct JournalDataArchive: Codable {
         let destinationRawText: String?
         let durationSource: DurationSource
         let distanceMeters: Double?
+        let recordedRoute: [RecordedRoutePoint]?
+        let recordedMotion: [RecordedMotionObservation]?
+        let recordedTransitMode: RecordedTransitMode?
         let originCandidates: [LocationCandidate]
         let destinationCandidates: [LocationCandidate]
         let unresolvedPeople: [String]
@@ -332,6 +336,7 @@ enum JournalDataArchiveService {
             modelToolTranscript: entry.modelToolTranscript,
             modelResponse: entry.modelResponse,
             automationCandidateID: entry.automationCandidateID,
+            journalRecordingID: entry.journalRecordingID,
             needsReview: entry.needsReview,
             entryKindReviewReason: entry.entryKindReviewReason,
             photoReferences: entry.photoReferences,
@@ -366,6 +371,9 @@ enum JournalDataArchiveService {
             destinationRawText: details.destinationRawText,
             durationSource: details.durationSource,
             distanceMeters: details.distanceMeters,
+            recordedRoute: details.recordedRoute,
+            recordedMotion: details.recordedMotion,
+            recordedTransitMode: details.recordedTransitMode,
             originCandidates: details.originCandidates,
             destinationCandidates: details.destinationCandidates,
             unresolvedPeople: details.unresolvedPeople,
@@ -514,6 +522,7 @@ enum JournalDataArchiveService {
                 modelToolTranscript: record.modelToolTranscript,
                 modelResponse: record.modelResponse,
                 automationCandidateID: record.automationCandidateID,
+                journalRecordingID: record.journalRecordingID,
                 photoReferences: record.photoReferences,
                 weather: record.weather,
                 endWeather: record.endWeather,
@@ -612,6 +621,9 @@ enum JournalDataArchiveService {
             destinationRawText: record.destinationRawText,
             durationSource: record.durationSource,
             distanceMeters: record.distanceMeters,
+            recordedRoute: record.recordedRoute ?? [],
+            recordedMotion: record.recordedMotion ?? [],
+            recordedTransitMode: record.recordedTransitMode,
             originCandidates: record.originCandidates,
             destinationCandidates: record.destinationCandidates,
             unresolvedPeople: record.unresolvedPeople,

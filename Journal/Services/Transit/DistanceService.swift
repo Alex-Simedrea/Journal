@@ -7,15 +7,28 @@ import CoreLocation
 import MapKit
 import SwiftData
 
+private struct TransitDistanceRequest: Equatable {
+    let origin: Location
+    let destination: Location
+    let transitType: String
+    let departureDate: Date?
+}
+
 @MainActor
 enum TransitDistanceService {
     static func populateMissing(in modelContext: ModelContext) async {
-        guard let entries = try? modelContext.fetch(FetchDescriptor<LogEntry>()) else {
+        guard let entryIDs = try? modelContext.fetch(
+            FetchDescriptor<LogEntry>()
+        ).compactMap({ entry in
+            entry.kind == .transit
+                && entry.transitDetails?.distanceMeters == nil
+                ? entry.id
+                : nil
+        }) else {
             return
         }
-        for entry in entries where entry.kind == .transit {
-            guard entry.transitDetails?.distanceMeters == nil else { continue }
-            await populate(entry, in: modelContext)
+        for entryID in entryIDs {
+            await populate(entryID: entryID, in: modelContext)
         }
     }
 
@@ -23,37 +36,50 @@ enum TransitDistanceService {
         _ entry: LogEntry,
         in modelContext: ModelContext
     ) async {
-        guard let details = entry.transitDetails,
-              let origin = details.originLocation
-                ?? details.originPlace?.location
-                ?? details.originCandidates.first?.location,
-              let destination = details.destinationLocation
-                ?? details.destinationPlace?.location
-                ?? details.destinationCandidates.first?.location else {
+        await populate(entryID: entry.id, in: modelContext)
+    }
+
+    static func populate(
+        entryID: UUID,
+        in modelContext: ModelContext
+    ) async {
+        guard let routeRequest = try? request(
+            forEntryID: entryID,
+            in: modelContext
+        ) else {
             return
         }
 
         let geodesicDistance = CLLocation(
-            latitude: origin.latitude,
-            longitude: origin.longitude
+            latitude: routeRequest.origin.latitude,
+            longitude: routeRequest.origin.longitude
         ).distance(
             from: CLLocation(
-                latitude: destination.latitude,
-                longitude: destination.longitude
+                latitude: routeRequest.destination.latitude,
+                longitude: routeRequest.destination.longitude
             )
         )
 
-        if let transportType = transportType(for: details.type),
+        let distance: Double
+        if let transportType = transportType(for: routeRequest.transitType),
            let metrics = try? await TransitMapKitService.routeMetrics(
-               from: origin.coordinate,
-               to: destination.coordinate,
+               from: routeRequest.origin.coordinate,
+               to: routeRequest.destination.coordinate,
                transportType: transportType,
-               departureDate: entry.startTime
+               departureDate: routeRequest.departureDate
            ) {
-            details.distanceMeters = metrics.distanceMeters
+            distance = metrics.distanceMeters
         } else {
-            details.distanceMeters = geodesicDistance
+            distance = geodesicDistance
         }
+
+        guard let currentRequest = try? request(
+            forEntryID: entryID,
+            in: modelContext
+        ), currentRequest == routeRequest,
+              let entry = try? entry(withID: entryID, in: modelContext),
+              let details = entry.transitDetails else { return }
+        details.distanceMeters = distance
         try? modelContext.save()
     }
 
@@ -61,8 +87,48 @@ enum TransitDistanceService {
         _ entry: LogEntry,
         in modelContext: ModelContext
     ) {
+        let entryID = entry.id
+        let container = modelContext.container
         entry.transitDetails?.distanceMeters = nil
-        Task { await populate(entry, in: modelContext) }
+        try? modelContext.save()
+        Task {
+            let enrichmentContext = ModelContext(container)
+            enrichmentContext.autosaveEnabled = false
+            await populate(entryID: entryID, in: enrichmentContext)
+        }
+    }
+
+    private static func request(
+        forEntryID entryID: UUID,
+        in modelContext: ModelContext
+    ) throws -> TransitDistanceRequest? {
+        guard let entry = try entry(withID: entryID, in: modelContext),
+              let details = entry.transitDetails,
+              let origin = details.originLocation
+                ?? details.originPlace?.location
+                ?? details.originCandidates.first?.location,
+              let destination = details.destinationLocation
+                ?? details.destinationPlace?.location
+                ?? details.destinationCandidates.first?.location else {
+            return nil
+        }
+        return TransitDistanceRequest(
+            origin: origin,
+            destination: destination,
+            transitType: details.type,
+            departureDate: entry.startTime
+        )
+    }
+
+    private static func entry(
+        withID entryID: UUID,
+        in modelContext: ModelContext
+    ) throws -> LogEntry? {
+        var descriptor = FetchDescriptor<LogEntry>(
+            predicate: #Predicate { $0.id == entryID }
+        )
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first
     }
 
     private static func transportType(

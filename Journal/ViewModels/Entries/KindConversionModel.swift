@@ -118,11 +118,7 @@ final class EntryKindConversionModel {
                   let destinationLocation = destination?.location ?? destinationLocation else {
                 return false
             }
-            let oldDetails = entry.placeVisitDetails
             entry.placeVisitDetails = nil
-            if let oldDetails {
-                modelContext.delete(oldDetails)
-            }
             entry.transitDetails = TransitDetails(
                 type: transitType,
                 originPlace: origin,
@@ -144,11 +140,7 @@ final class EntryKindConversionModel {
         case .placeVisit:
             let place = places.first(where: { $0.id == visitPlaceID })
             guard let visitLocation = place?.location ?? visitLocation else { return false }
-            let oldDetails = entry.transitDetails
             entry.transitDetails = nil
-            if let oldDetails {
-                modelContext.delete(oldDetails)
-            }
             entry.placeVisitDetails = PlaceVisitDetails(
                 place: place,
                 location: visitLocation.withFallbackDisplayName(place?.name),

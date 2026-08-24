@@ -38,7 +38,14 @@ final class PlaceEditorModel {
     private var currentLocationRequestID: UUID?
 
     @ObservationIgnored
+    private var mapPresentationID: UUID?
+
+    @ObservationIgnored
     private let currentLocationProvider: () async throws -> Location
+
+    @ObservationIgnored
+    private let coordinateLocationProvider:
+        (CLLocationCoordinate2D) async -> Location
 
     init(
         place: Place? = nil,
@@ -49,10 +56,15 @@ final class PlaceEditorModel {
         allowsCurrentLocationCapture: Bool = true,
         currentLocationProvider: @escaping () async throws -> Location = {
             try await LocationService.shared.captureCurrentLocation()
+        },
+        coordinateLocationProvider: @escaping (CLLocationCoordinate2D) async
+            -> Location = {
+            await LocationService.shared.location(at: $0)
         }
     ) {
         self.allowsCurrentLocationCapture = allowsCurrentLocationCapture
         self.currentLocationProvider = currentLocationProvider
+        self.coordinateLocationProvider = coordinateLocationProvider
         let initialResolvedLocation = place?.location ?? initialLocation
         name = place?.name ?? initialName
         selectedSymbol = place?.systemImage ?? initialSymbol
@@ -137,9 +149,27 @@ final class PlaceEditorModel {
         positionedByUser: Bool
     ) {
         locationSearch.updateRegion(region)
-        guard positionedByUser else { return }
+        guard positionedByUser, let mapPresentationID else { return }
         invalidateCurrentLocationCapture()
-        updateLocation(to: coordinate)
+        updateLocation(to: coordinate, mapPresentationID: mapPresentationID)
+    }
+
+    func mapDidAppear() {
+        locationUpdateTask?.cancel()
+        mapPresentationID = UUID()
+        guard let location else { return }
+        mapPosition = .region(
+            region(center: location.coordinate, meters: 200)
+        )
+        locationSearch.updateRegion(
+            region(center: location.coordinate, meters: 10_000)
+        )
+    }
+
+    func mapDidDisappear() {
+        mapPresentationID = nil
+        locationUpdateTask?.cancel()
+        locationUpdateTask = nil
     }
 
     func selectSearchSuggestion(_ suggestion: LocationSearchSuggestion) {
@@ -270,7 +300,7 @@ final class PlaceEditorModel {
 
     func stop() {
         invalidateCurrentLocationCapture()
-        locationUpdateTask?.cancel()
+        mapDidDisappear()
         symbolSuggestionTask?.cancel()
     }
 
@@ -292,14 +322,16 @@ final class PlaceEditorModel {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func updateLocation(to coordinate: CLLocationCoordinate2D) {
+    private func updateLocation(
+        to coordinate: CLLocationCoordinate2D,
+        mapPresentationID: UUID
+    ) {
         locationUpdateTask?.cancel()
         locationUpdateTask = Task {
-            let updatedLocation = await LocationService.shared.location(
-                at: coordinate
-            )
+            let updatedLocation = await coordinateLocationProvider(coordinate)
 
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled,
+                  self.mapPresentationID == mapPresentationID else { return }
             setUserSelectedLocation(updatedLocation)
         }
     }

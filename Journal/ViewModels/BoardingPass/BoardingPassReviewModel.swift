@@ -117,6 +117,7 @@ final class BoardingPassReviewModel {
 
     func commit(
         _ entry: LogEntry,
+        selectedPeopleIDs: Set<UUID>,
         in modelContext: ModelContext
     ) async -> Bool {
         isSaving = true
@@ -124,6 +125,9 @@ final class BoardingPassReviewModel {
         defer { isSaving = false }
 
         do {
+            entry.people = try modelContext.fetch(
+                FetchDescriptor<Person>()
+            ).filter { selectedPeopleIDs.contains($0.id) }
             if isFlightImport {
                 try AirportPlaceStore.attachAirports(
                     to: entry,

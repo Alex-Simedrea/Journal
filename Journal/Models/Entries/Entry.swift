@@ -41,6 +41,7 @@ final class LogEntry {
     var modelToolTranscript: String?
     var modelResponse: String?
     var automationCandidateID: UUID?
+    var journalRecordingID: UUID?
     var needsReview: Bool
     var entryKindReviewReason: String?
     var photoReferences: [PhotoReference] = []
@@ -72,6 +73,7 @@ final class LogEntry {
         modelToolTranscript: String? = nil,
         modelResponse: String? = nil,
         automationCandidateID: UUID? = nil,
+        journalRecordingID: UUID? = nil,
         photoReferences: [PhotoReference] = [],
         weather: EntryWeather? = nil,
         endWeather: EntryWeather? = nil,
@@ -98,6 +100,7 @@ final class LogEntry {
         self.modelToolTranscript = modelToolTranscript
         self.modelResponse = modelResponse
         self.automationCandidateID = automationCandidateID
+        self.journalRecordingID = journalRecordingID
         self.photoReferences = photoReferences
         self.weather = weather
         self.endWeather = endWeather
@@ -122,6 +125,7 @@ final class LogEntry {
         modelToolTranscript: String? = nil,
         modelResponse: String? = nil,
         automationCandidateID: UUID? = nil,
+        journalRecordingID: UUID? = nil,
         photoReferences: [PhotoReference] = [],
         weather: EntryWeather? = nil,
         endWeather: EntryWeather? = nil,
@@ -147,6 +151,7 @@ final class LogEntry {
             modelToolTranscript: modelToolTranscript,
             modelResponse: modelResponse,
             automationCandidateID: automationCandidateID,
+            journalRecordingID: journalRecordingID,
             photoReferences: photoReferences,
             weather: weather,
             endWeather: endWeather,

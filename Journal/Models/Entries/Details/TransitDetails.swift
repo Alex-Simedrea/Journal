@@ -107,6 +107,9 @@ final class TransitDetails {
 
     var durationSource: DurationSource
     var distanceMeters: Double?
+    var recordedRoute: [RecordedRoutePoint] = []
+    var recordedMotion: [RecordedMotionObservation] = []
+    var recordedTransitMode: RecordedTransitMode?
     var originCandidates: [LocationCandidate]
     var destinationCandidates: [LocationCandidate]
     var unresolvedPeople: [String]
@@ -124,6 +127,9 @@ final class TransitDetails {
         destinationRawText: String? = nil,
         durationSource: DurationSource = .unresolved,
         distanceMeters: Double? = nil,
+        recordedRoute: [RecordedRoutePoint] = [],
+        recordedMotion: [RecordedMotionObservation] = [],
+        recordedTransitMode: RecordedTransitMode? = nil,
         originCandidates: [LocationCandidate] = [],
         destinationCandidates: [LocationCandidate] = [],
         unresolvedPeople: [String] = [],
@@ -140,6 +146,9 @@ final class TransitDetails {
         self.destinationRawText = destinationRawText
         self.durationSource = durationSource
         self.distanceMeters = distanceMeters
+        self.recordedRoute = recordedRoute
+        self.recordedMotion = recordedMotion
+        self.recordedTransitMode = recordedTransitMode
         self.originCandidates = originCandidates
         self.destinationCandidates = destinationCandidates
         self.unresolvedPeople = unresolvedPeople

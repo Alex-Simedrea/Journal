@@ -41,8 +41,8 @@ final class WorkoutImportCoordinator {
         defer { isSyncing = false }
 
         do {
-            let existingEntries = try workoutEntries(in: modelContext)
-            if existingEntries.isEmpty, WorkoutImportPreferences.anchor() != nil {
+            let existingReferences = try workoutEntryReferences(in: modelContext)
+            if existingReferences.isEmpty, WorkoutImportPreferences.anchor() != nil {
                 WorkoutImportPreferences.resetAnchor()
             }
 
@@ -53,15 +53,17 @@ final class WorkoutImportCoordinator {
             )
             let wakeUps = try await client.wakeUps(cutoff: cutoff)
             let retriedSnapshots = await retryableSnapshots(
-                from: existingEntries,
+                from: existingReferences,
                 excluding: Set(changeSet.workouts.map(\.uuid))
                     .union(changeSet.deletedWorkoutUUIDs)
             )
-            try await apply(
+            let resolvedSnapshots = await resolvedSnapshots(
+                changeSet.workouts + retriedSnapshots
+            )
+            try apply(
                 changeSet,
                 wakeUps: wakeUps,
-                retriedSnapshots: retriedSnapshots,
-                existingEntries: existingEntries,
+                resolvedSnapshots: resolvedSnapshots,
                 in: modelContext
             )
             try WorkoutImportPreferences.save(anchor: changeSet.newAnchor)
@@ -87,11 +89,10 @@ final class WorkoutImportCoordinator {
     private func apply(
         _ changeSet: HealthKitWorkoutChangeSet,
         wakeUps: [HealthKitWakeUpSnapshot],
-        retriedSnapshots: [HealthKitWorkoutSnapshot],
-        existingEntries: [LogEntry],
+        resolvedSnapshots: [ResolvedWorkoutImport],
         in modelContext: ModelContext
-    ) async throws {
-        await refreshStoredLocationMetadata(in: existingEntries)
+    ) throws {
+        let existingEntries = try workoutEntries(in: modelContext)
         clearResolvedLocationReviews(in: existingEntries)
 
         var entriesByWorkoutUUID = Dictionary(
@@ -112,15 +113,15 @@ final class WorkoutImportCoordinator {
         let places = try modelContext.fetch(
             FetchDescriptor<Place>(sortBy: [SortDescriptor(\Place.createdAt)])
         )
-        for snapshot in changeSet.workouts + retriedSnapshots {
+        for resolved in resolvedSnapshots {
+            let snapshot = resolved.snapshot
             guard !WorkoutImportPreferences.isExcluded(snapshot.uuid) else {
                 continue
             }
 
-            let locations = await resolvedLocations(for: snapshot)
             let entry = WorkoutEntryStore.upsert(
                 snapshot: snapshot,
-                locations: locations,
+                locations: resolved.locations,
                 places: places,
                 existingEntry: entriesByWorkoutUUID[snapshot.uuid],
                 in: modelContext
@@ -134,52 +135,6 @@ final class WorkoutImportCoordinator {
         )
 
         try modelContext.save()
-    }
-
-    private func refreshStoredLocationMetadata(
-        in entries: [LogEntry]
-    ) async {
-        for entry in entries {
-            guard let details = entry.workoutDetails else { continue }
-            if details.movementKind == .moving {
-                details.originLocation = await enriched(
-                    details.originLocation
-                )
-                details.destinationLocation = await enriched(
-                    details.destinationLocation
-                )
-            } else {
-                details.sourceLocation = await enriched(
-                    details.sourceLocation
-                )
-            }
-        }
-    }
-
-    private func enriched(_ location: Location?) async -> Location? {
-        guard let location else { return nil }
-        guard location.compactAddress == nil
-                || location.formattedAddress == nil
-                || location.timeZoneIdentifier == nil else {
-            return location
-        }
-
-        let resolved = await LocationService.shared.location(
-            at: location.coordinate
-        )
-        return Location(
-            latitude: location.latitude,
-            longitude: location.longitude,
-            formattedAddress: resolved.formattedAddress
-                ?? location.formattedAddress,
-            compactAddress: resolved.compactAddress
-                ?? location.compactAddress,
-            timeZoneIdentifier: resolved.timeZoneIdentifier
-                ?? location.timeZoneIdentifier,
-            cityName: resolved.cityName ?? location.cityName,
-            countryName: resolved.countryName ?? location.countryName,
-            countryCode: resolved.countryCode ?? location.countryCode
-        )
     }
 
     private func clearResolvedLocationReviews(in entries: [LogEntry]) {
@@ -200,16 +155,15 @@ final class WorkoutImportCoordinator {
     }
 
     private func retryableSnapshots(
-        from entries: [LogEntry],
+        from references: [WorkoutEntryReference],
         excluding excludedUUIDs: Set<UUID>
     ) async -> [HealthKitWorkoutSnapshot] {
         var snapshots: [HealthKitWorkoutSnapshot] = []
-        for entry in entries {
-            guard let details = entry.workoutDetails,
-                  details.movementKind == .moving,
-                  details.routeImportState != .available,
-                  !excludedUUIDs.contains(details.healthKitWorkoutUUID),
-                  !WorkoutImportPreferences.isExcluded(details.healthKitWorkoutUUID)
+        for reference in references {
+            guard reference.movementKind == .moving,
+                  reference.routeImportState != .available,
+                  !excludedUUIDs.contains(reference.workoutUUID),
+                  !WorkoutImportPreferences.isExcluded(reference.workoutUUID)
             else {
                 continue
             }
@@ -217,7 +171,7 @@ final class WorkoutImportCoordinator {
             do {
                 snapshots.append(
                     try await client.currentSnapshot(
-                        for: details.healthKitWorkoutUUID
+                        for: reference.workoutUUID
                     )
                 )
             } catch {
@@ -245,6 +199,22 @@ final class WorkoutImportCoordinator {
         )
     }
 
+    private func resolvedSnapshots(
+        _ snapshots: [HealthKitWorkoutSnapshot]
+    ) async -> [ResolvedWorkoutImport] {
+        var result: [ResolvedWorkoutImport] = []
+        result.reserveCapacity(snapshots.count)
+        for snapshot in snapshots {
+            result.append(
+                ResolvedWorkoutImport(
+                    snapshot: snapshot,
+                    locations: await resolvedLocations(for: snapshot)
+                )
+            )
+        }
+        return result
+    }
+
     private func resolvedLocation(
         _ coordinate: WorkoutCoordinateSnapshot?
     ) async -> Location? {
@@ -257,4 +227,28 @@ final class WorkoutImportCoordinator {
             $0.kind == .workout && $0.workoutDetails != nil
         }
     }
+
+    private func workoutEntryReferences(
+        in modelContext: ModelContext
+    ) throws -> [WorkoutEntryReference] {
+        try workoutEntries(in: modelContext).compactMap { entry in
+            guard let details = entry.workoutDetails else { return nil }
+            return WorkoutEntryReference(
+                workoutUUID: details.healthKitWorkoutUUID,
+                movementKind: details.movementKind,
+                routeImportState: details.routeImportState
+            )
+        }
+    }
+}
+
+private struct WorkoutEntryReference: Sendable {
+    let workoutUUID: UUID
+    let movementKind: WorkoutMovementKind
+    let routeImportState: WorkoutRouteImportState
+}
+
+private struct ResolvedWorkoutImport: Sendable {
+    let snapshot: HealthKitWorkoutSnapshot
+    let locations: WorkoutResolvedLocations
 }

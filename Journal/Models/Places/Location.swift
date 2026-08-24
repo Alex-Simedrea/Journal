@@ -76,7 +76,23 @@ nonisolated struct Location: Hashable, Sendable {
     }
 
     var timelineName: String? {
-        displayName?.nilIfBlank ?? timelineAddress
+        timelineAddress ?? displayName?.nilIfBlank
+    }
+
+    var placeAndCityName: String? {
+        if let compactAddress = compactAddress?.nilIfBlank {
+            return compactAddress
+        }
+        guard let formattedAddress = formattedAddress?.nilIfBlank else {
+            return displayName?.nilIfBlank
+        }
+        let parts = addressParts(formattedAddress).filter { part in
+            part.caseInsensitiveCompare(countryName ?? "") != .orderedSame
+                && part.caseInsensitiveCompare(countryCode ?? "") != .orderedSame
+                && !isPostalCode(part)
+        }
+        guard !parts.isEmpty else { return formattedAddress }
+        return parts.prefix(2).joined(separator: ", ")
     }
 
     func withFallbackDisplayName(_ name: String?) -> Location {
@@ -97,6 +113,16 @@ nonisolated struct Location: Hashable, Sendable {
 
     private func containsDigit(_ value: String) -> Bool {
         value.unicodeScalars.contains { CharacterSet.decimalDigits.contains($0) }
+    }
+
+    private func isPostalCode(_ value: String) -> Bool {
+        let scalars = value.unicodeScalars
+        guard !scalars.isEmpty else { return false }
+        let allowed = CharacterSet.decimalDigits.union(
+            CharacterSet(charactersIn: " -")
+        )
+        return scalars.allSatisfy { allowed.contains($0) }
+            && scalars.contains { CharacterSet.decimalDigits.contains($0) }
     }
 }
 

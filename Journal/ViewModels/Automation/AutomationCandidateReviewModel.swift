@@ -31,8 +31,10 @@ final class AutomationCandidateReviewModel {
 
     func commit(
         _ entry: LogEntry,
+        selectedPeopleIDs: Set<UUID>,
         candidate: AutomationCandidate,
-        in modelContext: ModelContext
+        in modelContext: ModelContext,
+        performEnrichment: Bool = true
     ) async -> Bool {
         guard candidate.status == .pending else { return false }
         isSaving = true
@@ -40,16 +42,25 @@ final class AutomationCandidateReviewModel {
         defer { isSaving = false }
 
         do {
+            let selectedPeople = try modelContext.fetch(
+                FetchDescriptor<Person>()
+            ).filter { selectedPeopleIDs.contains($0.id) }
             let storedEntry = try materializedEntry(
                 for: candidate,
                 in: modelContext
             )
             let acceptedEntry: LogEntry
             if let storedEntry {
-                apply(entry, to: storedEntry, in: modelContext)
+                try apply(
+                    entry,
+                    selectedPeople: selectedPeople,
+                    to: storedEntry,
+                    in: modelContext
+                )
                 acceptedEntry = storedEntry
             } else {
                 entry.id = candidate.id
+                entry.people = selectedPeople
                 modelContext.insert(entry)
                 acceptedEntry = entry
             }
@@ -58,17 +69,24 @@ final class AutomationCandidateReviewModel {
                 entryID: acceptedEntry.id
             )
             try modelContext.save()
+            guard performEnrichment else { return true }
+            let acceptedEntryID = acceptedEntry.id
+            let acceptedKind = acceptedEntry.kind
+            let enrichmentContext = ModelContext(modelContext.container)
+            enrichmentContext.autosaveEnabled = false
             _ = try? await EntryWeatherService.populate(
-                acceptedEntry,
-                in: modelContext
+                entryID: acceptedEntryID,
+                in: enrichmentContext
             )
-            if acceptedEntry.kind == .transit {
-                TransitDistanceService.refreshInBackground(
-                    acceptedEntry,
-                    in: modelContext
+            if acceptedKind == .transit {
+                await TransitDistanceService.populate(
+                    entryID: acceptedEntryID,
+                    in: enrichmentContext
                 )
             }
-            try? await PhotoAutoLinkService.synchronize(in: modelContext)
+            try? await PhotoAutoLinkService.synchronize(
+                in: enrichmentContext
+            )
             return true
         } catch {
             modelContext.rollback()
@@ -82,21 +100,31 @@ final class AutomationCandidateReviewModel {
         in modelContext: ModelContext
     ) throws -> LogEntry? {
         let id = candidate.id
-        return try modelContext.fetch(
+        let canonicalEntry = try modelContext.fetch(
             FetchDescriptor<LogEntry>(
                 predicate: #Predicate { $0.id == id }
+            )
+        ).first
+        if let canonicalEntry { return canonicalEntry }
+
+        return try modelContext.fetch(
+            FetchDescriptor<LogEntry>(
+                predicate: #Predicate {
+                    $0.automationCandidateID == id
+                }
             )
         ).first
     }
 
     private func apply(
         _ draft: LogEntry,
+        selectedPeople: [Person],
         to entry: LogEntry,
         in modelContext: ModelContext
-    ) {
-        let oldTransitDetails = entry.transitDetails
-        let oldVisitDetails = entry.placeVisitDetails
-        let oldWorkoutDetails = entry.workoutDetails
+    ) throws {
+        guard draft.kind == entry.kind else {
+            throw AutomationCandidateReviewError.kindChanged
+        }
 
         entry.kind = draft.kind
         entry.startTime = draft.startTime
@@ -112,17 +140,85 @@ final class AutomationCandidateReviewModel {
         entry.weather = draft.weather
         entry.endWeather = draft.endWeather
         entry.dayWeatherRecords = draft.dayWeatherRecords
-        entry.people = draft.people
+        entry.people = selectedPeople
 
-        entry.transitDetails = draft.transitDetails
-        entry.placeVisitDetails = draft.placeVisitDetails
-        entry.workoutDetails = draft.workoutDetails
-        if let details = draft.transitDetails { modelContext.insert(details) }
-        if let details = draft.placeVisitDetails { modelContext.insert(details) }
-        if let details = draft.workoutDetails { modelContext.insert(details) }
-        if let oldTransitDetails { modelContext.delete(oldTransitDetails) }
-        if let oldVisitDetails { modelContext.delete(oldVisitDetails) }
-        if let oldWorkoutDetails { modelContext.delete(oldWorkoutDetails) }
+        switch draft.kind {
+        case .transit:
+            guard let draftDetails = draft.transitDetails else {
+                throw AutomationCandidateReviewError.missingDetails
+            }
+            if let details = entry.transitDetails {
+                Self.copy(draftDetails, to: details)
+            } else {
+                let details = Self.copy(of: draftDetails)
+                modelContext.insert(details)
+                entry.transitDetails = details
+            }
+        case .placeVisit:
+            guard let draftDetails = draft.placeVisitDetails else {
+                throw AutomationCandidateReviewError.missingDetails
+            }
+            if let details = entry.placeVisitDetails {
+                Self.copy(draftDetails, to: details)
+            } else {
+                let details = Self.copy(of: draftDetails)
+                modelContext.insert(details)
+                entry.placeVisitDetails = details
+            }
+        case .workout, .wakeUp:
+            throw AutomationCandidateReviewError.unsupportedKind
+        }
+    }
+
+    private static func copy(
+        _ source: TransitDetails,
+        to destination: TransitDetails
+    ) {
+        destination.type = source.type
+        destination.sourceOrganizationName = source.sourceOrganizationName
+        destination.sourceServiceIdentifier = source.sourceServiceIdentifier
+        destination.originPlace = source.originPlace
+        destination.originLocation = source.originLocation
+        destination.originRawText = source.originRawText
+        destination.destinationPlace = source.destinationPlace
+        destination.destinationLocation = source.destinationLocation
+        destination.destinationRawText = source.destinationRawText
+        destination.durationSource = source.durationSource
+        destination.distanceMeters = source.distanceMeters
+        destination.recordedRoute = source.recordedRoute
+        destination.recordedMotion = source.recordedMotion
+        destination.recordedTransitMode = source.recordedTransitMode
+        destination.originCandidates = source.originCandidates
+        destination.destinationCandidates = source.destinationCandidates
+        destination.unresolvedPeople = source.unresolvedPeople
+        destination.fieldReviews = source.fieldReviews
+    }
+
+    private static func copy(of source: TransitDetails) -> TransitDetails {
+        let copy = TransitDetails(type: source.type)
+        Self.copy(source, to: copy)
+        return copy
+    }
+
+    private static func copy(
+        _ source: PlaceVisitDetails,
+        to destination: PlaceVisitDetails
+    ) {
+        destination.description = source.description
+        destination.place = source.place
+        destination.location = source.location
+        destination.placeRawText = source.placeRawText
+        destination.candidates = source.candidates
+        destination.unresolvedPeople = source.unresolvedPeople
+        destination.fieldReviews = source.fieldReviews
+    }
+
+    private static func copy(
+        of source: PlaceVisitDetails
+    ) -> PlaceVisitDetails {
+        let copy = PlaceVisitDetails()
+        Self.copy(source, to: copy)
+        return copy
     }
 
     func dismiss(
@@ -136,6 +232,23 @@ final class AutomationCandidateReviewModel {
             modelContext.rollback()
             errorMessage = error.localizedDescription
             return false
+        }
+    }
+}
+
+private enum AutomationCandidateReviewError: LocalizedError {
+    case kindChanged
+    case missingDetails
+    case unsupportedKind
+
+    var errorDescription: String? {
+        switch self {
+        case .kindChanged:
+            String(localized: "The candidate type changed unexpectedly.")
+        case .missingDetails:
+            String(localized: "The candidate details are incomplete.")
+        case .unsupportedKind:
+            String(localized: "This entry type cannot be accepted as an automation candidate.")
         }
     }
 }

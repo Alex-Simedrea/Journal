@@ -9,6 +9,8 @@ struct DayTimelineScreen: View {
     @State private var isCalendarPresented = false
     @State private var selectedAutomationCandidate:
         AutomationCandidateSnapshot?
+    @State private var pendingEntryDeletionID: UUID?
+    @State private var pendingCandidateDismissalID: UUID?
     var showsCloseButton = true
     var contentRevision = 0
 
@@ -41,8 +43,8 @@ struct DayTimelineScreen: View {
             overviewData: presentation.overviewData,
             errorMessage: presentation.timelineErrorMessage,
             onSelect: { entryID in
-                if let candidate = presentation.automationCandidates.first(
-                    where: { $0.id == entryID }
+                if let candidate = presentation.pendingAutomationCandidate(
+                    forEntryID: entryID
                 ) {
                     selectedAutomationCandidate = candidate
                 } else {
@@ -92,21 +94,23 @@ struct DayTimelineScreen: View {
             )
             .presentationDetents([.medium])
         }
-        .sheet(item: $presentation.sheet, onDismiss: reloadTimelineAndRoutes) {
+        .sheet(item: $presentation.sheet, onDismiss: finishEntrySheet) {
             sheet in
             HomeDetailSheetContent(
                 sheet: sheet,
-                entryProvider: presentation.entry(withID:)
+                entryProvider: presentation.entry(withID:),
+                onRequestDelete: requestEntryDeletion
             )
         }
         .sheet(
             item: $selectedAutomationCandidate,
-            onDismiss: reloadTimelineAndRoutes
+            onDismiss: finishCandidateSheet
         ) { candidate in
-            AutomationCandidateReviewSheet(candidateID: candidate.id) {
-                selectedAutomationCandidate = nil
-                reloadTimelineAndRoutes()
-            }
+            AutomationCandidateReviewSheet(
+                candidateID: candidate.id,
+                onComplete: { selectedAutomationCandidate = nil },
+                onRequestDismiss: requestCandidateDismissal
+            )
         }
         .alert(
             "Couldn’t Prepare Timeline",
@@ -154,6 +158,46 @@ struct DayTimelineScreen: View {
         Task {
             await presentation.loadWorkoutRoutes(for: selectedDay)
         }
+    }
+
+    private func requestEntryDeletion(_ entryID: UUID) {
+        pendingEntryDeletionID = entryID
+        presentation.sheet = nil
+    }
+
+    private func finishEntrySheet() {
+        if let entryID = pendingEntryDeletionID {
+            pendingEntryDeletionID = nil
+            do {
+                try JournalDeletionService.delete(
+                    entryID: entryID,
+                    in: modelContext
+                )
+            } catch {
+                presentation.setupErrorMessage = error.localizedDescription
+            }
+        }
+        reloadTimelineAndRoutes()
+    }
+
+    private func requestCandidateDismissal(_ candidateID: UUID) {
+        pendingCandidateDismissalID = candidateID
+        selectedAutomationCandidate = nil
+    }
+
+    private func finishCandidateSheet() {
+        if let candidateID = pendingCandidateDismissalID {
+            pendingCandidateDismissalID = nil
+            do {
+                try AutomationCandidateStore.dismiss(
+                    candidateID: candidateID,
+                    in: modelContext
+                )
+            } catch {
+                presentation.setupErrorMessage = error.localizedDescription
+            }
+        }
+        reloadTimelineAndRoutes()
     }
 }
 

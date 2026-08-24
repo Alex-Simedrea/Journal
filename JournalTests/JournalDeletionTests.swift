@@ -21,6 +21,26 @@ struct JournalDeletionTests {
         #expect(try context.fetch(FetchDescriptor<TransitDetails>()).isEmpty)
     }
 
+    @Test("Deleting by stable ID is idempotent")
+    func deletingEntryByIDIsIdempotent() throws {
+        let context = try makeContext()
+        let entry = LogEntry(kind: .placeVisit, needsReview: false)
+        entry.placeVisitDetails = PlaceVisitDetails(
+            location: Location(latitude: 44.43, longitude: 26.10)
+        )
+        let entryID = entry.id
+        context.insert(entry)
+        try context.save()
+
+        try JournalDeletionService.delete(entryID: entryID, in: context)
+        try JournalDeletionService.delete(entryID: entryID, in: context)
+
+        #expect(try context.fetch(FetchDescriptor<LogEntry>()).isEmpty)
+        #expect(
+            try context.fetch(FetchDescriptor<PlaceVisitDetails>()).isEmpty
+        )
+    }
+
     @Test("Deleting a place nullifies entry references")
     func deletingPlacePreservesEntry() throws {
         let context = try makeContext()

@@ -63,9 +63,16 @@ struct BoardingPassImportReviewSheet: View {
         }
     }
 
-    private func commit(_ entry: LogEntry) {
+    private func commit(
+        _ entry: LogEntry,
+        selectedPeopleIDs: Set<UUID>
+    ) {
         Task {
-            if await model.commit(entry, in: modelContext) {
+            if await model.commit(
+                entry,
+                selectedPeopleIDs: selectedPeopleIDs,
+                in: modelContext
+            ) {
                 onComplete(model.pendingImport)
             }
         }

@@ -8,6 +8,20 @@ import SwiftData
 
 @MainActor
 enum JournalDeletionService {
+    static func delete(
+        entryID: UUID,
+        in modelContext: ModelContext
+    ) throws {
+        var descriptor = FetchDescriptor<LogEntry>(
+            predicate: #Predicate { $0.id == entryID }
+        )
+        descriptor.fetchLimit = 1
+        guard let entry = try modelContext.fetch(descriptor).first else {
+            return
+        }
+        try delete(entry, in: modelContext)
+    }
+
     static func delete(_ entry: LogEntry, in modelContext: ModelContext) throws {
         let workoutUUID = entry.workoutDetails?.healthKitWorkoutUUID
         if let workoutUUID {

@@ -41,12 +41,7 @@ enum PhotoAutoLinkService {
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         guard status == .authorized || status == .limited else { return }
 
-        let entries = try modelContext.fetch(FetchDescriptor<LogEntry>())
-        let targetsByEntryID = Dictionary(
-            uniqueKeysWithValues: entries.compactMap { entry in
-                target(for: entry).map { (entry.id, $0) }
-            }
-        )
+        let targetsByEntryID = try matchTargets(in: modelContext)
         guard !targetsByEntryID.isEmpty else { return }
 
         let intervals = mergedIntervals(
@@ -69,9 +64,13 @@ enum PhotoAutoLinkService {
         guard !matchesByEntryID.isEmpty else { return }
 
         var changed = false
-        for entry in entries {
+        let currentEntries = try modelContext.fetch(FetchDescriptor<LogEntry>())
+        for entry in currentEntries {
             guard let matchingIdentifiers = matchesByEntryID[entry.id]
             else { continue }
+            guard target(for: entry) == targetsByEntryID[entry.id] else {
+                continue
+            }
             var identifiers = Set(
                 entry.photoReferences.map(\.assetLocalIdentifier)
             )
@@ -94,6 +93,17 @@ enum PhotoAutoLinkService {
             modelContext.rollback()
             throw error
         }
+    }
+
+    private static func matchTargets(
+        in modelContext: ModelContext
+    ) throws -> [UUID: AutomaticPhotoMatchTarget] {
+        let entries = try modelContext.fetch(FetchDescriptor<LogEntry>())
+        return Dictionary(
+            uniqueKeysWithValues: entries.compactMap { entry in
+                target(for: entry).map { (entry.id, $0) }
+            }
+        )
     }
 
     nonisolated static func matches(

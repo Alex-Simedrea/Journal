@@ -37,6 +37,8 @@ final class HomePresentationModel {
     @ObservationIgnored
     private var loadedEntries: [LogEntry] = []
     @ObservationIgnored
+    private var pendingCandidateByEntryID: [UUID: AutomationCandidateSnapshot] = [:]
+    @ObservationIgnored
     private var overviewOccurrences: [TimelineOccurrence] = []
     @ObservationIgnored
     private var overviewDay: TimelineDayKey?
@@ -53,6 +55,12 @@ final class HomePresentationModel {
 
     func entry(withID id: UUID) -> LogEntry? {
         loadedEntries.first { $0.id == id }
+    }
+
+    func pendingAutomationCandidate(
+        forEntryID entryID: UUID
+    ) -> AutomationCandidateSnapshot? {
+        pendingCandidateByEntryID[entryID]
     }
 
     func reloadTimeline(
@@ -84,13 +92,28 @@ final class HomePresentationModel {
             let placesByID = Dictionary(
                 uniqueKeysWithValues: places.map { ($0.id, $0) }
             )
-            automationCandidates = try modelContext.fetch(
+            let pendingCandidates = try modelContext.fetch(
                 FetchDescriptor<AutomationCandidate>(
                     sortBy: [SortDescriptor(\.startTime)]
                 )
             ).compactMap {
                 AutomationCandidateSnapshot($0, placesByID: placesByID)
-            }.filter { $0.day == selectedDay }
+            }
+            let candidatesByID = Dictionary(
+                uniqueKeysWithValues: pendingCandidates.map { ($0.id, $0) }
+            )
+            pendingCandidateByEntryID = Dictionary(
+                uniqueKeysWithValues: entries.compactMap { entry in
+                    let candidateID = entry.automationCandidateID ?? entry.id
+                    guard let candidate = candidatesByID[candidateID] else {
+                        return nil
+                    }
+                    return (entry.id, candidate)
+                }
+            )
+            automationCandidates = pendingCandidates.filter {
+                $0.day == selectedDay
+            }
             let projection = TimelineProjection.project(
                 entries: entries.map(TimelineEntrySnapshot.init),
                 for: selectedDay
@@ -122,6 +145,7 @@ final class HomePresentationModel {
             timelineRows = []
             reviewOccurrences = []
             automationCandidates = []
+            pendingCandidateByEntryID = [:]
             overviewData = TimelineOverviewData()
             overviewOccurrences = []
             overviewDay = nil

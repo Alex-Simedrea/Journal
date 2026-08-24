@@ -9,6 +9,7 @@ struct AutomationCandidateReviewSheet: View {
 
     let candidateID: UUID
     let onComplete: () -> Void
+    let onRequestDismiss: (UUID) -> Void
 
     @State private var model = AutomationCandidateReviewModel()
     @State private var draftEntry: LogEntry?
@@ -22,8 +23,14 @@ struct AutomationCandidateReviewSheet: View {
                     : "Review Transit",
                 isConfirming: model.isSaving,
                 onCancel: onComplete,
-                onDismiss: { dismiss(candidate) },
-                onConfirm: { commit($0, candidate: candidate) }
+                onDismiss: { onRequestDismiss(candidate.id) },
+                onConfirm: {
+                    commit(
+                        $0,
+                        selectedPeopleIDs: $1,
+                        candidate: candidate
+                    )
+                }
             )
             .alert(
                 "Couldn’t Update Candidate",
@@ -72,22 +79,18 @@ struct AutomationCandidateReviewSheet: View {
 
     private func commit(
         _ entry: LogEntry,
+        selectedPeopleIDs: Set<UUID>,
         candidate: AutomationCandidate
     ) {
         Task {
             if await model.commit(
                 entry,
+                selectedPeopleIDs: selectedPeopleIDs,
                 candidate: candidate,
                 in: modelContext
             ) {
                 onComplete()
             }
-        }
-    }
-
-    private func dismiss(_ candidate: AutomationCandidate) {
-        if model.dismiss(candidate: candidate, in: modelContext) {
-            onComplete()
         }
     }
 

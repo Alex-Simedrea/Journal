@@ -61,6 +61,7 @@ struct AddPlaceSheet: View {
                         PlaceEditorContent(
                             model: model,
                             onSelectSymbol: {
+                                model.mapDidDisappear()
                                 movesForward = true
                                 isScrolled = false
                                 route = .symbols

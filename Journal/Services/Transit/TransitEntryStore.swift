@@ -84,9 +84,15 @@ enum TransitEntryStore {
         return entry
     }
 
-    static func insert(_ entry: LogEntry, in modelContext: ModelContext) throws {
+    static func insert(
+        _ entry: LogEntry,
+        refreshDistance: Bool = true,
+        in modelContext: ModelContext
+    ) throws {
         modelContext.insert(entry)
         try modelContext.save()
-        TransitDistanceService.refreshInBackground(entry, in: modelContext)
+        if refreshDistance {
+            TransitDistanceService.refreshInBackground(entry, in: modelContext)
+        }
     }
 }

@@ -76,8 +76,11 @@ enum EntryDetailEditingService {
         in modelContext: ModelContext,
         persist: Bool = true
     ) throws {
-        entry.people = people.filter {
+        let selectedPeople = people.filter {
             session.selectedPeopleIDs.contains($0.id)
+        }
+        if persist {
+            entry.people = selectedPeople
         }
         switch entry.kind {
         case .transit:
@@ -221,9 +224,9 @@ enum EntryDetailEditingService {
             let selection = session.selection(for: .destination)
                 ?? session.selection(for: .origin)
             let place = places.first { $0.id == selection?.placeID }
-            let oldDetails = entry.transitDetails
             entry.transitDetails = nil
-            if let oldDetails { modelContext.delete(oldDetails) }
+            // Do not explicitly invalidate the old child while this entry's
+            // detail navigation transition can still be rendering it.
             let reviews = selection == nil
                 ? [PlaceVisitFieldReview(
                     field: .place,
@@ -238,9 +241,9 @@ enum EntryDetailEditingService {
             )
             entry.kind = .placeVisit
         case (.placeVisit, .transit):
-            let oldDetails = entry.placeVisitDetails
             entry.placeVisitDetails = nil
-            if let oldDetails { modelContext.delete(oldDetails) }
+            // The detached child is intentionally retained as a harmless
+            // orphan; deleting it here can invalidate a still-rendering view.
             entry.transitDetails = TransitDetails(
                 type: session.transitType.isEmpty
                     ? "Transit"

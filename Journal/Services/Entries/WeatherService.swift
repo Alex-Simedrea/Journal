@@ -202,6 +202,25 @@ enum EntryWeatherService {
         force: Bool = false,
         endpoint: EntryWeatherEndpoint = .start
     ) async throws -> Bool {
+        let entryID = entry.id
+        return try await populate(
+            entryID: entryID,
+            in: modelContext,
+            force: force,
+            endpoint: endpoint
+        )
+    }
+
+    @discardableResult
+    static func populate(
+        entryID: UUID,
+        in modelContext: ModelContext,
+        force: Bool = false,
+        endpoint: EntryWeatherEndpoint = .start
+    ) async throws -> Bool {
+        guard let entry = try entry(withID: entryID, in: modelContext) else {
+            return false
+        }
         let existingWeather = switch endpoint {
         case .start: entry.weather
         case .end: entry.endWeather
@@ -215,12 +234,15 @@ enum EntryWeatherService {
             for: request
         )
 
-        guard request == self.request(for: entry, endpoint: endpoint) else {
+        guard let currentEntry = try self.entry(
+            withID: entryID,
+            in: modelContext
+        ), request == self.request(for: currentEntry, endpoint: endpoint) else {
             return false
         }
         switch endpoint {
-        case .start: entry.weather = weather
-        case .end: entry.endWeather = weather
+        case .start: currentEntry.weather = weather
+        case .end: currentEntry.endWeather = weather
         }
         try modelContext.save()
         return true
@@ -231,10 +253,22 @@ enum EntryWeatherService {
         in modelContext: ModelContext,
         force: Bool = false
     ) async {
+        await populateEndpoints(
+            entryID: entry.id,
+            in: modelContext,
+            force: force
+        )
+    }
+
+    static func populateEndpoints(
+        entryID: UUID,
+        in modelContext: ModelContext,
+        force: Bool = false
+    ) async {
         for endpoint in EntryWeatherEndpoint.allCases {
             do {
                 _ = try await populate(
-                    entry,
+                    entryID: entryID,
                     in: modelContext,
                     force: force,
                     endpoint: endpoint
@@ -249,24 +283,47 @@ enum EntryWeatherService {
         _ entry: LogEntry,
         in modelContext: ModelContext
     ) {
+        let entryID = entry.id
+        let container = modelContext.container
         Task {
-            await populateEndpoints(entry, in: modelContext, force: true)
+            let enrichmentContext = ModelContext(container)
+            enrichmentContext.autosaveEnabled = false
+            await populateEndpoints(
+                entryID: entryID,
+                in: enrichmentContext,
+                force: true
+            )
         }
     }
 
     static func populateMissing(in modelContext: ModelContext) async {
-        let entries: [LogEntry]
+        let entryIDs: [UUID]
         do {
-            entries = try modelContext.fetch(FetchDescriptor<LogEntry>())
+            entryIDs = try modelContext.fetch(FetchDescriptor<LogEntry>())
+                .compactMap { entry in
+                    entry.weather == nil || entry.endWeather == nil
+                        ? entry.id
+                        : nil
+                }
         } catch {
             print("Could not load entries for WeatherKit enrichment: \(error)")
             return
         }
 
-        for entry in entries
-        where entry.weather == nil || entry.endWeather == nil {
-            await populateEndpoints(entry, in: modelContext)
+        for entryID in entryIDs {
+            await populateEndpoints(entryID: entryID, in: modelContext)
         }
+    }
+
+    private static func entry(
+        withID entryID: UUID,
+        in modelContext: ModelContext
+    ) throws -> LogEntry? {
+        var descriptor = FetchDescriptor<LogEntry>(
+            predicate: #Predicate { $0.id == entryID }
+        )
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first
     }
 
     private static func resolvedLocation(

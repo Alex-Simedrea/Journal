@@ -68,13 +68,17 @@ struct TimelineCalendarSheet: View {
 struct HomeDetailSheetContent: View {
     let sheet: HomeSheet
     let entryProvider: (UUID) -> LogEntry?
+    let onRequestDelete: (UUID) -> Void
 
     var body: some View {
         VStack {
             switch sheet {
             case .details(let entryID):
                 if let entry = entryProvider(entryID) {
-                    EntryDetailSheet(entry: entry)
+                    EntryDetailSheet(
+                        entry: entry,
+                        onRequestDelete: onRequestDelete
+                    )
                 } else {
                     ContentUnavailableView(
                         "Entry Unavailable",

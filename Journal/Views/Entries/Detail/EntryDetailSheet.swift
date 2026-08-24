@@ -11,7 +11,7 @@ struct EntryDetailDraftPresentation {
     let isConfirming: Bool
     let onCancel: () -> Void
     let onDismiss: (() -> Void)?
-    let onConfirm: (LogEntry) -> Void
+    let onConfirm: (LogEntry, Set<UUID>) -> Void
 }
 
 struct EntryDetailSheet: View {
@@ -26,6 +26,7 @@ struct EntryDetailSheet: View {
 
     let entry: LogEntry
     let draftPresentation: EntryDetailDraftPresentation?
+    let onRequestDelete: ((UUID) -> Void)?
 
     @State private var coordinator: EntryDetailCoordinator
     @State private var routeModel = WorkoutRouteModel()
@@ -38,9 +39,13 @@ struct EntryDetailSheet: View {
     @State private var timeZoneDraft = TimeZone.current.identifier
     @State private var isPhotoPickerPresented = false
 
-    init(entry: LogEntry) {
+    init(
+        entry: LogEntry,
+        onRequestDelete: ((UUID) -> Void)? = nil
+    ) {
         self.entry = entry
         draftPresentation = nil
+        self.onRequestDelete = onRequestDelete
         _coordinator = State(initialValue: EntryDetailCoordinator(entry: entry))
     }
 
@@ -50,9 +55,10 @@ struct EntryDetailSheet: View {
         isConfirming: Bool = false,
         onCancel: @escaping () -> Void,
         onDismiss: (() -> Void)? = nil,
-        onConfirm: @escaping (LogEntry) -> Void
+        onConfirm: @escaping (LogEntry, Set<UUID>) -> Void
     ) {
         entry = draftEntry
+        onRequestDelete = nil
         draftPresentation = EntryDetailDraftPresentation(
             title: title,
             isConfirming: isConfirming,
@@ -96,7 +102,10 @@ struct EntryDetailSheet: View {
             } trailing: {
                 if coordinator.route == .details, let draftPresentation {
                     Button {
-                        draftPresentation.onConfirm(entry)
+                        draftPresentation.onConfirm(
+                            entry,
+                            coordinator.session.selectedPeopleIDs
+                        )
                     } label: {
                         if draftPresentation.isConfirming {
                             ProgressView()
@@ -373,6 +382,7 @@ struct EntryDetailSheet: View {
                     PlaceEditorContent(
                         model: addPlaceModel,
                         onSelectSymbol: {
+                            addPlaceModel.mapDidDisappear()
                             coordinator.present(.placeSymbol(role))
                         }
                     )
@@ -702,6 +712,10 @@ private extension EntryDetailSheet {
     }
 
     private func deleteEntry() {
+        if let onRequestDelete {
+            onRequestDelete(entry.id)
+            return
+        }
         do {
             try JournalDeletionService.delete(entry, in: modelContext)
             dismiss()

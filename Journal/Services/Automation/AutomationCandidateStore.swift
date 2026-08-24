@@ -130,9 +130,37 @@ enum AutomationCandidateStore {
         in modelContext: ModelContext
     ) throws {
         guard candidate.status == .pending else { return }
+        let candidateID = candidate.id
         candidate.status = .dismissed
         candidate.updatedAt = .now
-        try modelContext.save()
+        do {
+            try modelContext.delete(
+                model: LogEntry.self,
+                where: #Predicate {
+                    $0.id == candidateID
+                        || $0.automationCandidateID == candidateID
+                }
+            )
+            try modelContext.save()
+            NotificationCenter.default.post(
+                name: .automationCandidatesDidChange,
+                object: nil
+            )
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+    }
+
+    static func dismiss(
+        candidateID: UUID,
+        in modelContext: ModelContext
+    ) throws {
+        guard let candidate = try candidate(
+            withID: candidateID,
+            in: modelContext
+        ) else { return }
+        try dismiss(candidate, in: modelContext)
     }
 
     static func markAccepted(

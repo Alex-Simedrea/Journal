@@ -41,30 +41,38 @@ private struct JournalApplicationContent: View {
     var body: some View {
         HomeScreen(contentRevision: contentRevision)
         .task {
-            await automation.start(in: modelContext)
+            let automationContext = backgroundContext()
+            let contactContext = backgroundContext()
+            let workoutContext = backgroundContext()
+            let enrichmentContext = backgroundContext()
+            await automation.start(in: automationContext)
             _ = try? await ContactPersonSyncService
-                .synchronizeAllContacts(in: modelContext)
-            await workoutImports.start(in: modelContext)
-            await EntryWeatherService.populateMissing(in: modelContext)
-            await TransitDistanceService.populateMissing(in: modelContext)
-            await LocationGeographyService.populateMissing(in: modelContext)
+                .synchronizeAllContacts(in: contactContext)
+            await workoutImports.start(in: workoutContext)
+            await EntryWeatherService.populateMissing(in: enrichmentContext)
+            await TransitDistanceService.populateMissing(in: enrichmentContext)
+            await LocationGeographyService.populateMissing(in: enrichmentContext)
             contentRevision &+= 1
             boardingPassImports.loadNextIfNeeded()
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
+                JournalRecordingCoordinator.shared.appDidBecomeActive()
                 boardingPassImports.loadNextIfNeeded()
                 Task {
-                    await automation.synchronize(in: modelContext)
-                    await workoutImports.synchronize(in: modelContext)
+                    let automationContext = backgroundContext()
+                    let workoutContext = backgroundContext()
+                    let enrichmentContext = backgroundContext()
+                    await automation.synchronize(in: automationContext)
+                    await workoutImports.synchronize(in: workoutContext)
                     await EntryWeatherService.populateMissing(
-                        in: modelContext
+                        in: enrichmentContext
                     )
                     await TransitDistanceService.populateMissing(
-                        in: modelContext
+                        in: enrichmentContext
                     )
                     await LocationGeographyService.populateMissing(
-                        in: modelContext
+                        in: enrichmentContext
                     )
                     contentRevision &+= 1
                 }
@@ -115,6 +123,12 @@ private struct JournalApplicationContent: View {
                     ?? "An unknown error occurred."
             )
         }
+    }
+
+    private func backgroundContext() -> ModelContext {
+        let context = ModelContext(modelContext.container)
+        context.autosaveEnabled = false
+        return context
     }
 }
 

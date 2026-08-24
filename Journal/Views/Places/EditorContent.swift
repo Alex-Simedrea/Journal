@@ -157,6 +157,8 @@ private struct PlaceEditorSelectedLocation: View {
                 frequency: .onEnd,
                 model.mapCameraChanged
             )
+            .onAppear { model.mapDidAppear() }
+            .onDisappear { model.mapDidDisappear() }
             .overlay {
                 MapSelectionPin()
                     .offset(y: -23.5)

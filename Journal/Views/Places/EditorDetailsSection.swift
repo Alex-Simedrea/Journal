@@ -18,6 +18,7 @@ struct PlaceEditorDetailsSection: View {
 
             NavigationLink {
                 PlaceSymbolPicker(selection: $model.selectedSymbol)
+                    .onAppear { model.mapDidDisappear() }
             } label: {
                 LabeledContent("Symbol") {
                     PlaceEditorSymbolImage(

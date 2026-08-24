@@ -70,6 +70,7 @@ struct JournalDataArchiveTests {
         )
         let transitID = UUID()
         let candidateID = UUID()
+        let recordingID = UUID()
         let transit = LogEntry(
             id: transitID,
             kind: .transit,
@@ -86,6 +87,7 @@ struct JournalDataArchiveTests {
             modelToolTranscript: "tools",
             modelResponse: "response",
             automationCandidateID: candidateID,
+            journalRecordingID: recordingID,
             photoReferences: [
                 PhotoReference(
                     assetLocalIdentifier: "photo-1",
@@ -142,6 +144,27 @@ struct JournalDataArchiveTests {
             destinationRawText: "destination raw",
             durationSource: .manualOverride,
             distanceMeters: 1_000,
+            recordedRoute: [
+                RecordedRoutePoint(
+                    latitude: origin.latitude,
+                    longitude: origin.longitude,
+                    timestamp: baseDate.addingTimeInterval(60)
+                ),
+                RecordedRoutePoint(
+                    latitude: destination.latitude,
+                    longitude: destination.longitude,
+                    timestamp: baseDate.addingTimeInterval(3_660)
+                ),
+            ],
+            recordedMotion: [
+                RecordedMotionObservation(
+                    startTime: baseDate.addingTimeInterval(60),
+                    endTime: baseDate.addingTimeInterval(3_660),
+                    kind: .automotive,
+                    confidenceRawValue: 2
+                )
+            ],
+            recordedTransitMode: .automotive,
             originCandidates: [candidate(at: origin, name: "Origin")],
             destinationCandidates: [
                 candidate(at: destination, name: "Destination")
@@ -270,6 +293,7 @@ struct JournalDataArchiveTests {
             importedEntries.first { $0.id == transitID }
         )
         #expect(importedTransit.people.map(\.id) == [person.id])
+        #expect(importedTransit.journalRecordingID == recordingID)
         #expect(importedTransit.startTimeZoneIdentifier == "Europe/Bucharest")
         #expect(importedTransit.endTimeZoneIdentifier == "Europe/Paris")
         #expect(importedTransit.photoReferences.first?.assetLocalIdentifier == "photo-1")
@@ -279,6 +303,9 @@ struct JournalDataArchiveTests {
         #expect(importedTransit.transitDetails?.originPlace?.id == home.id)
         #expect(importedTransit.transitDetails?.destinationPlace?.id == cafe.id)
         #expect(importedTransit.transitDetails?.destinationRawText == "destination raw")
+        #expect(importedTransit.transitDetails?.recordedRoute.count == 2)
+        #expect(importedTransit.transitDetails?.recordedMotion.first?.kind == .automotive)
+        #expect(importedTransit.transitDetails?.recordedTransitMode == .automotive)
 
         let importedWorkout = try #require(
             importedEntries.first { $0.kind == .workout }

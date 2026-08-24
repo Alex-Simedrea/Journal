@@ -52,7 +52,8 @@ struct EntryEditingTests {
         #expect(try context.fetch(FetchDescriptor<LogEntry>()).isEmpty)
         #expect(entry.endTime == Date(timeIntervalSince1970: 3_000))
         #expect(entry.transitDetails?.sourceServiceIdentifier == "AF6634")
-        #expect(entry.people.map(\.id) == [person.id])
+        #expect(entry.people.isEmpty)
+        #expect(session.selectedPeopleIDs == [person.id])
 
         try TransitEntryStore.insert(entry, in: context)
 
@@ -660,6 +661,36 @@ struct EntryEditingTests {
             ),
             positionedByUser: false
         )
+
+        #expect(model.location == selectedLocation)
+    }
+
+    @Test("Leaving the place map cancels transition camera updates")
+    func leavingPlaceMapPreservesLocation() async throws {
+        let selectedLocation = Location(latitude: 48.86, longitude: 2.35)
+        let transitionLocation = Location(latitude: 46.00, longitude: 25.00)
+        let model = PlaceEditorModel(
+            initialLocation: selectedLocation,
+            allowsCurrentLocationCapture: false,
+            coordinateLocationProvider: { _ in
+                try? await Task.sleep(for: .milliseconds(50))
+                return transitionLocation
+            }
+        )
+        let transitionCoordinate = transitionLocation.coordinate
+        model.mapDidAppear()
+        model.mapCameraChanged(
+            to: transitionCoordinate,
+            region: MKCoordinateRegion(
+                center: transitionCoordinate,
+                latitudinalMeters: 2_000_000,
+                longitudinalMeters: 2_000_000
+            ),
+            positionedByUser: true
+        )
+
+        model.mapDidDisappear()
+        try await Task.sleep(for: .milliseconds(75))
 
         #expect(model.location == selectedLocation)
     }

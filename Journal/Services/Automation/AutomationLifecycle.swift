@@ -16,7 +16,16 @@ extension Notification.Name {
 enum JournalModelContainer {
     static let shared: ModelContainer = {
         do {
-            return try ModelContainer(
+            let configuration = ModelConfiguration()
+            // This is deliberately checked on every cold launch. It is a
+            // small, idempotent repair and protects against a relationship
+            // row disappearing after any interrupted edit, not just during a
+            // one-time automation migration.
+            _ = try SwiftDataStoreIntegrityRepair
+                .clearDanglingEntryDetailReferences(
+                    at: configuration.url
+                )
+            let container = try ModelContainer(
                 for: LogEntry.self,
                 Person.self,
                 Place.self,
@@ -24,12 +33,181 @@ enum JournalModelContainer {
                 PlaceVisitDetails.self,
                 WorkoutDetails.self,
                 TransitType.self,
-                AutomationCandidate.self
+                AutomationCandidate.self,
+                ActiveJournalRecording.self,
+                configurations: configuration
             )
+            try AutomationCandidateStoreRepair.runIfNeeded(
+                in: container.mainContext
+            )
+            return container
         } catch {
             fatalError("Unable to create Journal model container: \(error)")
         }
     }()
+}
+
+@MainActor
+enum AutomationCandidateStoreRepair {
+    private static let repairVersion = 2
+    private static let repairVersionKey =
+        "journal.automation-candidate-store-repair-version"
+
+    static var isNeeded: Bool {
+        UserDefaults.standard.integer(forKey: repairVersionKey) < repairVersion
+    }
+
+    static func runIfNeeded(in modelContext: ModelContext) throws {
+        guard isNeeded else { return }
+
+        try rebuildNonAcceptedEntries(in: modelContext)
+        try repairAcceptedEntries(in: modelContext)
+        UserDefaults.standard.set(repairVersion, forKey: repairVersionKey)
+    }
+
+    static func rebuildNonAcceptedEntries(
+        in modelContext: ModelContext
+    ) throws {
+        let candidates = try modelContext.fetch(
+            FetchDescriptor<AutomationCandidate>()
+        )
+        let candidateIDs = candidates.compactMap { candidate in
+            candidate.status == .accepted ? nil : candidate.id
+        }
+
+        for candidateID in candidateIDs {
+            try modelContext.delete(
+                model: LogEntry.self,
+                where: #Predicate {
+                    $0.id == candidateID
+                        || $0.automationCandidateID == candidateID
+                }
+            )
+        }
+        try modelContext.save()
+        try AutomationCandidateEntryService.synchronizePending(
+            in: modelContext
+        )
+    }
+
+    static func repairAcceptedEntries(
+        in modelContext: ModelContext
+    ) throws {
+        let candidates = try modelContext.fetch(
+            FetchDescriptor<AutomationCandidate>()
+        ).filter { $0.status == .accepted }
+        guard !candidates.isEmpty else { return }
+
+        let entries = try modelContext.fetch(FetchDescriptor<LogEntry>())
+        let places = try modelContext.fetch(FetchDescriptor<Place>())
+
+        for candidate in candidates {
+            let matchingEntries = entries.filter {
+                $0.id == candidate.id
+                    || $0.automationCandidateID == candidate.id
+                    || $0.id == candidate.acceptedEntryID
+            }
+            guard let entry = preferredEntry(
+                from: matchingEntries,
+                for: candidate
+            ) else { continue }
+
+            entry.automationCandidateID = candidate.id
+            candidate.acceptedEntryID = entry.id
+            try removeDuplicates(
+                matchingEntries.filter { $0.id != entry.id },
+                in: modelContext
+            )
+            restoreMissingDetails(
+                for: entry,
+                from: candidate,
+                places: places,
+                in: modelContext
+            )
+        }
+        try modelContext.save()
+    }
+
+    private static func preferredEntry(
+        from entries: [LogEntry],
+        for candidate: AutomationCandidate
+    ) -> LogEntry? {
+        if let acceptedEntryID = candidate.acceptedEntryID,
+           let accepted = entries.first(where: { $0.id == acceptedEntryID }) {
+            return accepted
+        }
+        return entries.first(where: { $0.id == candidate.id })
+            ?? entries.first
+    }
+
+    private static func removeDuplicates(
+        _ entries: [LogEntry],
+        in modelContext: ModelContext
+    ) throws {
+        guard !entries.isEmpty else { return }
+
+        // Detach first so deleting a duplicate can never cascade through a
+        // child-detail object that another historical copy also references.
+        for entry in entries {
+            entry.transitDetails = nil
+            entry.placeVisitDetails = nil
+            entry.workoutDetails = nil
+        }
+        try modelContext.save()
+        for entry in entries {
+            modelContext.delete(entry)
+        }
+        try modelContext.save()
+    }
+
+    private static func restoreMissingDetails(
+        for entry: LogEntry,
+        from candidate: AutomationCandidate,
+        places: [Place],
+        in modelContext: ModelContext
+    ) {
+        switch entry.kind {
+        case .placeVisit where entry.placeVisitDetails == nil:
+            guard let location = candidate.visitLocation else { return }
+            let place = places.first { $0.id == candidate.visitPlaceID }
+            let name = place?.name ?? location.preferredName
+            let details = PlaceVisitDetails(
+                place: place,
+                location: (place?.location ?? location)
+                    .withFallbackDisplayName(name),
+                placeRawText: name
+            )
+            modelContext.insert(details)
+            entry.placeVisitDetails = details
+        case .transit where entry.transitDetails == nil:
+            guard let origin = candidate.originLocation,
+                  let destination = candidate.destinationLocation else {
+                return
+            }
+            let originPlace = places.first { $0.id == candidate.originPlaceID }
+            let destinationPlace = places.first {
+                $0.id == candidate.destinationPlaceID
+            }
+            let originName = originPlace?.name ?? origin.preferredName
+            let destinationName = destinationPlace?.name
+                ?? destination.preferredName
+            let details = TransitDetails(
+                type: candidate.motionKind?.transitTypeName ?? "Transit",
+                originPlace: originPlace,
+                originLocation: (originPlace?.location ?? origin)
+                    .withFallbackDisplayName(originName),
+                originRawText: originName,
+                destinationPlace: destinationPlace,
+                destinationLocation: (destinationPlace?.location ?? destination)
+                    .withFallbackDisplayName(destinationName),
+                destinationRawText: destinationName
+            )
+            modelContext.insert(details)
+            entry.transitDetails = details
+        default:
+            break
+        }
+    }
 }
 
 @MainActor
@@ -47,6 +225,9 @@ final class JournalAppDelegate: NSObject, UIApplicationDelegate {
             modelContainer: JournalModelContainer.shared
         )
         VisitMonitoringCoordinator.shared.resumeIfAuthorized()
+        JournalRecordingCoordinator.shared.restoreIfNeeded(
+            applicationIsActive: application.applicationState == .active
+        )
         return true
     }
 }
@@ -150,10 +331,6 @@ final class AutomationCoordinator {
             }
         }
 
-        guard CLLocationManager.locationServicesEnabled() else {
-            locationPermission = .unavailable
-            return
-        }
         locationPermission = switch VisitMonitoringCoordinator.shared
             .authorizationStatus {
         case .authorizedAlways: .allowed
