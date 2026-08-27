@@ -3,6 +3,7 @@ import SwiftUI
 
 struct EntryDetailOverview: View {
     let entry: LogEntry
+    let peopleOverride: [Person]?
     let routeModel: WorkoutRouteModel
     let topContentInset: CGFloat
     @Binding var isScrolled: Bool
@@ -27,16 +28,19 @@ struct EntryDetailOverview: View {
                 case .placeVisit:
                     EntryDetailPlaceComposition(
                         entry: entry,
+                        people: peopleOverride ?? entry.people,
                         onPresent: onPresent
                     )
                 case .transit:
                     EntryDetailTransitComposition(
                         entry: entry,
+                        people: peopleOverride ?? entry.people,
                         onPresent: onPresent
                     )
                 case .workout:
                     EntryDetailWorkoutComposition(
                         entry: entry,
+                        people: peopleOverride ?? entry.people,
                         onPresent: onPresent
                     )
                 case .wakeUp:

@@ -1,23 +1,23 @@
 import Foundation
 
-enum DayMovementIconKind: Hashable, Sendable {
+nonisolated enum DayMovementIconKind: Hashable, Sendable {
     case transit(String)
     case workout(String)
 }
 
-struct DayMovementIcon: Hashable, Identifiable, Sendable {
+nonisolated struct DayMovementIcon: Hashable, Identifiable, Sendable {
     let id: TimelineOccurrenceID
     let kind: DayMovementIconKind
 }
 
-struct DayMovementSummary: Equatable, Sendable {
+nonisolated struct DayMovementSummary: Equatable, Sendable {
     let icons: [DayMovementIcon]
     let distanceMeters: Double?
     let durationSeconds: TimeInterval?
     let needsReview: Bool
 }
 
-struct DayFeaturedPlace: Equatable, Sendable {
+nonisolated struct DayFeaturedPlace: Equatable, Sendable {
     let occurrenceID: TimelineOccurrenceID
     let location: TimelineLocationSnapshot
     let durationSeconds: TimeInterval?
@@ -25,7 +25,7 @@ struct DayFeaturedPlace: Equatable, Sendable {
     let needsReview: Bool
 }
 
-struct DayWakeSummary: Equatable, Sendable {
+nonisolated struct DayWakeSummary: Equatable, Sendable {
     let wakeTime: Date
     let durationSeconds: TimeInterval?
     let timeZoneIdentifier: String
@@ -108,7 +108,7 @@ nonisolated extension PersistedDayWeather {
     }
 }
 
-struct DaySummary: Equatable, Identifiable, Sendable {
+nonisolated struct DaySummary: Equatable, Identifiable, Sendable {
     let day: TimelineDayKey
     let occurrences: [TimelineOccurrence]
     let overviewData: TimelineOverviewData
@@ -172,7 +172,7 @@ enum DaySummaryDatePresentation {
     }
 }
 
-enum DaySummaryProjector {
+nonisolated enum DaySummaryProjector {
     static func makeSummaries(
         entries: [TimelineEntrySnapshot]
     ) -> [DaySummary] {

@@ -6,29 +6,29 @@
 import Foundation
 import SwiftData
 
-enum WorkoutMovementKind: String, Codable, Hashable, Sendable {
+nonisolated enum WorkoutMovementKind: String, Codable, Hashable, Sendable {
     case moving
     case staticWorkout
 }
 
-enum WorkoutRouteImportState: String, Codable, Hashable, Sendable {
+nonisolated enum WorkoutRouteImportState: String, Codable, Hashable, Sendable {
     case pending
     case available
     case unavailable
 }
 
-enum WorkoutPlaceResolutionSource: String, Codable, Hashable, Sendable {
+nonisolated enum WorkoutPlaceResolutionSource: String, Codable, Hashable, Sendable {
     case automatic
     case manual
 }
 
-enum WorkoutReviewField: String, Codable, CaseIterable, Hashable, Sendable {
+nonisolated enum WorkoutReviewField: String, Codable, CaseIterable, Hashable, Sendable {
     case place
     case origin
     case destination
 }
 
-struct WorkoutFieldReview: Codable, Hashable, Identifiable, Sendable {
+nonisolated struct WorkoutFieldReview: Codable, Hashable, Identifiable, Sendable {
     var field: WorkoutReviewField
     var reason: String
 
@@ -56,7 +56,22 @@ final class WorkoutDetails {
     var placeResolutionSource: WorkoutPlaceResolutionSource
     var originResolutionSource: WorkoutPlaceResolutionSource
     var destinationResolutionSource: WorkoutPlaceResolutionSource
-    var fieldReviews: [WorkoutFieldReview]
+    /// SwiftData's automatic handling for arrays of Codable values can
+    /// intermittently attempt to materialize the stored JSON blob as a native
+    /// collection and trap before decoding it. Keep the same persisted column,
+    /// but own the JSON coding so an empty `[]` remains an ordinary Data value.
+    @Attribute(originalName: "fieldReviews")
+    private var fieldReviewsData: Data?
+
+    var fieldReviews: [WorkoutFieldReview] {
+        get {
+            PersistedJSON.decode(
+                [WorkoutFieldReview].self,
+                from: fieldReviewsData
+            ) ?? []
+        }
+        set { fieldReviewsData = PersistedJSON.encode(newValue) }
+    }
 
     init(
         healthKitWorkoutUUID: UUID,
@@ -93,7 +108,7 @@ final class WorkoutDetails {
         self.placeResolutionSource = placeResolutionSource
         self.originResolutionSource = originResolutionSource
         self.destinationResolutionSource = destinationResolutionSource
-        self.fieldReviews = fieldReviews
+        self.fieldReviewsData = PersistedJSON.encode(fieldReviews)
     }
 
     func review(for field: WorkoutReviewField) -> WorkoutFieldReview? {

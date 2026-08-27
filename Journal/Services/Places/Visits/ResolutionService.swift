@@ -5,7 +5,7 @@
 
 import Foundation
 
-struct ResolvedPlaceVisitDraft {
+nonisolated struct ResolvedPlaceVisitDraft {
     var description: String? = nil
     var place: Place?
     var location: Location?

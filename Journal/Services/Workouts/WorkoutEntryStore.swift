@@ -6,14 +6,13 @@
 import Foundation
 import SwiftData
 
-struct WorkoutResolvedLocations {
+nonisolated struct WorkoutResolvedLocations: Sendable {
     let source: Location?
     let origin: Location?
     let destination: Location?
 }
 
-@MainActor
-enum WorkoutEntryStore {
+nonisolated enum WorkoutEntryStore {
     static func upsert(
         snapshot: HealthKitWorkoutSnapshot,
         locations: WorkoutResolvedLocations,

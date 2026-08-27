@@ -108,9 +108,106 @@ nonisolated struct SummaryMapPathDescriptor: Codable, Hashable, Sendable {
     let strokes: [Stroke]
 }
 
+nonisolated enum SummaryMapOverviewCamera {
+    private static let padding = 1.35
+
+    static func region(
+        for coordinates: [CLLocationCoordinate2D],
+        size: CGSize
+    ) -> MKCoordinateRegion? {
+        let coordinates = uniqueCoordinates(coordinates)
+        guard let first = coordinates.first else { return nil }
+        guard coordinates.count > 1 else {
+            return MKCoordinateRegion(
+                center: first,
+                latitudinalMeters: 1_200,
+                longitudinalMeters: 1_200
+            )
+        }
+
+        let latitudes = coordinates.map(\.latitude)
+        let longitudeInterval = minimalLongitudeInterval(
+            coordinates.map(\.longitude)
+        )
+        let minimumLatitude = latitudes.min() ?? first.latitude
+        let maximumLatitude = latitudes.max() ?? first.latitude
+        let centerLatitude = (minimumLatitude + maximumLatitude) / 2
+        let centerLongitude = normalizedLongitude(
+            longitudeInterval.start + longitudeInterval.span / 2
+        )
+
+        var latitudeSpan = max(maximumLatitude - minimumLatitude, 0.5)
+        var longitudeSpan = max(longitudeInterval.span, 0.5)
+        let aspect = max(0.25, size.width / max(size.height, 1))
+        let longitudeScale = max(0.2, cos(centerLatitude * .pi / 180))
+        let displayedAspect = longitudeSpan * longitudeScale / latitudeSpan
+        if displayedAspect > aspect {
+            latitudeSpan = longitudeSpan * longitudeScale / aspect
+        } else {
+            longitudeSpan = latitudeSpan * aspect / longitudeScale
+        }
+
+        return MKCoordinateRegion(
+            center: CLLocationCoordinate2D(
+                latitude: centerLatitude,
+                longitude: centerLongitude
+            ),
+            span: MKCoordinateSpan(
+                latitudeDelta: min(170, latitudeSpan * padding),
+                longitudeDelta: min(350, longitudeSpan * padding)
+            )
+        )
+    }
+
+    private static func uniqueCoordinates(
+        _ coordinates: [CLLocationCoordinate2D]
+    ) -> [CLLocationCoordinate2D] {
+        var keys = Set<String>()
+        return coordinates.filter { coordinate in
+            keys.insert(String(
+                format: "%.6f,%.6f",
+                coordinate.latitude,
+                coordinate.longitude
+            )).inserted
+        }
+    }
+
+    private static func minimalLongitudeInterval(
+        _ longitudes: [CLLocationDegrees]
+    ) -> (start: Double, span: Double) {
+        let sorted = longitudes.map { longitude in
+            let value = longitude.truncatingRemainder(dividingBy: 360)
+            return value < 0 ? value + 360 : value
+        }.sorted()
+        guard sorted.count > 1 else { return (sorted.first ?? 0, 0) }
+
+        var largestGap = -Double.infinity
+        var intervalStart = sorted[0]
+        for index in sorted.indices {
+            let current = sorted[index]
+            let next = index == sorted.index(before: sorted.endIndex)
+                ? sorted[0] + 360
+                : sorted[index + 1]
+            let gap = next - current
+            if gap > largestGap {
+                largestGap = gap
+                intervalStart = next.truncatingRemainder(dividingBy: 360)
+            }
+        }
+        return (intervalStart, max(0, 360 - largestGap))
+    }
+
+    private static func normalizedLongitude(_ longitude: Double) -> Double {
+        var value = longitude.truncatingRemainder(dividingBy: 360)
+        if value > 180 { value -= 360 }
+        if value < -180 { value += 360 }
+        return value
+    }
+}
+
 @MainActor
 enum SummaryMapSnapshotRequestFactory {
-    private static let renderVersion = 16
+    private static let renderVersion = 22
 
     static func overview(
         slotID: String,
@@ -307,6 +404,7 @@ actor SummaryMapSnapshotStore {
     private struct InFlight {
         let id: UUID
         let task: Task<Data, any Error>
+        var waiterCount: Int
     }
 
     private struct MemoryEntry {
@@ -318,7 +416,6 @@ actor SummaryMapSnapshotStore {
     private let maximumBytes: Int
     private let renderer: Renderer
     private var inFlight: [String: InFlight] = [:]
-    private var currentContentBySlot: [String: String] = [:]
     private var memory: [String: MemoryEntry] = [:]
     private var memoryBytes = 0
     private var memoryClock: UInt64 = 0
@@ -343,27 +440,16 @@ actor SummaryMapSnapshotStore {
 
     func data(for request: SummaryMapSnapshotRequest) async throws -> Data {
         let key = request.cacheKey
-        currentContentBySlot[request.slotHash] = request.contentHash
-        if var entry = memory[key] {
-            memoryClock &+= 1
-            entry.access = memoryClock
-            memory[key] = entry
-            return entry.data
-        }
+        if let cached = cachedData(for: request) { return cached }
 
-        try prepareDirectory(for: request)
-        let fileURL = fileURL(for: request)
-        if let data = try? Data(contentsOf: fileURL), !data.isEmpty {
-            try? FileManager.default.setAttributes(
-                [.modificationDate: Date()],
-                ofItemAtPath: fileURL.path
+        if var existing = inFlight[key] {
+            existing.waiterCount += 1
+            inFlight[key] = existing
+            return try await renderedData(
+                for: request,
+                key: key,
+                inFlight: existing
             )
-            remember(data, forKey: key)
-            return data
-        }
-
-        if let existing = inFlight[key] {
-            return try await existing.task.value
         }
 
         let token = UUID()
@@ -373,13 +459,36 @@ actor SummaryMapSnapshotStore {
                 try await renderer(request)
             }
         }
-        inFlight[key] = InFlight(id: token, task: task)
+        let pending = InFlight(id: token, task: task, waiterCount: 1)
+        inFlight[key] = pending
 
+        return try await renderedData(
+            for: request,
+            key: key,
+            inFlight: pending
+        )
+    }
+
+    private func renderedData(
+        for request: SummaryMapSnapshotRequest,
+        key: String,
+        inFlight pending: InFlight
+    ) async throws -> Data {
         do {
-            let data = try await task.value
-            if inFlight[key]?.id == token,
-               currentContentBySlot[request.slotHash] == request.contentHash {
+            let data = try await withTaskCancellationHandler {
+                try await pending.task.value
+            } onCancel: {
+                Task {
+                    await self.cancelWaiter(
+                        forKey: key,
+                        token: pending.id
+                    )
+                }
+            }
+            try Task.checkCancellation()
+            if inFlight[key]?.id == pending.id {
                 try prepareDirectory(for: request)
+                let fileURL = fileURL(for: request)
                 try FileManager.default.createDirectory(
                     at: fileURL.deletingLastPathComponent(),
                     withIntermediateDirectories: true
@@ -388,28 +497,68 @@ actor SummaryMapSnapshotStore {
                 remember(data, forKey: key)
                 inFlight[key] = nil
                 try trimDiskIfNeeded()
-            } else if inFlight[key]?.id == token {
-                inFlight[key] = nil
             }
             return data
         } catch {
-            if inFlight[key]?.id == token {
+            if !Task.isCancelled,
+               inFlight[key]?.id == pending.id {
                 inFlight[key] = nil
             }
             throw error
         }
     }
 
+    private func cancelWaiter(forKey key: String, token: UUID) {
+        guard var pending = inFlight[key], pending.id == token else {
+            return
+        }
+        pending.waiterCount -= 1
+        if pending.waiterCount <= 0 {
+            inFlight[key] = nil
+            pending.task.cancel()
+        } else {
+            inFlight[key] = pending
+        }
+    }
+
+    func cachedData(for request: SummaryMapSnapshotRequest) -> Data? {
+        let key = request.cacheKey
+        if var entry = memory[key] {
+            memoryClock &+= 1
+            entry.access = memoryClock
+            memory[key] = entry
+            return entry.data
+        }
+
+        let fileURL = fileURL(for: request)
+        guard let data = try? Data(contentsOf: fileURL), !data.isEmpty else {
+            return nil
+        }
+        try? FileManager.default.setAttributes(
+            [.modificationDate: Date()],
+            ofItemAtPath: fileURL.path
+        )
+        remember(data, forKey: key)
+        return data
+    }
+
     func prewarm(
         _ requests: [SummaryMapSnapshotRequest],
-        retainDecodedImages: Bool = false
+        retainDecodedImages: Bool = false,
+        rendersMissingSnapshots: Bool = true
     ) async {
         for request in requests {
             guard !Task.isCancelled else { return }
-            guard let data = try? await data(for: request) else { continue }
+            let snapshotData: Data?
+            if rendersMissingSnapshots {
+                snapshotData = try? await data(for: request)
+            } else {
+                snapshotData = cachedData(for: request)
+            }
+            guard let snapshotData else { continue }
             if retainDecodedImages {
-                await SummaryMapDecodedImageCache.insert(
-                    data: data,
+                _ = await SummaryMapDecodedImageCache.image(
+                    data: snapshotData,
                     for: request
                 )
             }
@@ -430,13 +579,6 @@ actor SummaryMapSnapshotStore {
             path: request.contentHash,
             directoryHint: .isDirectory
         )
-        let children = try fileManager.contentsOfDirectory(
-            at: slotDirectory,
-            includingPropertiesForKeys: nil
-        )
-        for child in children where child.lastPathComponent != request.contentHash {
-            try? fileManager.removeItem(at: child)
-        }
         try fileManager.createDirectory(
             at: contentDirectory,
             withIntermediateDirectories: true
@@ -495,22 +637,45 @@ actor SummaryMapSnapshotStore {
     }
 }
 
-@MainActor
-enum SummaryMapDecodedImageCache {
-    static func image(for request: SummaryMapSnapshotRequest) -> UIImage? {
-        SummaryImageMemoryCache.shared.image(forKey: key(for: request))
+nonisolated enum SummaryMapDecodedImageCache {
+    private final class Storage: @unchecked Sendable {
+        let images = NSCache<NSString, UIImage>()
+
+        init() {
+            images.countLimit = 96
+            images.totalCostLimit = 64 * 1_024 * 1_024
+        }
     }
 
-    static func insert(data: Data, for request: SummaryMapSnapshotRequest) {
-        guard let image = UIImage(
+    private static let storage = Storage()
+
+    static func cachedImage(
+        for request: SummaryMapSnapshotRequest
+    ) -> UIImage? {
+        storage.images.object(forKey: key(for: request) as NSString)
+    }
+
+    static func image(
+        data: Data,
+        for request: SummaryMapSnapshotRequest
+    ) async -> UIImage? {
+        if let cached = cachedImage(for: request) { return cached }
+        guard let encoded = UIImage(
             data: data,
             scale: CGFloat(request.variant.scale)
-        ) else { return }
-        SummaryImageMemoryCache.shared.insert(
-            image,
-            forKey: key(for: request),
-            cost: request.variant.pixelWidth * request.variant.pixelHeight * 4
+        ) else { return nil }
+        // Map snapshots are already rendered at their final pixel size.
+        // Preparing, rather than resizing, moves JPEG decompression away
+        // from SwiftUI's frame commit and leaves a display-ready backing.
+        let decoded = await encoded.byPreparingForDisplay() ?? encoded
+        guard !Task.isCancelled else { return nil }
+        storage.images.setObject(
+            decoded,
+            forKey: key(for: request) as NSString,
+            cost: request.variant.pixelWidth
+                * request.variant.pixelHeight * 4
         )
+        return decoded
     }
 
     private static func key(for request: SummaryMapSnapshotRequest) -> String {
@@ -613,6 +778,7 @@ private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
 
     private let request: SummaryMapSnapshotRequest
     private let mapView: MKMapView
+    private let usesHybridStyle: Bool
     private var hostWindow: UIWindow?
     private var overlayStyles: [ObjectIdentifier: OverlayStyle] = [:]
     private var continuation: CheckedContinuation<CGImage, any Error>?
@@ -620,6 +786,22 @@ private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
     private var finishTask: Task<Void, Never>?
     private var mapIsFullyRendered = false
     private var didFinish = false
+
+    private var allOverviewCoordinates: [CLLocationCoordinate2D] {
+        request.content.paths.flatMap {
+            $0.coordinates.map(\.mapCoordinate)
+        } + request.content.markers.map(\.displayCoordinate)
+    }
+
+    private var cameraCoordinates: [CLLocationCoordinate2D] {
+        request.content.paths.flatMap { path -> [CLLocationCoordinate2D] in
+            guard let first = path.coordinates.first?.mapCoordinate,
+                  let last = path.coordinates.last?.mapCoordinate else {
+                return []
+            }
+            return [first, last]
+        } + request.content.markers.map(\.displayCoordinate)
+    }
 
     private var edgeBleed: CGFloat {
         1 / max(request.variant.scale, 1)
@@ -641,6 +823,17 @@ private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
 
     init(request: SummaryMapSnapshotRequest) {
         self.request = request
+        let styleCoordinates = request.content.paths.flatMap {
+            path -> [CLLocationCoordinate2D] in
+            guard let first = path.coordinates.first?.mapCoordinate,
+                  let last = path.coordinates.last?.mapCoordinate else {
+                return []
+            }
+            return [first, last]
+        } + request.content.markers.map(\.displayCoordinate)
+        usesHybridStyle = JournalMapDisplayStylePolicy.usesHybridStyle(
+            for: styleCoordinates
+        )
         let edgeBleed = 1 / max(request.variant.scale, 1)
         let pointSize = request.variant.pointSize
         mapView = MKMapView(
@@ -656,13 +849,26 @@ private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
     }
 
     func render() async throws -> CGImage {
-        try await withCheckedThrowingContinuation { continuation in
-            self.continuation = continuation
-            configureMap()
-            timeoutTask = Task { [self] in
-                try? await Task.sleep(for: .seconds(20))
-                guard !Task.isCancelled else { return }
-                failRendering(with: URLError(.timedOut))
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                self.continuation = continuation
+                configureMap()
+                timeoutTask = Task { [self] in
+                    try? await Task.sleep(
+                        for: usesHybridStyle ? .seconds(3) : .seconds(20)
+                    )
+                    guard !Task.isCancelled else { return }
+                    if usesHybridStyle, hostWindow != nil {
+                        prepareMarkerViewsForCapture()
+                        finishRendering()
+                    } else {
+                        failRendering(with: URLError(.timedOut))
+                    }
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.failRendering(with: CancellationError())
             }
         }
     }
@@ -725,11 +931,16 @@ private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
                       guard let annotation = annotation as? Annotation else {
                           return false
                       }
-                      return annotation.coordinate.latitude
+                      let matches = annotation.coordinate.latitude
                           == descriptor.displayCoordinate.latitude
                           && annotation.coordinate.longitude
                           == descriptor.displayCoordinate.longitude
-                          && mapView.view(for: annotation)?.window != nil
+                      guard matches else { return false }
+                      if usesHybridStyle,
+                         !isProjectedOnScreen(annotation.coordinate) {
+                          return true
+                      }
+                      return mapView.view(for: annotation)?.window != nil
                   }
               }) else { return }
 
@@ -737,11 +948,25 @@ private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
         // views and the fully-rendered map callback are sufficient readiness
         // signals for the cached capture.
         finishTask = Task { @MainActor [weak self] in
-            await Task.yield()
+            if self?.usesHybridStyle == true {
+                // Hybrid tiles can report fully rendered before MapKit's
+                // attribution and globe projection complete their layout.
+                try? await Task.sleep(for: .milliseconds(120))
+            } else {
+                await Task.yield()
+            }
             guard let self, !Task.isCancelled else { return }
             prepareMarkerViewsForCapture()
             finishRendering()
         }
+    }
+
+    private func isProjectedOnScreen(
+        _ coordinate: CLLocationCoordinate2D
+    ) -> Bool {
+        let point = mapView.convert(coordinate, toPointTo: mapView)
+        guard point.x.isFinite, point.y.isFinite else { return false }
+        return mapView.bounds.insetBy(dx: -40, dy: -40).contains(point)
     }
 
     private func prepareMarkerViewsForCapture() {
@@ -783,7 +1008,15 @@ private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
 
     private func configureMap() {
         mapView.delegate = self
-        mapView.mapType = .standard
+        if usesHybridStyle {
+            mapView.preferredConfiguration = MKHybridMapConfiguration(
+                elevationStyle: .realistic
+            )
+        } else {
+            mapView.preferredConfiguration = MKStandardMapConfiguration(
+                elevationStyle: .flat
+            )
+        }
         mapView.overrideUserInterfaceStyle = request.variant.appearance == .dark
             ? .dark
             : .light
@@ -866,10 +1099,9 @@ private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
                 animated: false
             )
         case .overview:
-            let coordinates = request.content.markers.map(\.displayCoordinate)
-                + request.content.paths.flatMap {
-                    $0.coordinates.map(\.mapCoordinate)
-                }
+            let coordinates = usesHybridStyle
+                ? cameraCoordinates
+                : allOverviewCoordinates
             guard coordinates.count > 1 else {
                 if let coordinate = coordinates.first {
                     mapView.setRegion(
@@ -877,6 +1109,26 @@ private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
                             center: coordinate,
                             latitudinalMeters: 1_200,
                             longitudinalMeters: 1_200
+                        ),
+                        animated: false
+                    )
+                }
+                return
+            }
+            if usesHybridStyle {
+                if let region = SummaryMapOverviewCamera.region(
+                    for: coordinates,
+                    size: request.variant.pointSize
+                ) {
+                    mapView.setRegion(region, animated: false)
+                    let fittedCamera = mapView.camera
+                    mapView.setCamera(
+                        MKMapCamera(
+                            lookingAtCenter: fittedCamera.centerCoordinate,
+                            fromDistance: fittedCamera
+                                .centerCoordinateDistance * 2.2,
+                            pitch: 0,
+                            heading: fittedCamera.heading
                         ),
                         animated: false
                     )
@@ -891,13 +1143,13 @@ private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
                     size: MKMapSize(width: 1, height: 1)
                 ))
             }
-            let latitude = coordinates.map(\.latitude).reduce(0, +)
-                / Double(coordinates.count)
-            let minimumPadding = 450 * MKMapPointsPerMeterAtLatitude(latitude)
             mapView.setVisibleMapRect(
-                rect.insetBy(
-                    dx: -max(rect.width * 0.22, minimumPadding),
-                    dy: -max(rect.height * 0.22, minimumPadding)
+                rect,
+                edgePadding: UIEdgeInsets(
+                    top: max(18, renderingSize.height * 0.12),
+                    left: max(18, renderingSize.width * 0.12),
+                    bottom: max(18, renderingSize.height * 0.12),
+                    right: max(18, renderingSize.width * 0.12)
                 ),
                 animated: false
             )
@@ -951,6 +1203,7 @@ private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
     private func failRendering(with error: any Error) {
         guard !didFinish, let continuation else { return }
         didFinish = true
+        timeoutTask?.cancel()
         finishTask?.cancel()
         mapView.delegate = nil
         hostWindow?.isHidden = true
@@ -971,19 +1224,17 @@ extension HomeFeedModel {
         guard contentWidth > 1 else { return }
 
         let newestFirst = Array(rows.reversed())
-        let retainedDayCount = min(newestFirst.count, 60)
+        let retainedDayCount = min(newestFirst.count, 12)
         let recentPhotos = newestFirst.prefix(retainedDayCount).flatMap {
             $0.summary.photos.prefix(4)
         }
-        let periodPhotos = (monthRows + yearRows).flatMap {
-            $0.summary.photos.prefix(4)
-        }
-        async let photoPrewarm: Void = SummaryPhotoThumbnailService.prewarm(
-            recentPhotos + periodPhotos
+        async let recentPhotoPrewarm: Void = SummaryPhotoThumbnailService.prewarm(
+            recentPhotos
         )
 
-        // Keep a generous recent window decoded so ordinary day browsing does
-        // not flash placeholders as lazy rows are recreated.
+        // Keep the immediately browsable window decoded. Older snapshots stay
+        // on disk and are decoded on demand; eagerly decoding the whole journal
+        // makes the first scroll interaction contend with MapKit and Photos.
         for row in newestFirst.prefix(retainedDayCount) {
             guard !Task.isCancelled else { return }
             await row.loadMapEnrichment()
@@ -995,13 +1246,20 @@ extension HomeFeedModel {
             )
             await SummaryMapSnapshotStore.shared.prewarm(
                 requests,
-                retainDecodedImages: true
+                retainDecodedImages: true,
+                rendersMissingSnapshots: true
             )
         }
 
-        // There are comparatively few month and year maps, so retain all of
-        // them before spending time on older day snapshots.
-        for row in (monthRows + yearRows).reversed() {
+        await loadPeriodPhotoMetadata()
+        let retainedPeriods = Array(monthRows.suffix(12))
+            + Array(yearRows.suffix(3))
+        let periodPhotos = retainedPeriods.flatMap {
+            $0.summary.photos.prefix(4)
+        }
+        async let periodPhotoPrewarm: Void = SummaryPhotoThumbnailService
+            .prewarm(periodPhotos)
+        for row in retainedPeriods.reversed() {
             guard !Task.isCancelled else { return }
             await row.loadEnrichment()
             let requests = periodSnapshotRequests(
@@ -1012,25 +1270,12 @@ extension HomeFeedModel {
             )
             await SummaryMapSnapshotStore.shared.prewarm(
                 requests,
-                retainDecodedImages: true
+                retainDecodedImages: true,
+                rendersMissingSnapshots: true
             )
         }
-
-
-        // Finish the retroactive disk cache for older days without displacing
-        // the recent decoded working set.
-        for row in newestFirst.dropFirst(retainedDayCount) {
-            guard !Task.isCancelled else { return }
-            await row.loadMapEnrichment()
-            let requests = daySnapshotRequests(
-                for: row,
-                contentWidth: contentWidth,
-                displayScale: displayScale,
-                appearance: appearance
-            )
-            await SummaryMapSnapshotStore.shared.prewarm(requests)
-        }
-        await photoPrewarm
+        await recentPhotoPrewarm
+        await periodPhotoPrewarm
     }
 
     private func daySnapshotRequests(

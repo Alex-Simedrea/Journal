@@ -21,6 +21,8 @@ struct TransitDetailSheet: View {
             Form {
                 if let details = entry.transitDetails {
                     TransitRouteMapSection(
+                        transitType: details.type,
+                        recordedRoute: details.recordedRoute,
                         origin: details.originLocation
                             ?? details.originPlace?.location
                             ?? details.originCandidates.first?.location,

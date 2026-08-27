@@ -67,16 +67,8 @@ private struct EntryDetailMapContent: View {
                     EntryDetailMapMarker(endpoint: endpoint)
                 }
             case .transit:
-                if let origin = transitOrigin,
-                    let destination = transitDestination
-                {
-                    MapPolyline(
-                        coordinates: TimelineOverviewData.curvedCoordinates(
-                            from: origin.location.coordinate,
-                            to: destination.location.coordinate,
-                            bendPositive: true
-                        )
-                    )
+                if transitRouteCoordinates.count > 1 {
+                    MapPolyline(coordinates: transitRouteCoordinates)
                     .stroke(
                         TransitPresentationCatalog.presentation(
                             for: entry.transitDetails?.type ?? "Transit"
@@ -128,7 +120,11 @@ private struct EntryDetailMapContent: View {
                 EmptyMapContent()
             }
         }
-        .mapStyle(.standard)
+        .mapStyle(
+            JournalMapDisplayStylePolicy.mapStyle(
+                for: markerCoordinates
+            )
+        )
         .allowsHitTesting(false)
     }
 
@@ -150,6 +146,24 @@ private struct EntryDetailMapContent: View {
                 )
             )
         )
+    }
+
+    private var markerCoordinates: [CLLocationCoordinate2D] {
+        switch entry.kind {
+        case .placeVisit:
+            return [visitEndpoint].compactMap { $0?.location.coordinate }
+        case .transit:
+            return [transitOrigin, transitDestination]
+                .compactMap { $0?.location.coordinate }
+        case .workout:
+            if entry.workoutDetails?.movementKind == .moving {
+                return [workoutOrigin, workoutDestination]
+                    .compactMap { $0?.location.coordinate }
+            }
+            return [workoutPlace].compactMap { $0?.location.coordinate }
+        case .wakeUp:
+            return []
+        }
     }
 
     private var visitEndpoint: EntryDetailMapEndpoint? {
@@ -185,6 +199,15 @@ private struct EntryDetailMapContent: View {
             accuracyRadiusMeters:
                 details.originPlace?.accuracyRadiusMeters ?? 0,
             radiusCenterCoordinate: details.originPlace?.location.coordinate
+        )
+    }
+
+    private var transitRouteCoordinates: [CLLocationCoordinate2D] {
+        TransitRouteGeometry.coordinates(
+            recordedRoute: entry.transitDetails?.recordedRoute ?? [],
+            origin: transitOrigin?.location.coordinate,
+            destination: transitDestination?.location.coordinate,
+            bendPositive: entry.id.uuid.0 % 2 == 0
         )
     }
 

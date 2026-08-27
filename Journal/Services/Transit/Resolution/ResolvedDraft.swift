@@ -6,7 +6,7 @@
 import CoreLocation
 import Foundation
 
-struct ResolvedTransitDraft {
+nonisolated struct ResolvedTransitDraft {
     var transitType: String
     var originPlace: Place?
     var originLocation: Location?

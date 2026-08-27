@@ -5,7 +5,7 @@
 
 import Foundation
 
-struct EntryWeather: Codable, Hashable, Sendable {
+nonisolated struct EntryWeather: Codable, Hashable, Sendable {
     var condition: String
     var symbolName: String
     var temperatureCelsius: Double
@@ -20,7 +20,7 @@ struct EntryWeather: Codable, Hashable, Sendable {
 /// The last successful daily WeatherKit result. Entry weather remains the
 /// point-in-time observation for the entry itself; this is the durable cache
 /// used by day summaries while current and future forecasts refresh.
-struct PersistedDayWeather: Codable, Hashable, Sendable {
+nonisolated struct PersistedDayWeather: Codable, Hashable, Sendable {
     var year: Int
     var month: Int
     var day: Int

@@ -13,7 +13,7 @@ struct DaySummaryCardContent: View {
     }
 
     var body: some View {
-        let recipe = DaySummaryLayoutRecipe.make(for: model.summary)
+        let recipe = model.layoutRecipe
 
         GeometryReader { proxy in
             DaySummaryTileCanvas(
@@ -84,7 +84,7 @@ private struct DaySummaryTile: View {
             case .photos:
                 DaySummaryPhotoTile(
                     references: model.summary.photos,
-                    loadsContent: loadsDeferredContent
+                    loadsContent: true
                 )
             case .movement:
                 if let movement = model.summary.movement {
@@ -244,6 +244,11 @@ private struct DaySummaryPhotoTile: View {
                         )
                 }
             }
+        }
+        .task(id: references.map(\.assetLocalIdentifier)) {
+            await SummaryPhotoThumbnailService.prewarm(
+                Array(references.prefix(4))
+            )
         }
     }
 }
@@ -604,23 +609,28 @@ struct SummaryMapSnapshotView: View {
             }
             .task(id: taskID(for: request)) {
                 guard let request else { return }
-                if let cached = SummaryMapDecodedImageCache.image(
+                if let cached = SummaryMapDecodedImageCache.cachedImage(
                     for: request
                 ) {
                     image = cached
                     return
                 }
-                guard loadsContent else { return }
                 do {
-                    let data = try await SummaryMapSnapshotStore.shared.data(
-                        for: request
-                    )
+                    let cachedData = await SummaryMapSnapshotStore.shared
+                        .cachedData(for: request)
+                    let data: Data? = if let cachedData {
+                        cachedData
+                    } else if loadsContent {
+                        try await SummaryMapSnapshotStore.shared.data(
+                            for: request
+                        )
+                    } else {
+                        nil
+                    }
+                    guard let data else { return }
                     try Task.checkCancellation()
-                    SummaryMapDecodedImageCache.insert(
+                    image = await SummaryMapDecodedImageCache.image(
                         data: data,
-                        for: request
-                    )
-                    image = SummaryMapDecodedImageCache.image(
                         for: request
                     )
                 } catch is CancellationError {

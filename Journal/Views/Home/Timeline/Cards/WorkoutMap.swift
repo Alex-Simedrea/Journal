@@ -109,7 +109,12 @@ struct TimelineWorkoutMapContent: View {
                     )
                 }
             }
-            .mapStyle(.standard)
+            .mapStyle(
+                JournalMapDisplayStylePolicy.mapStyle(
+                    for: [workoutOrigin, workoutDestination]
+                        .compactMap { $0?.coordinate }
+                )
+            )
             .onChange(of: points, initial: true) { _, points in
                 position = routePosition(points: points)
             }

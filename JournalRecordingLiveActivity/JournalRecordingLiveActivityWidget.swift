@@ -8,11 +8,11 @@ struct JournalRecordingLiveActivityWidget: Widget {
         ActivityConfiguration(
             for: JournalRecordingActivityAttributes.self
         ) { context in
-            JournalRecordingLockScreenView(
+            JournalRecordingActivityContent(
                 startedAt: context.attributes.startedAt,
                 state: context.state
             )
-            .activityBackgroundTint(.clear)
+            .activityBackgroundTint(nil)
             .activitySystemActionForegroundColor(.orange)
             .widgetURL(URL(string: "attractivestar-journal://recording"))
         } dynamicIsland: { context in
@@ -48,6 +48,26 @@ struct JournalRecordingLiveActivityWidget: Widget {
             }
             .widgetURL(URL(string: "attractivestar-journal://recording"))
         }
+        .supplementalActivityFamilies([.small])
+    }
+}
+
+private struct JournalRecordingActivityContent: View {
+    @Environment(\.activityFamily) private var activityFamily
+
+    let startedAt: Date
+    let state: JournalRecordingActivityAttributes.ContentState
+
+    var body: some View {
+        switch activityFamily {
+        case .small:
+            JournalRecordingWatchView(startedAt: startedAt, state: state)
+                .padding(.horizontal, 8)
+        case .medium:
+            JournalRecordingLockScreenView(startedAt: startedAt, state: state)
+        @unknown default:
+            JournalRecordingLockScreenView(startedAt: startedAt, state: state)
+        }
     }
 }
 
@@ -72,6 +92,189 @@ private struct JournalRecordingLockScreenView: View {
             }
         }
         .padding()
+    }
+}
+
+private struct JournalRecordingWatchView: View {
+    let startedAt: Date
+    let state: JournalRecordingActivityAttributes.ContentState
+
+    var body: some View {
+        switch state.phase {
+        case .recording:
+            JournalRecordingWatchActiveView(
+                startedAt: startedAt,
+                distanceMeters: state.distanceMeters,
+                movementDescription: state.movementDescription,
+                needsForegroundLaunch: state.needsForegroundLaunch
+            )
+        case .finalizing:
+            JournalRecordingWatchSavingView()
+        case .completed:
+            JournalRecordingWatchSummaryView(
+                startedAt: startedAt,
+                endedAt: state.endedAt,
+                title: state.summaryTitle,
+                detail: state.summaryDetail,
+                distanceMeters: state.distanceMeters,
+                showsDistance: state.showsDistance
+            )
+        }
+    }
+}
+
+private struct JournalRecordingWatchActiveView: View {
+    let startedAt: Date
+    let distanceMeters: Double
+    let movementDescription: String
+    let needsForegroundLaunch: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(startedAt, style: .timer)
+                    .font(.title2.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.primary)
+                JournalRecordingWatchMetricsView(
+                    distanceMeters: distanceMeters,
+                    movementDescription: movementDescription,
+                    needsForegroundLaunch: needsForegroundLaunch
+                )
+            }
+            Spacer(minLength: 2)
+            JournalRecordingStopButton(diameter: 42)
+        }
+    }
+}
+
+private struct JournalRecordingWatchMetricsView: View {
+    let distanceMeters: Double
+    let movementDescription: String
+    let needsForegroundLaunch: Bool
+
+    var body: some View {
+        if needsForegroundLaunch {
+            Label("Open iPhone to track", systemImage: "iphone")
+                .font(.caption2)
+                .foregroundStyle(.yellow)
+                .lineLimit(1)
+        } else {
+            HStack(spacing: 3) {
+                Text(
+                    Measurement(
+                        value: distanceMeters,
+                        unit: UnitLength.meters
+                    ),
+                    format: .measurement(
+                        width: .abbreviated,
+                        usage: .road
+                    )
+                )
+                Text("•")
+                Text(movementDescription)
+            }
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+    }
+}
+
+private struct JournalRecordingWatchSavingView: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "hourglass")
+                .font(.headline)
+                .foregroundStyle(.orange)
+                .frame(width: 34, height: 34)
+                .background(.orange.opacity(0.16), in: Circle())
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Saving Recording…")
+                    .font(.headline)
+                    .lineLimit(1)
+                Text("Creating your journal entry")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+private struct JournalRecordingWatchSummaryView: View {
+    let startedAt: Date
+    let endedAt: Date?
+    let title: String?
+    let detail: String?
+    let distanceMeters: Double
+    let showsDistance: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.title3)
+                .foregroundStyle(.green)
+            VStack(alignment: .leading, spacing: 1) {
+                if let title {
+                    Text(title)
+                        .font(.headline)
+                        .lineLimit(1)
+                } else {
+                    Text("Recording Saved")
+                        .font(.headline)
+                        .lineLimit(1)
+                }
+                if let detail {
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                JournalRecordingWatchSummaryMetadata(
+                    startedAt: startedAt,
+                    endedAt: endedAt,
+                    distanceMeters: distanceMeters,
+                    showsDistance: showsDistance
+                )
+            }
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+private struct JournalRecordingWatchSummaryMetadata: View {
+    let startedAt: Date
+    let endedAt: Date?
+    let distanceMeters: Double
+    let showsDistance: Bool
+
+    var body: some View {
+        HStack(spacing: 3) {
+            if let endedAt {
+                Text(startedAt, format: .dateTime.hour().minute())
+                Text("–")
+                Text(endedAt, format: .dateTime.hour().minute())
+            }
+            if endedAt != nil, showsDistance {
+                Text("•")
+            }
+            if showsDistance {
+                Text(
+                    Measurement(
+                        value: distanceMeters,
+                        unit: UnitLength.meters
+                    ),
+                    format: .measurement(
+                        width: .abbreviated,
+                        usage: .road
+                    )
+                )
+            }
+        }
+        .font(.caption2.monospacedDigit())
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
     }
 }
 
@@ -369,6 +572,48 @@ private struct JournalRecordingCompactIcon: View {
                 showsDistance: true
             )
         }
+    }
+
+    private struct JournalRecordingWatchPreviewSurface: View {
+        let state: JournalRecordingActivityAttributes.ContentState
+
+        var body: some View {
+            JournalRecordingWatchView(
+                startedAt: JournalRecordingActivityAttributes.preview.startedAt,
+                state: state
+            )
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background {
+                Color.clear
+                    .glassEffect(
+                        .regular.tint(.black.opacity(0.42)),
+                        in: ContainerRelativeShape()
+                    )
+            }
+            .preferredColorScheme(.dark)
+        }
+    }
+
+    #Preview(
+        "Apple Watch · Recording",
+        traits: .fixedLayout(width: 180, height: 82)
+    ) {
+        JournalRecordingWatchPreviewSurface(state: .recordingPreview)
+    }
+
+    #Preview(
+        "Apple Watch · Saving",
+        traits: .fixedLayout(width: 180, height: 82)
+    ) {
+        JournalRecordingWatchPreviewSurface(state: .savingPreview)
+    }
+
+    #Preview(
+        "Apple Watch · Saved",
+        traits: .fixedLayout(width: 180, height: 82)
+    ) {
+        JournalRecordingWatchPreviewSurface(state: .transitPreview)
     }
 
     #Preview(

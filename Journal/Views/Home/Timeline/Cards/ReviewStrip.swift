@@ -8,8 +8,17 @@ struct TimelineUnmatchedReviewStrip: View {
     private var reviews: [TimelineReviewSnapshot] {
         let mapped: Set<TimelineReviewTarget> =
             switch occurrence.kind {
-            case .transit: [.transitType, .origin, .destination, .time]
-            case .placeVisit: [.place, .people, .time]
+            case .transit:
+                [
+                    .entryKind,
+                    .transitType,
+                    .origin,
+                    .destination,
+                    .time,
+                    .people,
+                ]
+            case .placeVisit:
+                [.entryKind, .place, .people, .time]
             case .workout: [.place, .origin, .destination]
             case .wakeUp: []
             }

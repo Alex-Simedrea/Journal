@@ -56,31 +56,16 @@ enum SummaryPhotoThumbnailService {
     }
 
     static func prewarm(_ references: [PhotoReference]) async {
-        let unique = Array(Dictionary(
-            references.map { ($0.assetLocalIdentifier, $0) },
-            uniquingKeysWith: { first, _ in first }
-        ).values)
-        await withTaskGroup(of: Void.self) { group in
-            var iterator = unique.lazy.filter {
-                cachedImage(for: $0) == nil
-            }.makeIterator()
-            for _ in 0..<8 {
-                guard let reference = iterator.next() else { break }
-                group.addTask {
-                    _ = await SummaryPhotoThumbnailService.image(
-                        for: reference
-                    )
-                }
-            }
-            while await group.next() != nil {
-                guard let reference = iterator.next() else { continue }
-                group.addTask {
-                    _ = await SummaryPhotoThumbnailService.image(
-                        for: reference
-                    )
-                }
-            }
-        }
+        let identifiers = Array(Set(
+            references.map(\.assetLocalIdentifier)
+        ))
+        PhotoLibraryService.preheatImages(
+            for: identifiers,
+            targetSize: CGSize(
+                width: pixelDimension,
+                height: pixelDimension
+            )
+        )
     }
 
     private static func key(for reference: PhotoReference) -> String {

@@ -43,8 +43,7 @@ nonisolated struct MotionTransitDetection: Hashable, Sendable {
     let destinationPlaceID: UUID?
 }
 
-@MainActor
-enum AutomationCandidateStore {
+nonisolated enum AutomationCandidateStore {
     static func upsertVisit(
         _ visit: VisitDetectionSnapshot,
         in modelContext: ModelContext
@@ -93,6 +92,25 @@ enum AutomationCandidateStore {
             }
         )
         if let existing = try modelContext.fetch(descriptor).first {
+            guard existing.status == .pending else { return existing }
+            existing.startTime = detection.startTime
+            existing.endTime = detection.endTime
+            existing.timeZoneIdentifier = detection.originLocation
+                .timeZoneIdentifier ?? existing.timeZoneIdentifier
+            existing.motionKind = detection.kind
+            existing.motionConfidenceRawValue = detection.confidenceRawValue
+            if detection.originPlaceID != nil || existing.originPlaceID == nil {
+                existing.originLocation = detection.originLocation
+            }
+            existing.originPlaceID = detection.originPlaceID
+                ?? existing.originPlaceID
+            if detection.destinationPlaceID != nil
+                || existing.destinationPlaceID == nil {
+                existing.destinationLocation = detection.destinationLocation
+            }
+            existing.destinationPlaceID = detection.destinationPlaceID
+                ?? existing.destinationPlaceID
+            existing.updatedAt = .now
             return existing
         }
 
@@ -161,6 +179,60 @@ enum AutomationCandidateStore {
             in: modelContext
         ) else { return }
         try dismiss(candidate, in: modelContext)
+    }
+
+    @discardableResult
+    static func acceptMaterializedTransit(
+        candidateID: UUID,
+        entryID: UUID,
+        in modelContext: ModelContext
+    ) throws -> UUID? {
+        guard let candidate = try candidate(
+            withID: candidateID,
+            in: modelContext
+        ), candidate.status == .pending,
+           candidate.kind == .transit else {
+            return nil
+        }
+
+        let requestedEntry = try modelContext.fetch(
+            FetchDescriptor<LogEntry>(
+                predicate: #Predicate { $0.id == entryID }
+            )
+        ).first
+        let entry = try (
+            requestedEntry ?? modelContext.fetch(
+                FetchDescriptor<LogEntry>(
+                    predicate: #Predicate {
+                        $0.automationCandidateID == candidateID
+                    }
+                )
+            ).first
+        )
+        guard let entry,
+              entry.kind == .transit,
+              entry.id == candidateID
+                || entry.automationCandidateID == candidateID else {
+            return nil
+        }
+
+        entry.automationCandidateID = candidateID
+        entry.needsReview = false
+        entry.entryKindReviewReason = nil
+        entry.transitDetails?.fieldReviews = []
+        markAccepted(candidate, entryID: entry.id)
+
+        do {
+            try modelContext.save()
+            NotificationCenter.default.post(
+                name: .automationCandidatesDidChange,
+                object: nil
+            )
+            return entry.id
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
     }
 
     static func markAccepted(

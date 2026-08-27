@@ -86,6 +86,7 @@ private enum SummaryRouteGeometry {
 @Observable
 final class DaySummaryRowModel: Identifiable {
     let summary: DaySummary
+    let layoutRecipe: DaySummaryLayoutRecipe
     private(set) var overviewData: TimelineOverviewData
     private(set) var weatherState: DayWeatherLoadState = .idle
     private(set) var enrichmentRevision = 0
@@ -94,7 +95,10 @@ final class DaySummaryRowModel: Identifiable {
     private var didLoadRoutes = false
 
     @ObservationIgnored
-    private var persistWeather: ((DayWeatherRequest, DayWeatherSummary) -> Void)?
+    private var persistWeather: (@Sendable (
+        DayWeatherRequest,
+        DayWeatherSummary
+    ) async -> Void)?
 
     @ObservationIgnored
     private var needsWeatherRefresh: Bool
@@ -105,9 +109,13 @@ final class DaySummaryRowModel: Identifiable {
         summary: DaySummary,
         weatherState: DayWeatherLoadState = .idle,
         needsWeatherRefresh: Bool? = nil,
-        persistWeather: ((DayWeatherRequest, DayWeatherSummary) -> Void)? = nil
+        persistWeather: (@Sendable (
+            DayWeatherRequest,
+            DayWeatherSummary
+        ) async -> Void)? = nil
     ) {
         self.summary = summary
+        layoutRecipe = DaySummaryLayoutRecipe.make(for: summary)
         overviewData = summary.overviewData
         self.weatherState = weatherState
         self.needsWeatherRefresh = needsWeatherRefresh
@@ -118,7 +126,10 @@ final class DaySummaryRowModel: Identifiable {
     func prepareForReload(
         persistedWeather: DayWeatherSummary?,
         weatherNeedsRefresh: Bool,
-        persistWeather: ((DayWeatherRequest, DayWeatherSummary) -> Void)?
+        persistWeather: (@Sendable (
+            DayWeatherRequest,
+            DayWeatherSummary
+        ) async -> Void)?
     ) {
         self.persistWeather = persistWeather
         guard weatherState != .loading else { return }
@@ -175,7 +186,7 @@ final class DaySummaryRowModel: Identifiable {
                 return
             }
             weatherState = .loaded(weather)
-            persistWeather?(request, weather)
+            await persistWeather?(request, weather)
         } catch is CancellationError {
             weatherState = cachedWeather.map(DayWeatherLoadState.loaded)
                 ?? .idle
@@ -235,41 +246,61 @@ final class DaySummaryRowModel: Identifiable {
 @MainActor
 @Observable
 final class HomeFeedModel {
+    private struct MapSlotSource: Equatable {
+        let id: String
+        let data: TimelineOverviewData
+    }
+
     private(set) var rows: [DaySummaryRowModel] = []
     private(set) var monthRows: [PeriodSummaryRowModel] = []
     private(set) var yearRows: [PeriodSummaryRowModel] = []
     private(set) var errorMessage: String?
     private(set) var mapSnapshotRevision = 0
 
+    @ObservationIgnored
+    private var mapSlotSources: [MapSlotSource] = []
+
+    @ObservationIgnored
+    private var latestSnapshots: [TimelineEntrySnapshot] = []
+
+    @ObservationIgnored
+    private var latestDaySummaries: [DaySummary] = []
+
+    @ObservationIgnored
+    private var loadedPhotoMetadataIdentifiers: Set<String> = []
+
+    @ObservationIgnored
+    private var periodPhotoMetadata: [String: PeriodPhotoMetadata] = [:]
+
+    @ObservationIgnored
+    private var periodProjectionRevision = 0
+
+    @ObservationIgnored
+    private var periodProjectionTask: Task<Void, Never>?
+
     var days: [TimelineDayKey] { rows.map(\.id) }
 
-    func reload(in modelContext: ModelContext) {
+    func reload(in modelContext: ModelContext) async {
         do {
-            let entries = try modelContext.fetch(
-                FetchDescriptor<LogEntry>(
-                    sortBy: [SortDescriptor(\LogEntry.createdAt)]
-                )
+            let store = await JournalPersistenceActors.shared.homeFeed(
+                for: JournalModelContainerReference(modelContext.container)
             )
-            let snapshots = entries.map(TimelineEntrySnapshot.init)
-            let summaries = DaySummaryProjector.makeSummaries(entries: snapshots)
-            let photoMetadata = PeriodPhotoMetadataService.metadata(
-                for: snapshots.flatMap(\.photoReferences)
-            )
+            let projection = try await store.load()
+            guard !Task.isCancelled else { return }
+            let snapshots = projection.snapshots
+            let summaries = projection.daySummaries
+            latestSnapshots = snapshots
+            latestDaySummaries = summaries
             let existingRows = Dictionary(
                 uniqueKeysWithValues: rows.map { ($0.id, $0) }
             )
-            let entriesByID = Dictionary(
-                uniqueKeysWithValues: entries.map { ($0.id, $0) }
-            )
             rows = summaries.map { summary in
-                let persistedWeather = persistedWeather(
-                    for: summary,
-                    entriesByID: entriesByID
-                )
+                let persistedWeather = projection.weatherByDay[summary.day]
                 let persistence = weatherPersistence(
                     for: summary,
-                    entriesByID: entriesByID,
-                    modelContext: modelContext
+                    storageEntryID: projection
+                        .weatherStorageEntryByDay[summary.day],
+                    store: store
                 )
                 if let existing = existingRows[summary.day],
                    existing.summary == summary {
@@ -291,23 +322,15 @@ final class HomeFeedModel {
                     persistWeather: persistence
                 )
             }
-            monthRows = stablePeriodRows(
-                PeriodSummaryProjector.makeMonthSummaries(
-                    entries: snapshots,
-                    daySummaries: summaries,
-                    photoMetadata: photoMetadata
-                ),
-                existing: monthRows
+            updateMapSnapshotRevision(
+                days: summaries,
+                periods: (monthRows + yearRows).map(\.summary)
             )
-            yearRows = stablePeriodRows(
-                PeriodSummaryProjector.makeYearSummaries(
-                    entries: snapshots,
-                    daySummaries: summaries,
-                    photoMetadata: photoMetadata
-                ),
-                existing: yearRows
+            schedulePeriodProjection(
+                snapshots: snapshots,
+                daySummaries: summaries,
+                photoMetadata: periodPhotoMetadata
             )
-            mapSnapshotRevision &+= 1
             errorMessage = nil
         } catch {
             rows = []
@@ -329,6 +352,33 @@ final class HomeFeedModel {
         monthRows.compactMap(\.summary.monthKey).first { $0.year == year.year }
     }
 
+    func loadPeriodPhotoMetadata() async {
+        let references = latestSnapshots.flatMap(\.photoReferences)
+        let identifiers = Set(references.map(\.assetLocalIdentifier))
+        guard identifiers != loadedPhotoMetadataIdentifiers else {
+            await periodProjectionTask?.value
+            return
+        }
+
+        let metadata = await Task.detached(priority: .utility) {
+            PeriodPhotoMetadataService.metadata(for: references)
+        }.value
+        guard !Task.isCancelled,
+              identifiers == Set(
+                  latestSnapshots.flatMap(\.photoReferences)
+                      .map(\.assetLocalIdentifier)
+              ) else { return }
+
+        loadedPhotoMetadataIdentifiers = identifiers
+        periodPhotoMetadata = metadata
+        schedulePeriodProjection(
+            snapshots: latestSnapshots,
+            daySummaries: latestDaySummaries,
+            photoMetadata: metadata
+        )
+        await periodProjectionTask?.value
+    }
+
     private func stablePeriodRows(
         _ summaries: [PeriodSummary],
         existing: [PeriodSummaryRowModel]
@@ -344,46 +394,88 @@ final class HomeFeedModel {
         }
     }
 
-    private func persistedWeather(
-        for summary: DaySummary,
-        entriesByID: [UUID: LogEntry]
-    ) -> PersistedDayWeather? {
-        guard let request = summary.weatherRequest else { return nil }
-        for occurrence in summary.occurrences {
-            guard let entry = entriesByID[occurrence.entryID],
-                  let record = entry.dayWeatherRecords.first(where: {
-                      $0.matches(request)
-                  }) else {
-                continue
-            }
-            return record
+    private func schedulePeriodProjection(
+        snapshots: [TimelineEntrySnapshot],
+        daySummaries: [DaySummary],
+        photoMetadata: [String: PeriodPhotoMetadata]
+    ) {
+        periodProjectionRevision &+= 1
+        let revision = periodProjectionRevision
+        periodProjectionTask?.cancel()
+        periodProjectionTask = Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                (
+                    PeriodSummaryProjector.makeMonthSummaries(
+                        entries: snapshots,
+                        daySummaries: daySummaries,
+                        photoMetadata: photoMetadata
+                    ),
+                    PeriodSummaryProjector.makeYearSummaries(
+                        entries: snapshots,
+                        daySummaries: daySummaries,
+                        photoMetadata: photoMetadata
+                    )
+                )
+            }.value
+            guard let self, !Task.isCancelled,
+                  revision == periodProjectionRevision else { return }
+            monthRows = stablePeriodRows(result.0, existing: monthRows)
+            yearRows = stablePeriodRows(result.1, existing: yearRows)
+            updateMapSnapshotRevision(
+                days: daySummaries,
+                periods: result.0 + result.1
+            )
         }
-        return nil
+    }
+
+    private func updateMapSnapshotRevision(
+        days: [DaySummary],
+        periods: [PeriodSummary]
+    ) {
+        let sources = days.map {
+            MapSlotSource(id: "day-\($0.day.id)-overview", data: $0.overviewData)
+        } + periods.flatMap { summary in
+            var result = [
+                MapSlotSource(
+                    id: "period-\(summary.id.id)-overview",
+                    data: summary.overviewData
+                ),
+            ]
+            if let route = summary.frequentRoute {
+                result.append(MapSlotSource(
+                    id: "period-\(summary.id.id)-frequent-route",
+                    data: route.mapData
+                ))
+            }
+            if let journey = summary.longestJourney {
+                result.append(MapSlotSource(
+                    id: "period-\(summary.id.id)-longest-journey",
+                    data: journey.mapData
+                ))
+            }
+            return result
+        }
+        guard sources != mapSlotSources else { return }
+        mapSlotSources = sources
+        mapSnapshotRevision &+= 1
     }
 
     private func weatherPersistence(
         for summary: DaySummary,
-        entriesByID: [UUID: LogEntry],
-        modelContext: ModelContext
-    ) -> ((DayWeatherRequest, DayWeatherSummary) -> Void)? {
-        guard let storageEntry = summary.occurrences.lazy.compactMap({
-            entriesByID[$0.entryID]
-        }).first else {
+        storageEntryID: UUID?,
+        store: HomeFeedProjectionStore
+    ) -> (@Sendable (DayWeatherRequest, DayWeatherSummary) async -> Void)? {
+        guard summary.weatherRequest != nil,
+              let storageEntryID else {
             return nil
         }
         return { request, weather in
-            let record = PersistedDayWeather(
-                request: request,
-                summary: weather
-            )
-            storageEntry.dayWeatherRecords.removeAll {
-                $0.year == record.year
-                    && $0.month == record.month
-                    && $0.day == record.day
-            }
-            storageEntry.dayWeatherRecords.append(record)
             do {
-                try modelContext.save()
+                try await store.persistWeather(
+                    weather,
+                    request: request,
+                    entryID: storageEntryID
+                )
             } catch {
                 print("Could not persist daily weather: \(error)")
             }

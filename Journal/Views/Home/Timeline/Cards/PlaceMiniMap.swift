@@ -5,25 +5,40 @@ import SwiftUI
 struct TimelinePlaceMiniMap: View {
     let location: TimelineLocationSnapshot?
     let needsReview: Bool
+    let cameraNorthOffsetFraction: Double
+
+    init(
+        location: TimelineLocationSnapshot?,
+        needsReview: Bool,
+        cameraNorthOffsetFraction: Double = 0
+    ) {
+        self.location = location
+        self.needsReview = needsReview
+        self.cameraNorthOffsetFraction = max(
+            cameraNorthOffsetFraction,
+            0
+        )
+    }
 
     var body: some View {
         ZStack {
             if let location, location.hasCoordinate {
+                let visibleDiameter = PlaceMapCamera.visibleDiameter(
+                    accuracyRadiusMeters: location.accuracyRadiusMeters,
+                    minimum: 320
+                )
+                let featureCoordinate = location.radiusCenterCoordinate
+                    ?? location.coordinate
                 Map(
                     initialPosition: .region(
                         MKCoordinateRegion(
-                            center: location.radiusCenterCoordinate
-                                ?? location.coordinate,
-                            latitudinalMeters: PlaceMapCamera.visibleDiameter(
-                                accuracyRadiusMeters:
-                                    location.accuracyRadiusMeters,
-                                minimum: 320
+                            center: PlaceMapCamera.center(
+                                northOf: featureCoordinate,
+                                byMeters: visibleDiameter
+                                    * cameraNorthOffsetFraction
                             ),
-                            longitudinalMeters: PlaceMapCamera.visibleDiameter(
-                                accuracyRadiusMeters:
-                                    location.accuracyRadiusMeters,
-                                minimum: 320
-                            )
+                            latitudinalMeters: visibleDiameter,
+                            longitudinalMeters: visibleDiameter
                         )
                     )
                 ) {

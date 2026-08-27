@@ -84,6 +84,12 @@ struct WorkoutRouteMap: View {
                 .tint(.red)
             }
         }
+        .mapStyle(
+            JournalMapDisplayStylePolicy.mapStyle(
+                for: [points.first, points.last]
+                    .compactMap { $0?.coordinate }
+            )
+        )
         .frame(height: 280)
         .clipShape(.rect(cornerRadius: 12))
     }

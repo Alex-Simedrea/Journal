@@ -1,18 +1,18 @@
 import Foundation
 import SwiftData
 
-enum AutomationCandidateKind: String, Codable, Hashable, Sendable {
+nonisolated enum AutomationCandidateKind: String, Codable, Hashable, Sendable {
     case visit
     case transit
 }
 
-enum AutomationCandidateStatus: String, Codable, Hashable, Sendable {
+nonisolated enum AutomationCandidateStatus: String, Codable, Hashable, Sendable {
     case pending
     case accepted
     case dismissed
 }
 
-enum MotionTransitKind: String, Codable, Hashable, Sendable {
+nonisolated enum MotionTransitKind: String, Codable, Hashable, Sendable {
     case walk
     case bicycle
     case automotive

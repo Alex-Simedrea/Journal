@@ -169,6 +169,20 @@ final class EntryLocationPickerModel {
     }
 }
 
+enum EntryLocationSearchResult: Identifiable {
+    case savedPlace(Place)
+    case mapKit(LocationSearchSuggestion)
+
+    var id: String {
+        switch self {
+        case .savedPlace(let place):
+            "saved-\(place.id.uuidString)"
+        case .mapKit(let suggestion):
+            "map-\(suggestion.id)"
+        }
+    }
+}
+
 enum EntryLocationPickerProjection {
     static func filteredPlaces(
         _ places: [Place],
@@ -187,6 +201,23 @@ enum EntryLocationPickerProjection {
                 .joined(separator: " ")
             ).contains(query)
         }
+    }
+
+    static func interleavedSearchResults(
+        places: [Place],
+        suggestions: [LocationSearchSuggestion]
+    ) -> [EntryLocationSearchResult] {
+        var results: [EntryLocationSearchResult] = []
+        results.reserveCapacity(places.count + suggestions.count)
+        for index in 0..<max(places.count, suggestions.count) {
+            if places.indices.contains(index) {
+                results.append(.savedPlace(places[index]))
+            }
+            if suggestions.indices.contains(index) {
+                results.append(.mapKit(suggestions[index]))
+            }
+        }
+        return results
     }
 
     private static func normalized(_ value: String) -> String {

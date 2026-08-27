@@ -6,8 +6,7 @@
 import Foundation
 import SwiftData
 
-@MainActor
-enum WakeUpEntryStore {
+nonisolated enum WakeUpEntryStore {
     static func synchronize(
         snapshots: [HealthKitWakeUpSnapshot],
         in modelContext: ModelContext

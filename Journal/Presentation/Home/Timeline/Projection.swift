@@ -1,7 +1,7 @@
 import CoreLocation
 import Foundation
 
-struct TimelineOccurrence: Hashable, Identifiable, Sendable {
+nonisolated struct TimelineOccurrence: Hashable, Identifiable, Sendable {
     let id: TimelineOccurrenceID
     let entryID: UUID
     let role: TimelineOccurrenceRole
@@ -45,40 +45,57 @@ struct TimelineOccurrence: Hashable, Identifiable, Sendable {
     }
 }
 
-enum TimelinePreviousRelationship: Hashable, Sendable {
+nonisolated enum TimelinePreviousRelationship: Hashable, Sendable {
     case first
     case contiguous
     case gap(TimeInterval)
     case overlap
 }
 
-struct TimelineRow: Hashable, Identifiable, Sendable {
+nonisolated struct TimelineRow: Hashable, Identifiable, Sendable {
     let occurrence: TimelineOccurrence
     let relationshipToPrevious: TimelinePreviousRelationship
+    let transitGap: TimelineTransitGap?
     let transitPresentation: TimelineTransitRowPresentation?
     let endBoundaryNeedsReview: Bool
     let startBoundaryRenderedByPrevious: Bool
 
     var id: TimelineOccurrenceID { occurrence.id }
+
+    var presentsDistinctContiguousTransitStart: Bool {
+        relationshipToPrevious == .contiguous
+            && !startBoundaryRenderedByPrevious
+            && transitPresentation?.origin.showsPseudoEntry == true
+    }
 }
 
-enum TimelineTransitBoundarySide: String, Hashable, Sendable {
+nonisolated struct TimelineTransitGapID: Hashable, Sendable {
+    let originVisitEntryID: UUID
+    let destinationVisitEntryID: UUID
+}
+
+nonisolated struct TimelineTransitGap: Hashable, Identifiable, Sendable {
+    let id: TimelineTransitGapID
+    let originName: String
+    let destinationName: String
+}
+
+nonisolated enum TimelineTransitBoundarySide: String, Hashable, Sendable {
     case origin
     case destination
 }
 
-struct TimelineTransitBoundaryID: Hashable, Sendable {
+nonisolated struct TimelineTransitBoundaryID: Hashable, Sendable {
     let occurrenceID: TimelineOccurrenceID
     let side: TimelineTransitBoundarySide
 }
 
-struct TimelineTransitBoundaryPresentation: Hashable, Identifiable, Sendable {
+nonisolated struct TimelineTransitBoundaryPresentation: Hashable, Identifiable, Sendable {
     let occurrenceID: TimelineOccurrenceID
     let side: TimelineTransitBoundarySide
     let name: String
     let location: TimelineLocationSnapshot?
     let showsPseudoEntry: Bool
-    let needsReview: Bool
     let followingTransitStart: TimelineTransitSharedStartPresentation?
 
     var id: TimelineTransitBoundaryID {
@@ -93,26 +110,25 @@ struct TimelineTransitBoundaryPresentation: Hashable, Identifiable, Sendable {
     }
 }
 
-struct TimelineTransitSharedStartPresentation: Hashable, Sendable {
+nonisolated struct TimelineTransitSharedStartPresentation: Hashable, Sendable {
     let date: Date
     let timeZoneIdentifier: String
-    let needsReview: Bool
 }
 
-struct TimelineTransitRowPresentation: Hashable, Sendable {
+nonisolated struct TimelineTransitRowPresentation: Hashable, Sendable {
     let origin: TimelineTransitBoundaryPresentation
     let destination: TimelineTransitBoundaryPresentation
     let showsReviewBadge: Bool
 }
 
-struct TimelineTimeZoneChange: Hashable, Identifiable, Sendable {
+nonisolated struct TimelineTimeZoneChange: Hashable, Identifiable, Sendable {
     let id: TimelineOccurrenceID
     let fromTimeZoneIdentifier: String
     let toTimeZoneIdentifier: String
     let date: Date
 }
 
-enum TimelineListItem: Hashable, Identifiable, Sendable {
+nonisolated enum TimelineListItem: Hashable, Identifiable, Sendable {
     case occurrence(TimelineOccurrence)
     case timeZoneChange(TimelineTimeZoneChange)
 
@@ -126,7 +142,7 @@ enum TimelineListItem: Hashable, Identifiable, Sendable {
     }
 }
 
-struct TimelineProjection: Sendable {
+nonisolated struct TimelineProjection: Sendable {
     let occurrences: [TimelineOccurrence]
     let rows: [TimelineRow]
     let reviewOccurrences: [TimelineOccurrence]
@@ -241,8 +257,6 @@ struct TimelineProjection: Sendable {
             let nextOccurrence = nextIndex < occurrences.endIndex
                 ? occurrences[nextIndex]
                 : nil
-            let nextSharesBoundary = nextIndex < occurrences.endIndex
-                && relationships[nextIndex] == .contiguous
             let sharesOriginWithPreviousTransit: Bool
             if let previousOccurrence {
                 sharesOriginWithPreviousTransit =
@@ -266,6 +280,12 @@ struct TimelineProjection: Sendable {
             return TimelineRow(
                 occurrence: occurrence,
                 relationshipToPrevious: relationships[index],
+                transitGap: transitGap(
+                    before: occurrence,
+                    previous: previousOccurrence,
+                    relationship: relationships[index],
+                    allOccurrences: occurrences
+                ),
                 transitPresentation: transitPresentation(
                     for: occurrence,
                     previous: previousOccurrence,
@@ -275,9 +295,7 @@ struct TimelineProjection: Sendable {
                     sharesDestinationWithNextTransit:
                         sharesDestinationWithNextTransit
                 ),
-                endBoundaryNeedsReview: occurrence.reviewsTime
-                    || (nextSharesBoundary
-                        && occurrences[nextIndex].reviewsTime),
+                endBoundaryNeedsReview: occurrence.reviewsTime,
                 startBoundaryRenderedByPrevious:
                     sharesOriginWithPreviousTransit
             )
@@ -298,6 +316,59 @@ struct TimelineProjection: Sendable {
         TimelineBoundaryMatcher.timesMatch(previousEnd, nextStart)
     }
 
+    private static func transitGap(
+        before occurrence: TimelineOccurrence,
+        previous: TimelineOccurrence?,
+        relationship: TimelinePreviousRelationship,
+        allOccurrences: [TimelineOccurrence]
+    ) -> TimelineTransitGap? {
+        guard case .gap = relationship,
+              let previous,
+              previous.kind == .placeVisit,
+              occurrence.kind == .placeVisit,
+              previous.visibleEndTime == previous.endTime,
+              occurrence.visibleStartTime == occurrence.startTime,
+              let gapStart = previous.endTime,
+              let gapEnd = occurrence.startTime,
+              let origin = previous.snapshot.visitLocation,
+              let destination = occurrence.snapshot.visitLocation,
+              origin.hasCoordinate,
+              destination.hasCoordinate else {
+            return nil
+        }
+
+        let hasTransit = allOccurrences.contains { candidate in
+            guard candidate.kind == .transit,
+                  let start = candidate.startTime,
+                  let end = candidate.endTime else {
+                return false
+            }
+            return start < gapEnd && end > gapStart
+        }
+        guard !hasTransit else { return nil }
+
+        let distance = CLLocation(
+            latitude: origin.latitude,
+            longitude: origin.longitude
+        ).distance(
+            from: CLLocation(
+                latitude: destination.latitude,
+                longitude: destination.longitude
+            )
+        )
+        guard distance >= TimelineTransitGapInference.minimumDistanceMeters
+        else { return nil }
+
+        return TimelineTransitGap(
+            id: TimelineTransitGapID(
+                originVisitEntryID: previous.entryID,
+                destinationVisitEntryID: occurrence.entryID
+            ),
+            originName: previous.visitPlace,
+            destinationName: occurrence.visitPlace
+        )
+    }
+
     private static func transitPresentation(
         for occurrence: TimelineOccurrence,
         previous: TimelineOccurrence?,
@@ -307,22 +378,6 @@ struct TimelineProjection: Sendable {
     ) -> TimelineTransitRowPresentation? {
         guard occurrence.kind == .transit else { return nil }
 
-        let originNeedsReview = occurrence.snapshot.reviews.contains {
-            $0.target == .origin
-        }
-        let ownDestinationNeedsReview = occurrence.snapshot.reviews.contains {
-            $0.target == .destination
-        }
-        let followingOriginNeedsReview: Bool
-        if sharesDestinationWithNextTransit, let next {
-            followingOriginNeedsReview = next.snapshot.reviews.contains {
-                $0.target == .origin
-            }
-        } else {
-            followingOriginNeedsReview = false
-        }
-        let destinationNeedsReview = ownDestinationNeedsReview
-            || followingOriginNeedsReview
         let originMatches = TimelineBoundaryMatcher.matches(
             transitTime: occurrence.visibleStartTime,
             transitLocation: occurrence.snapshot.originLocation,
@@ -349,7 +404,6 @@ struct TimelineProjection: Sendable {
             location: occurrence.snapshot.originLocation,
             showsPseudoEntry: !originMatches
                 && !sharesOriginWithPreviousTransit,
-            needsReview: originNeedsReview,
             followingTransitStart: nil
         )
         let destination = TimelineTransitBoundaryPresentation(
@@ -359,29 +413,14 @@ struct TimelineProjection: Sendable {
             location: occurrence.snapshot.destinationLocation,
             showsPseudoEntry: sharesDestinationWithNextTransit
                 || !destinationMatches,
-            needsReview: destinationNeedsReview,
             followingTransitStart: followingTransitStart
         )
-        let centrallyRenderedTargets: Set<TimelineReviewTarget> = [
-            .entryKind,
-            .transitType,
-            .people,
-        ]
-        let hasCentralReview = occurrence.snapshot.reviews.contains { review in
-            centrallyRenderedTargets.contains(review.target)
-                || (review.target == .origin
-                    && !origin.showsPseudoEntry
-                    && !sharesOriginWithPreviousTransit)
-                || (review.target == .destination
-                    && !destination.showsPseudoEntry)
-        }
-        let hasUnclassifiedReview = occurrence.needsReview
-            && occurrence.snapshot.reviews.isEmpty
 
         return TimelineTransitRowPresentation(
             origin: origin,
             destination: destination,
-            showsReviewBadge: hasCentralReview || hasUnclassifiedReview
+            showsReviewBadge: occurrence.needsReview
+                || !occurrence.snapshot.reviews.isEmpty
         )
     }
 
@@ -394,8 +433,7 @@ struct TimelineProjection: Sendable {
         }
         return TimelineTransitSharedStartPresentation(
             date: nextStart,
-            timeZoneIdentifier: next.timeZoneIdentifier,
-            needsReview: next.reviewsTime
+            timeZoneIdentifier: next.timeZoneIdentifier
         )
     }
 
@@ -552,7 +590,7 @@ struct TimelineProjection: Sendable {
     }
 }
 
-enum TimelineBoundaryMatcher {
+nonisolated enum TimelineBoundaryMatcher {
     static let maximumSemanticDistanceMeters: CLLocationDistance = 50
 
     static func matches(

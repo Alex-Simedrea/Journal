@@ -11,56 +11,11 @@ private final class HomeFeedDeferredLoadingPolicy {
     @ObservationIgnored
     private var phase: ScrollPhase = .idle
 
-    @ObservationIgnored
-    private var previousOffset: CGFloat?
-
-    @ObservationIgnored
-    private var previousSampleTime: TimeInterval?
-
-    private static let pauseVelocity: CGFloat = 400
-    private static let resumeVelocity: CGFloat = 200
-
     func phaseDidChange(
-        to newPhase: ScrollPhase,
-        offset: CGFloat,
-        velocity: CGFloat?,
-        at time: TimeInterval
+        to newPhase: ScrollPhase
     ) {
         phase = newPhase
-        previousOffset = offset
-        previousSampleTime = time
-
-        if newPhase == .idle {
-            allowsLoading = true
-        } else if newPhase == .animating {
-            allowsLoading = false
-        } else if let velocity {
-            updateLoadingState(for: abs(velocity))
-        }
-    }
-
-    func sampled(offset: CGFloat, at time: TimeInterval) {
-        defer {
-            previousOffset = offset
-            previousSampleTime = time
-        }
-        guard phase.isScrolling,
-              let previousOffset,
-              let previousSampleTime else {
-            return
-        }
-        let duration = time - previousSampleTime
-        guard duration > 0 else { return }
-        let velocity = abs(offset - previousOffset) / duration
-        updateLoadingState(for: velocity)
-    }
-
-    private func updateLoadingState(for velocity: CGFloat) {
-        if allowsLoading, velocity >= Self.pauseVelocity {
-            allowsLoading = false
-        } else if !allowsLoading, velocity <= Self.resumeVelocity {
-            allowsLoading = true
-        }
+        allowsLoading = newPhase == .idle
     }
 }
 
@@ -123,14 +78,20 @@ struct HomeScreen: View {
     @State private var visibleYear: YearKey?
     @State private var isFeedReady = false
     @State private var isFeedPositioned = false
+    @State private var didReportInitialFeedReady = false
     @State private var emptyTransitionDay = TimelineDayKey.today()
     @State private var presentedTimeline: PresentedTimeline?
     @State private var isCalendarPresented = false
     @State private var isProfilePresented = false
     let contentRevision: Int
+    let onInitialFeedReady: () -> Void
 
-    init(contentRevision: Int = 0) {
+    init(
+        contentRevision: Int = 0,
+        onInitialFeedReady: @escaping () -> Void = {}
+    ) {
         self.contentRevision = contentRevision
+        self.onInitialFeedReady = onInitialFeedReady
     }
 
     var body: some View {
@@ -165,7 +126,9 @@ struct HomeScreen: View {
             }
             .presentationDetents([.medium])
         }
-        .sheet(isPresented: $isProfilePresented, onDismiss: reloadFeed) {
+        .sheet(isPresented: $isProfilePresented, onDismiss: {
+            Task { await reloadFeed() }
+        }) {
             ProfileMenuSheet()
         }
         .fullScreenCover(
@@ -181,17 +144,27 @@ struct HomeScreen: View {
             )
         }
         .task(id: contentRevision) {
-            reloadFeed()
+            await reloadFeed()
+            guard !Task.isCancelled else { return }
             if !isFeedReady {
                 prepareInitialFeedPosition()
             }
             isFeedReady = true
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { reloadFeed() }
+            if phase == .active {
+                Task { await reloadFeed() }
+            }
         }
         .onChange(of: selectedScale) { oldScale, newScale in
             prepareScaleSwitch(from: oldScale, to: newScale)
+        }
+        .onReceive(TimelineDataChange.publisher) { _ in
+            Task { await reloadFeed() }
+        }
+        .task(id: selectedScale) {
+            guard selectedScale != .days else { return }
+            await model.loadPeriodPhotoMetadata()
         }
     }
 
@@ -268,13 +241,13 @@ struct HomeScreen: View {
         }
     }
 
-    private func reloadFeed() {
-        model.reload(in: modelContext)
+    private func reloadFeed() async {
+        await model.reload(in: modelContext)
     }
 
     private func prepareInitialFeedPosition() {
         guard let day = model.days.last else {
-            isFeedPositioned = true
+            markFeedPositioned()
             return
         }
         setVisibleAnchor(.day(day))
@@ -419,7 +392,14 @@ struct HomeScreen: View {
 
     private func scrollRequestDidApply(_ requestID: UUID) {
         guard scrollRequest?.id == requestID else { return }
+        markFeedPositioned()
+    }
+
+    private func markFeedPositioned() {
         isFeedPositioned = true
+        guard !didReportInitialFeedReady else { return }
+        didReportInitialFeedReady = true
+        onInitialFeedReady()
     }
 
     private func handleCalendarSelection(_ selectedDay: TimelineDayKey) {
@@ -508,7 +488,7 @@ struct HomeScreen: View {
     }
 
     private func timelineDidDismiss() {
-        model.reload(in: modelContext)
+        Task { await reloadFeed() }
     }
 }
 
@@ -672,6 +652,11 @@ private struct HomeFeedPrewarmingModifier: ViewModifier {
     func body(content: Content) -> some View {
         content.task(id: taskKey) {
             guard taskKey != nil else { return }
+            // Visible cards load their own disk-cached snapshots. Prewarming
+            // the surrounding browsing window is deliberately delayed so
+            // MapKit and image decoding cannot monopolize the first frames.
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
             await model.prewarmMapSnapshots(
                 contentWidth: contentWidth,
                 displayScale: displayScale,
@@ -735,6 +720,7 @@ private struct HomeFeedContent: View {
                     .padding(.horizontal, 16)
                     .padding(.top, 16)
                 }
+                .defaultScrollAnchor(.bottom)
                 .contentMargins(.bottom, 16, for: .scrollContent)
                 .scrollPosition(id: $scrollPosition, anchor: .top)
                 .scrollEdgeEffectStyle(.soft, for: [.top, .bottom])
@@ -746,24 +732,11 @@ private struct HomeFeedContent: View {
                         onVisibleAnchorChange(scale, first)
                     }
                 }
-                .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                    geometry.contentOffset.y
-                } action: { _, newOffset in
-                    deferredLoading.sampled(
-                        offset: newOffset,
-                        at: ProcessInfo.processInfo.systemUptime
-                    )
-                }
                 .onScrollPhaseChange { _, newPhase, context in
                     if newPhase == .interacting {
                         onUserScroll()
                     }
-                    deferredLoading.phaseDidChange(
-                        to: newPhase,
-                        offset: context.geometry.contentOffset.y,
-                        velocity: context.velocity?.dy,
-                        at: ProcessInfo.processInfo.systemUptime
-                    )
+                    deferredLoading.phaseDidChange(to: newPhase)
                 }
                 .background(Color(uiColor: .systemGroupedBackground))
                 .scrollContentBackground(.hidden)
@@ -784,7 +757,8 @@ private struct HomeFeedContent: View {
             .modifier(
                 HomeFeedPrewarmingModifier(
                     model: model,
-                    isEnabled: prewarmingEnabled,
+                    isEnabled: prewarmingEnabled
+                        && deferredLoading.allowsLoading,
                     contentWidth: min(440, max(0, container.size.width - 32))
                 )
             )
@@ -880,6 +854,8 @@ private struct HomeFeedDayRow: View {
         .accessibilityHint("Opens this day’s timeline")
         .task(id: enrichmentTaskID) {
             guard loadsDeferredContent else { return }
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
             await model.loadEnrichment()
         }
     }
@@ -923,6 +899,8 @@ private struct PeriodFeedRow: View {
         .accessibilityHint("Opens the next level of this period")
         .task(id: loadsDeferredContent) {
             guard loadsDeferredContent else { return }
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
             await model.loadEnrichment()
         }
     }

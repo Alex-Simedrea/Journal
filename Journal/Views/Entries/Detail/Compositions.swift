@@ -2,6 +2,7 @@ import SwiftUI
 
 struct EntryDetailPlaceComposition: View {
   let entry: LogEntry
+  let people: [Person]
   let onPresent: (EntryDetailRoute) -> Void
 
   var body: some View {
@@ -14,7 +15,7 @@ struct EntryDetailPlaceComposition: View {
           onEdit: { onPresent(.time) }
         )
         EntryDetailPeopleCard(
-          people: entry.people,
+          people: people,
           needsReview: entry.placeVisitDetails?.review(for: .people) != nil,
           onEdit: { onPresent(.people) }
         )
@@ -26,6 +27,7 @@ struct EntryDetailPlaceComposition: View {
 
 struct EntryDetailTransitComposition: View {
   let entry: LogEntry
+  let people: [Person]
   let onPresent: (EntryDetailRoute) -> Void
 
   var body: some View {
@@ -50,7 +52,7 @@ struct EntryDetailTransitComposition: View {
       EntryDetailAdaptivePair {
         EntryDetailWeatherColumn(entry: entry)
         EntryDetailPeopleCard(
-          people: entry.people,
+          people: people,
           needsReview: entry.transitDetails?.review(for: .people) != nil,
           onEdit: { onPresent(.people) }
         )
@@ -61,6 +63,7 @@ struct EntryDetailTransitComposition: View {
 
 struct EntryDetailWorkoutComposition: View {
   let entry: LogEntry
+  let people: [Person]
   let onPresent: (EntryDetailRoute) -> Void
 
   var body: some View {
@@ -81,7 +84,7 @@ struct EntryDetailWorkoutComposition: View {
       EntryDetailAdaptivePair {
         EntryDetailWeatherColumn(entry: entry)
         EntryDetailPeopleCard(
-          people: entry.people,
+          people: people,
           needsReview: false,
           onEdit: { onPresent(.people) }
         )

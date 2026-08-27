@@ -55,7 +55,7 @@ nonisolated enum PeriodSummaryKey: Hashable, Identifiable, Sendable {
     }
 }
 
-struct PeriodPersonSummary: Equatable, Identifiable, Sendable {
+nonisolated struct PeriodPersonSummary: Equatable, Identifiable, Sendable {
     let person: TimelinePersonSnapshot
     let loggedDuration: TimeInterval
     let dayCount: Int
@@ -64,7 +64,7 @@ struct PeriodPersonSummary: Equatable, Identifiable, Sendable {
     var id: UUID { person.id }
 }
 
-struct PeriodPlaceSummary: Equatable, Identifiable, Sendable {
+nonisolated struct PeriodPlaceSummary: Equatable, Identifiable, Sendable {
     let location: TimelineLocationSnapshot
     let duration: TimeInterval
     let visitCount: Int
@@ -72,7 +72,7 @@ struct PeriodPlaceSummary: Equatable, Identifiable, Sendable {
     var id: String { location.id }
 }
 
-struct PeriodRouteSummary: Equatable, Sendable {
+nonisolated struct PeriodRouteSummary: Equatable, Sendable {
     let count: Int
     let originName: String
     let destinationName: String
@@ -97,7 +97,7 @@ struct PeriodRouteSummary: Equatable, Sendable {
     }
 }
 
-struct PeriodGeographySummary: Equatable, Identifiable, Sendable {
+nonisolated struct PeriodGeographySummary: Equatable, Identifiable, Sendable {
     let name: String
     let code: String?
     let visitCount: Int
@@ -105,14 +105,14 @@ struct PeriodGeographySummary: Equatable, Identifiable, Sendable {
     var id: String { code ?? name }
 }
 
-struct PeriodSleepSummary: Equatable, Sendable {
+nonisolated struct PeriodSleepSummary: Equatable, Sendable {
     let sampleCount: Int
     let averageWakeMinute: Int
     let averageDuration: TimeInterval?
     let consistencyMinutes: Int
 }
 
-struct PeriodJourneySummary: Equatable, Sendable {
+nonisolated struct PeriodJourneySummary: Equatable, Sendable {
     let day: TimelineDayKey
     let distanceMeters: Double
     let originName: String
@@ -140,7 +140,7 @@ struct PeriodJourneySummary: Equatable, Sendable {
     }
 }
 
-struct PeriodSummary: Equatable, Identifiable, Sendable {
+nonisolated struct PeriodSummary: Equatable, Identifiable, Sendable {
     let key: PeriodSummaryKey
     let days: [DaySummary]
     let entryCount: Int
@@ -186,7 +186,7 @@ enum PeriodSummaryDatePresentation {
     static func title(for key: YearKey) -> String { String(key.year) }
 }
 
-enum PeriodSummaryProjector {
+nonisolated enum PeriodSummaryProjector {
     private struct AttributedEntry {
         let snapshot: TimelineEntrySnapshot
         let day: TimelineDayKey
@@ -776,7 +776,7 @@ enum PeriodSummaryProjector {
     }
 }
 
-private extension PeriodSummaryKey {
+nonisolated private extension PeriodSummaryKey {
     var yearValue: Int? {
         guard case .year(let key) = self else { return nil }
         return key.year

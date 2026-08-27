@@ -8,13 +8,13 @@
 import Foundation
 import SwiftData
 
-enum PlaceVisitReviewField: String, Codable, CaseIterable, Hashable {
+nonisolated enum PlaceVisitReviewField: String, Codable, CaseIterable, Hashable, Sendable {
     case place
     case time
     case people
 }
 
-struct PlaceVisitFieldReview: Codable, Hashable, Identifiable {
+nonisolated struct PlaceVisitFieldReview: Codable, Hashable, Identifiable, Sendable {
     var field: PlaceVisitReviewField
     var reason: String
 
@@ -29,7 +29,18 @@ final class PlaceVisitDetails {
     var placeRawText: String?
     var candidates: [LocationCandidate]
     var unresolvedPeople: [String]
-    var fieldReviews: [PlaceVisitFieldReview]
+    @Attribute(originalName: "fieldReviews")
+    private var fieldReviewsData: Data?
+
+    var fieldReviews: [PlaceVisitFieldReview] {
+        get {
+            PersistedJSON.decode(
+                [PlaceVisitFieldReview].self,
+                from: fieldReviewsData
+            ) ?? []
+        }
+        set { fieldReviewsData = PersistedJSON.encode(newValue) }
+    }
 
     init(
         description: String? = nil,
@@ -46,7 +57,7 @@ final class PlaceVisitDetails {
         self.placeRawText = placeRawText
         self.candidates = candidates
         self.unresolvedPeople = unresolvedPeople
-        self.fieldReviews = fieldReviews
+        self.fieldReviewsData = PersistedJSON.encode(fieldReviews)
     }
 
     var description: String? {

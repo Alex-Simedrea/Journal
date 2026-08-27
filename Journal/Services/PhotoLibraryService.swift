@@ -6,6 +6,71 @@
 import Photos
 import UIKit
 
+@MainActor
+private final class PhotoLibraryImageRequest {
+    private let manager: PHImageManager
+    private let asset: PHAsset
+    private let targetSize: CGSize
+    private let options: PHImageRequestOptions
+    private var requestID = PHInvalidImageRequestID
+    private var continuation: CheckedContinuation<UIImage?, Never>?
+    private var isFinished = false
+
+    init(
+        manager: PHImageManager,
+        asset: PHAsset,
+        targetSize: CGSize,
+        options: PHImageRequestOptions
+    ) {
+        self.manager = manager
+        self.asset = asset
+        self.targetSize = targetSize
+        self.options = options
+    }
+
+    func value() async -> UIImage? {
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                self.continuation = continuation
+                requestID = manager.requestImage(
+                    for: asset,
+                    targetSize: targetSize,
+                    contentMode: .aspectFill,
+                    options: options
+                ) { [weak self] image, info in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        let wasCancelled = info?[PHImageCancelledKey]
+                            as? Bool ?? false
+                        let error = info?[PHImageErrorKey] as? (any Error)
+                        self.finish(
+                            with: wasCancelled || error != nil ? nil : image
+                        )
+                    }
+                }
+                if Task.isCancelled { self.cancel() }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.cancel() }
+        }
+    }
+
+    private func cancel() {
+        guard !isFinished else { return }
+        if requestID != PHInvalidImageRequestID {
+            manager.cancelImageRequest(requestID)
+        }
+        finish(with: nil)
+    }
+
+    private func finish(with image: UIImage?) {
+        guard !isFinished else { return }
+        isFinished = true
+        continuation?.resume(returning: image)
+        continuation = nil
+    }
+}
+
 nonisolated enum PhotoLibraryServiceError: LocalizedError {
     case accessDenied
     case inaccessibleSelection
@@ -25,6 +90,8 @@ nonisolated enum PhotoLibraryServiceError: LocalizedError {
 
 @MainActor
 enum PhotoLibraryService {
+    private static let cachingImageManager = PHCachingImageManager()
+
     static func requestReadAccess() async throws {
         let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
         guard status == .authorized || status == .limited else {
@@ -56,21 +123,44 @@ enum PhotoLibraryService {
         )
         guard let asset = assets.firstObject else { return nil }
 
-        return await withCheckedContinuation { continuation in
-            let options = PHImageRequestOptions()
-            options.deliveryMode = .highQualityFormat
-            options.resizeMode = .exact
-            options.isNetworkAccessAllowed = true
+        let image = await PhotoLibraryImageRequest(
+            manager: cachingImageManager,
+            asset: asset,
+            targetSize: targetSize,
+            options: thumbnailOptions()
+        ).value()
+        guard let image else { return nil }
+        let prepared = await image.byPreparingForDisplay() ?? image
+        return Task.isCancelled ? nil : prepared
+    }
 
-            PHImageManager.default().requestImage(
-                for: asset,
-                targetSize: targetSize,
-                contentMode: .aspectFill,
-                options: options
-            ) { image, _ in
-                continuation.resume(returning: image)
-            }
-        }
+    static func preheatImages(
+        for assetLocalIdentifiers: [String],
+        targetSize: CGSize
+    ) {
+        guard !assetLocalIdentifiers.isEmpty else { return }
+        let assets = PHAsset.fetchAssets(
+            withLocalIdentifiers: assetLocalIdentifiers,
+            options: nil
+        )
+        var values: [PHAsset] = []
+        values.reserveCapacity(assets.count)
+        assets.enumerateObjects { asset, _, _ in values.append(asset) }
+        guard !values.isEmpty else { return }
+        cachingImageManager.startCachingImages(
+            for: values,
+            targetSize: targetSize,
+            contentMode: .aspectFill,
+            options: thumbnailOptions()
+        )
+    }
+
+    private static func thumbnailOptions() -> PHImageRequestOptions {
+        let options = PHImageRequestOptions()
+        options.deliveryMode = .highQualityFormat
+        options.resizeMode = .exact
+        options.isNetworkAccessAllowed = true
+        return options
     }
 
     static func temporaryPreviewURL(

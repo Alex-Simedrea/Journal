@@ -6,7 +6,7 @@
 import Foundation
 import HealthKit
 
-enum WorkoutImportPreferences {
+nonisolated enum WorkoutImportPreferences {
     private static let cutoffKey = "healthkit.workouts.cutoff"
     private static let anchorKey = "healthkit.workouts.anchor"
     private static let excludedUUIDsKey = "healthkit.workouts.excluded-uuids"

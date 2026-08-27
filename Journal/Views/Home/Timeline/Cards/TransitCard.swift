@@ -11,6 +11,9 @@ struct TimelineCompactTransitRow: View {
     let endTime: Date?
     let people: [TimelinePersonSnapshot]
     let showsReviewBadge: Bool
+    let reviewCandidateID: UUID?
+    let onAcceptCandidate: (UUID) -> Void
+    let onDismissCandidate: (UUID) -> Void
     let onTap: () -> Void
 
     private var presentation: TransitPresentation {
@@ -18,33 +21,55 @@ struct TimelineCompactTransitRow: View {
     }
 
     var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: TimelineRulerMetrics.compactEntryContentSpacing) {
-                TimelineCompactTransitBadge(presentation: presentation)
+        HStack(spacing: 6) {
+            Button(action: onTap) {
+                HStack(
+                    spacing: TimelineRulerMetrics.compactEntryContentSpacing
+                ) {
+                    TimelineCompactTransitBadge(presentation: presentation)
 
-                Text(summary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(summary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                if showsReviewBadge {
-                    ReviewBadge(size: 17)
+                    if !people.isEmpty {
+                        TimelinePeopleAvatarStack(people: people)
+                    }
                 }
-
-                if !people.isEmpty {
-                    TimelinePeopleAvatarStack(people: people)
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(.rect)
             }
-            .frame(
-                maxWidth: .infinity,
-                minHeight: TimelineRulerMetrics.compactEntryHeight,
-                alignment: .leading
-            )
-            .contentShape(.rect)
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .combine)
+            .accessibilityHint("Opens transit details")
+
+            if let reviewCandidateID {
+                TimelineTransitQuickReviewButton(
+                    systemImage: "xmark",
+                    foregroundColor: .gray,
+                    backgroundColor: .gray.opacity(0.2),
+                    accessibilityLabel: "Dismiss suggested transit",
+                    action: { onDismissCandidate(reviewCandidateID) }
+                )
+                TimelineTransitQuickReviewButton(
+                    systemImage: "checkmark",
+                    foregroundColor: .white,
+                    backgroundColor: .blue,
+                    accessibilityLabel: "Accept suggested transit",
+                    action: { onAcceptCandidate(reviewCandidateID) }
+                )
+            }
+
+            if showsReviewBadge {
+                ReviewBadge(size: 17)
+            }
         }
-        .buttonStyle(.plain)
-        .accessibilityElement(children: .combine)
-        .accessibilityHint("Opens transit details")
+        .frame(
+            maxWidth: .infinity,
+            minHeight: TimelineRulerMetrics.compactEntryHeight,
+            alignment: .leading
+        )
     }
 
     private var summary: AttributedString {
@@ -99,6 +124,26 @@ struct TimelineCompactTransitRow: View {
     }
 }
 
+private struct TimelineTransitQuickReviewButton: View {
+    let systemImage: String
+    let foregroundColor: Color
+    let backgroundColor: Color
+    let accessibilityLabel: LocalizedStringKey
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(foregroundColor)
+                .frame(width: 24, height: 24)
+                .background(backgroundColor, in: .circle)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
 struct TimelineCompactTransitBadge: View {
     let presentation: TransitPresentation
 
@@ -121,7 +166,6 @@ struct TimelineCompactTransitBadge: View {
 struct TimelineTransitPseudoPlaceRow: View {
     let name: String
     let systemImage: PlaceSystemImage
-    let needsReview: Bool
 
     var body: some View {
         HStack(spacing: TimelineRulerMetrics.compactEntryContentSpacing) {
@@ -133,9 +177,6 @@ struct TimelineTransitPseudoPlaceRow: View {
                 .minimumScaleFactor(0.72)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            if needsReview {
-                ReviewBadge(size: 17)
-            }
         }
         .frame(
             maxWidth: .infinity,
@@ -184,9 +225,7 @@ struct TimelineTransitCard: View {
                     originName: occurrence.origin,
                     destination: occurrence.snapshot.destinationLocation,
                     destinationName: occurrence.destination,
-                    needsReview: occurrence.snapshot.reviews.contains {
-                        $0.target == .origin || $0.target == .destination
-                    }
+                    needsReview: false
                 )
             }
         }
@@ -217,18 +256,17 @@ struct TimelineTransitTypeTile: View {
 
                 TimelineTransitMetrics(occurrence: occurrence)
             }
+
+            Spacer(minLength: 0)
+
+            if occurrence.needsReview {
+                ReviewBadge(size: 17)
+            }
         }
         .foregroundStyle(presentation.foregroundColor)
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(presentation.color, in: .rect(cornerRadius: 16))
-        .overlay(alignment: .topTrailing) {
-            if occurrence.snapshot.reviews.contains(where: {
-                $0.target == .transitType
-            }) {
-                ReviewBadge(size: 17).padding(5)
-            }
-        }
     }
 }
 

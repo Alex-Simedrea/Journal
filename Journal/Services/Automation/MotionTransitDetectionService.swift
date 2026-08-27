@@ -95,14 +95,18 @@ final class MotionTransitDetectionService {
     private init() {}
 
     func reconcile(in modelContext: ModelContext) async throws {
-        guard CMMotionActivityManager.isActivityAvailable() else { return }
+        try Self.persist(
+            segments: try await historicalSegments(),
+            in: modelContext
+        )
+    }
+
+    func historicalSegments() async throws -> [MotionActivitySegment] {
+        guard CMMotionActivityManager.isActivityAvailable() else { return [] }
         let end = Date.now
         let start = end.addingTimeInterval(-7 * 24 * 60 * 60)
         let samples = try await query(from: start, to: end)
-        try reconcile(
-            segments: MotionActivitySegmenter.segments(from: samples),
-            in: modelContext
-        )
+        return MotionActivitySegmenter.segments(from: samples)
     }
 
     func startLiveUpdates(modelContainer: ModelContainer) {
@@ -121,8 +125,11 @@ final class MotionTransitDetectionService {
                     from: [previous, sample]
                 )
                 guard !segments.isEmpty else { return }
-                let context = ModelContext(modelContainer)
-                try? self.reconcile(segments: segments, in: context)
+                let maintenance = await JournalPersistenceActors.shared
+                    .maintenance(
+                        for: JournalModelContainerReference(modelContainer)
+                    )
+                await maintenance.persistMotion(segments)
             }
         }
     }
@@ -154,7 +161,7 @@ final class MotionTransitDetectionService {
         }
     }
 
-    private func reconcile(
+    nonisolated static func persist(
         segments: [MotionActivitySegment],
         in modelContext: ModelContext
     ) throws {
@@ -255,20 +262,20 @@ final class MotionTransitDetectionService {
     }
 }
 
-private extension MotionTransitDetectionService {
-    enum EndpointRole {
+nonisolated private extension MotionTransitDetectionService {
+    nonisolated enum EndpointRole: Sendable {
         case arrival
         case departure
     }
 
-    struct EndpointObservation {
+    struct EndpointObservation: Sendable {
         let date: Date
         let role: EndpointRole
         let location: Location
         let placeID: UUID?
     }
 
-    func endpointObservations(
+    static func endpointObservations(
         entries: [LogEntry],
         candidates: [AutomationCandidate]
     ) -> [EndpointObservation] {
@@ -378,7 +385,7 @@ private extension MotionTransitDetectionService {
         return result
     }
 
-    func nearestObservation(
+    static func nearestObservation(
         to date: Date,
         role: EndpointRole,
         in observations: [EndpointObservation]
@@ -395,7 +402,7 @@ private extension MotionTransitDetectionService {
             }
     }
 
-    func duplicatesExistingTransit(
+    static func duplicatesExistingTransit(
         segment: MotionActivitySegment,
         origin: Location,
         destination: Location,
@@ -425,7 +432,7 @@ private extension MotionTransitDetectionService {
         }
     }
 
-    func locationsAreNear(_ lhs: Location, _ rhs: Location) -> Bool {
+    static func locationsAreNear(_ lhs: Location, _ rhs: Location) -> Bool {
         CLLocation(latitude: lhs.latitude, longitude: lhs.longitude)
             .distance(
                 from: CLLocation(latitude: rhs.latitude, longitude: rhs.longitude)

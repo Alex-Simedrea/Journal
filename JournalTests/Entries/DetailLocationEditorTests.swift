@@ -78,6 +78,33 @@ struct DetailLocationEditorTests {
         )
     }
 
+    @Test("Saved and MapKit search results are interleaved")
+    @MainActor
+    func interleavedSearchResults() {
+        let first = Place(
+            name: "First",
+            location: Location(latitude: 44.43, longitude: 26.10)
+        )
+        let second = Place(
+            name: "Second",
+            location: Location(latitude: 44.44, longitude: 26.11)
+        )
+        let suggestion = LocationSearchSuggestion(
+            completion: MKLocalSearchCompletion()
+        )
+
+        let results = EntryLocationPickerProjection.interleavedSearchResults(
+            places: [first, second],
+            suggestions: [suggestion]
+        )
+
+        #expect(results.map(\.id) == [
+            "saved-\(first.id.uuidString)",
+            "map-\(suggestion.id)",
+            "saved-\(second.id.uuidString)",
+        ])
+    }
+
     @Test("Selecting a saved place exits search and retains its identity")
     @MainActor
     func savedPlaceSelection() {

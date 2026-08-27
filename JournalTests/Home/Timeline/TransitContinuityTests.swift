@@ -8,6 +8,63 @@ import Testing
 struct TransitContinuityTests {
     private let timeZoneIdentifier = "Europe/Bucharest"
 
+    @Test("A gap between consecutive visits offers one transit action")
+    func visitGapAction() throws {
+        let home = location(name: "Home", latitude: 44.43, longitude: 26.10)
+        let office = location(
+            name: "Office",
+            latitude: 44.44,
+            longitude: 26.11
+        )
+        let first = placeVisit(
+            start: "2026-07-17T09:00:00+03:00",
+            end: "2026-07-17T10:00:00+03:00",
+            location: home
+        )
+        let second = placeVisit(
+            start: "2026-07-17T10:20:00+03:00",
+            end: "2026-07-17T12:00:00+03:00",
+            location: office
+        )
+
+        let gap = try #require(
+            project([first, second]).rows.last?.transitGap
+        )
+        #expect(gap.id.originVisitEntryID == first.id)
+        #expect(gap.id.destinationVisitEntryID == second.id)
+    }
+
+    @Test("A transit spanning the visit gap suppresses the action")
+    func overlappingTransitSuppressesGapAction() {
+        let home = location(name: "Home", latitude: 44.43, longitude: 26.10)
+        let office = location(
+            name: "Office",
+            latitude: 44.44,
+            longitude: 26.11
+        )
+        let spanningTransit = transit(
+            start: "2026-07-17T08:30:00+03:00",
+            end: "2026-07-17T10:10:00+03:00",
+            origin: home,
+            destination: office
+        )
+        let first = placeVisit(
+            start: "2026-07-17T09:00:00+03:00",
+            end: "2026-07-17T10:00:00+03:00",
+            location: home
+        )
+        let second = placeVisit(
+            start: "2026-07-17T10:20:00+03:00",
+            end: "2026-07-17T12:00:00+03:00",
+            location: office
+        )
+
+        #expect(
+            project([spanningTransit, first, second])
+                .rows.last?.transitGap == nil
+        )
+    }
+
     @Test("Matching neighbors suppress both pseudo-place rows")
     func fullyMatchingContinuity() throws {
         let home = location(name: "Home", latitude: 44.43, longitude: 26.10)
@@ -376,6 +433,46 @@ struct TransitContinuityTests {
         #expect(continuation.date == date("2026-07-17T12:02:30+03:00"))
     }
 
+    @Test("Contiguous transits with different places keep distinct boundaries")
+    func contiguousTransitLocationMismatch() throws {
+        let firstDestination = location(
+            name: "Piazza Bra",
+            latitude: 45.4380,
+            longitude: 10.9921
+        )
+        let secondOrigin = location(
+            name: "Piazza Broilo 3",
+            latitude: 45.4432,
+            longitude: 10.9987
+        )
+        let first = transit(
+            start: "2026-07-17T17:52:00+03:00",
+            end: "2026-07-17T18:10:00+03:00",
+            origin: location(name: "Previous place"),
+            destination: firstDestination
+        )
+        let second = transit(
+            start: "2026-07-17T18:10:00+03:00",
+            end: "2026-07-17T18:18:00+03:00",
+            origin: secondOrigin,
+            destination: firstDestination
+        )
+        let rows = project([first, second]).rows
+        let firstRow = try #require(
+            rows.first { $0.occurrence.entryID == first.id }
+        )
+        let secondRow = try #require(
+            rows.first { $0.occurrence.entryID == second.id }
+        )
+        let firstPresentation = try #require(firstRow.transitPresentation)
+        let secondPresentation = try #require(secondRow.transitPresentation)
+
+        #expect(firstPresentation.destination.showsPseudoEntry)
+        #expect(secondPresentation.origin.showsPseudoEntry)
+        #expect(secondRow.relationshipToPrevious == .contiguous)
+        #expect(secondRow.presentsDistinctContiguousTransitStart)
+    }
+
     @Test("A static workout exposes the same place at both boundaries")
     func staticWorkoutBoundary() throws {
         let gym = location(name: "Gym", latitude: 44.43, longitude: 26.10)
@@ -476,7 +573,6 @@ struct TransitContinuityTests {
         )
         #expect(!result.origin.showsPseudoEntry)
         #expect(result.destination.showsPseudoEntry)
-        #expect(result.destination.needsReview)
         #expect(result.showsReviewBadge)
     }
 
@@ -517,8 +613,8 @@ struct TransitContinuityTests {
         )
 
         #expect(transitRow.relationshipToPrevious == .contiguous)
-        #expect(previousRow.endBoundaryNeedsReview)
-        #expect(!transitPresentation.showsReviewBadge)
+        #expect(!previousRow.endBoundaryNeedsReview)
+        #expect(transitPresentation.showsReviewBadge)
     }
 
     @Test("Pseudo-place identity survives presentation edits")

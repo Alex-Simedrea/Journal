@@ -105,6 +105,32 @@ struct TransitPresentationTests {
         #expect(snapshot.transitSourceServiceIdentifier == "IC536")
     }
 
+    @Test("Timeline snapshots retain recorded transit routes")
+    @MainActor
+    func timelineRetainsRecordedRoute() {
+        let route = [
+            RecordedRoutePoint(
+                latitude: 44.4268,
+                longitude: 26.1025,
+                timestamp: Date(timeIntervalSince1970: 100)
+            ),
+            RecordedRoutePoint(
+                latitude: 44.4321,
+                longitude: 26.1134,
+                timestamp: Date(timeIntervalSince1970: 200)
+            ),
+        ]
+        let entry = LogEntry(kind: .transit, needsReview: false)
+        entry.transitDetails = TransitDetails(
+            type: "Walk",
+            recordedRoute: route
+        )
+
+        let snapshot = TimelineEntrySnapshot(entry: entry)
+
+        #expect(snapshot.transitRecordedRoute == route)
+    }
+
     @Test("Timeline addresses remove cities but preserve street numbers")
     func timelineAddressFormatting() {
         #expect(

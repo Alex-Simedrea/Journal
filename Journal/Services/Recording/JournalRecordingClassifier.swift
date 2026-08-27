@@ -1,12 +1,28 @@
 import CoreLocation
 import Foundation
+import OSLog
 
 nonisolated struct JournalRecordingClassificationConfiguration: Sendable {
     var maximumHorizontalAccuracy = 120.0
-    var visitRadiusMeters = 80.0
     var visitCoverageFraction = 0.9
-    var visitMaximumEndpointDisplacementMeters = 140.0
-    var minimumTransitDistanceMeters = 250.0
+    var minimumStrongTransitDistanceMeters = 150.0
+    var minimumMotionSupportedTransitDistanceMeters = 75.0
+    var minimumSparseTransitDistanceMeters = 40.0
+    var maximumVisitDistanceMeters = 75.0
+    var minimumVisitDwellFraction = 0.85
+    var minimumSupportedMovementDuration: TimeInterval = 60
+    var minimumSparseMovementDuration: TimeInterval = 120
+    var movementMergeGap: TimeInterval = 15
+    var speedSampleMergeGap: TimeInterval = 90
+    var minimumMovingSpeedMetersPerSecond = 0.5
+    var maximumPlausibleSpeedMetersPerSecond = 80.0
+    var baseDwellRadiusMeters = 40.0
+    var maximumDwellRadiusMeters = 60.0
+    var dwellAccuracyMultiplier = 2.0
+    var maximumDwellCandidateCount = 64
+    var minimumRouteSimplificationToleranceMeters = 12.0
+    var maximumRouteSimplificationToleranceMeters = 35.0
+    var routeSimplificationAccuracyMultiplier = 1.5
     var endpointFraction = 0.2
     var maximumEndpointSampleCount = 6
     var polylineToleranceMeters = 25.0
@@ -44,7 +60,7 @@ nonisolated enum JournalRecordingClassifier {
                         <= configuration.maximumHorizontalAccuracy
             }
             .sorted { $0.timestamp < $1.timestamp }
-        guard let first = reliable.first else { return nil }
+        guard !reliable.isEmpty else { return nil }
 
         let center = medianPoint(reliable)
         let radii = reliable.map { distance($0, center) }.sorted()
@@ -56,18 +72,50 @@ nonisolated enum JournalRecordingClassifier {
             )
         )
         let coverageRadius = radii[coverageIndex]
-        let endpointDisplacement = reliable.last.map { distance(first, $0) } ?? 0
-        let traveledDistance = routeDistance(reliable)
+        let traveledDistance = routeDistance(
+            reliable,
+            configuration: configuration
+        )
+        let movementDuration = max(
+            sustainedMovementDuration(
+                motion,
+                minimumConfidenceRawValue:
+                    configuration.minimumMotionConfidenceRawValue,
+                mergeGap: configuration.movementMergeGap
+            ),
+            sustainedSpeedMovementDuration(
+                reliable,
+                configuration: configuration
+            )
+        )
+        let dwellFraction = dominantDwellFraction(
+            reliable,
+            configuration: configuration
+        )
 
-        let geographicallyClustered = coverageRadius
-            <= configuration.visitRadiusMeters
-            && endpointDisplacement
-                <= configuration.visitMaximumEndpointDisplacementMeters
-        let movementIsTooSmallForTransit = traveledDistance
-            < configuration.minimumTransitDistanceMeters
-            && endpointDisplacement
-                <= configuration.visitMaximumEndpointDisplacementMeters
-        if geographicallyClustered || movementIsTooSmallForTransit {
+        let hasStrongRoute = traveledDistance
+            >= configuration.minimumStrongTransitDistanceMeters
+        let hasMotionSupportedRoute = traveledDistance
+            >= configuration.minimumMotionSupportedTransitDistanceMeters
+            && movementDuration
+                >= configuration.minimumSupportedMovementDuration
+        let hasSparseMotionSupportedRoute = traveledDistance
+            >= configuration.minimumSparseTransitDistanceMeters
+            && movementDuration
+                >= configuration.minimumSparseMovementDuration
+        let isTransit = hasStrongRoute
+            || hasMotionSupportedRoute
+            || hasSparseMotionSupportedRoute
+        let isVisit = traveledDistance
+            < configuration.maximumVisitDistanceMeters
+            && dwellFraction >= configuration.minimumVisitDwellFraction
+            && movementDuration
+                < configuration.minimumSupportedMovementDuration
+        JournalRecordingLog.classifier.info(
+            "[Classifier] confirmed path \(traveledDistance)m; sustained movement \(movementDuration)s; dominant dwell \(dwellFraction)"
+        )
+
+        if !isTransit, isVisit {
             return .visit(
                 coordinate: RecordedRoutePoint(
                     latitude: center.latitude,
@@ -108,6 +156,41 @@ nonisolated enum JournalRecordingClassifier {
         )
     }
 
+    static func sustainedMovementDuration(
+        _ motion: [RecordedMotionObservation],
+        minimumConfidenceRawValue: Int = 1,
+        mergeGap: TimeInterval = 15
+    ) -> TimeInterval {
+        let intervals = motion.compactMap { observation -> DateInterval? in
+            guard observation.confidenceRawValue >= minimumConfidenceRawValue,
+                  observation.endTime > observation.startTime else { return nil }
+            switch observation.kind {
+            case .walking, .running, .cycling, .automotive:
+                return DateInterval(
+                    start: observation.startTime,
+                    end: observation.endTime
+                )
+            case .stationary, .unknown:
+                return nil
+            }
+        }.sorted { $0.start < $1.start }
+        guard var current = intervals.first else { return 0 }
+
+        var longest = current.duration
+        for interval in intervals.dropFirst() {
+            if interval.start.timeIntervalSince(current.end) <= mergeGap {
+                current = DateInterval(
+                    start: current.start,
+                    end: max(current.end, interval.end)
+                )
+            } else {
+                longest = max(longest, current.duration)
+                current = interval
+            }
+        }
+        return max(longest, current.duration)
+    }
+
     static func dominantMode(
         motion: [RecordedMotionObservation],
         points: [TrackedLocationPoint],
@@ -135,7 +218,7 @@ nonisolated enum JournalRecordingClassifier {
             return dominant.key
         }
 
-        let speeds = points.compactMap(\.speed).filter { $0 >= 0 && $0 < 80 }
+        let speeds = points.compactMap(\.speed).filter { $0 >= 0.5 && $0 < 80 }
         guard !speeds.isEmpty else { return .unknown }
         let medianSpeed = speeds.sorted()[speeds.count / 2]
         if medianSpeed <= 2.7 { return .walking }
@@ -144,14 +227,142 @@ nonisolated enum JournalRecordingClassifier {
         return .unknown
     }
 
-    static func routeDistance(_ points: [TrackedLocationPoint]) -> Double {
-        zip(points, points.dropFirst()).reduce(0) { result, pair in
-            let separation = distance(pair.0, pair.1)
-            let noiseFloor = min(
-                25,
-                max(pair.0.horizontalAccuracy, pair.1.horizontalAccuracy) * 0.25
+    static func routeDistance(
+        _ points: [TrackedLocationPoint],
+        configuration: JournalRecordingClassificationConfiguration = .init()
+    ) -> Double {
+        guard points.count > 1 else { return 0 }
+        let accuracies = points.map(\.horizontalAccuracy).sorted()
+        let medianAccuracy = accuracies[accuracies.count / 2]
+        let tolerance = min(
+            configuration.maximumRouteSimplificationToleranceMeters,
+            max(
+                configuration.minimumRouteSimplificationToleranceMeters,
+                medianAccuracy
+                    * configuration.routeSimplificationAccuracyMultiplier
             )
-            return result + (separation >= noiseFloor ? separation : 0)
+        )
+        let confirmedRoute = simplify(
+            points.map {
+                RecordedRoutePoint(
+                    latitude: $0.latitude,
+                    longitude: $0.longitude,
+                    timestamp: $0.timestamp
+                )
+            },
+            toleranceMeters: tolerance
+        )
+        return zip(confirmedRoute, confirmedRoute.dropFirst()).reduce(0) {
+            distance, pair in
+            distance + CLLocation(
+                latitude: pair.0.latitude,
+                longitude: pair.0.longitude
+            ).distance(
+                from: CLLocation(
+                    latitude: pair.1.latitude,
+                    longitude: pair.1.longitude
+                )
+            )
+        }
+    }
+
+    static func dominantDwellFraction(
+        _ points: [TrackedLocationPoint],
+        configuration: JournalRecordingClassificationConfiguration = .init()
+    ) -> Double {
+        guard !points.isEmpty else { return 0 }
+        guard points.count > 1 else { return 1 }
+
+        let accuracies = points.map(\.horizontalAccuracy).sorted()
+        let medianAccuracy = accuracies[accuracies.count / 2]
+        let dwellRadius = min(
+            configuration.maximumDwellRadiusMeters,
+            max(
+                configuration.baseDwellRadiusMeters,
+                medianAccuracy * configuration.dwellAccuracyMultiplier
+            )
+        )
+        let weights = temporalWeights(points)
+        let totalWeight = weights.reduce(0, +)
+        guard totalWeight > 0 else { return 1 }
+
+        let maximumCandidateCount = max(
+            1,
+            configuration.maximumDwellCandidateCount
+        )
+        let stride = max(
+            1,
+            Int(
+                ceil(
+                    Double(points.count)
+                        / Double(maximumCandidateCount)
+                )
+            )
+        )
+        var candidates = Swift.stride(
+            from: 0,
+            to: points.count,
+            by: stride
+        ).map { points[$0] }
+        candidates.append(medianPoint(points))
+
+        let greatestDwellWeight = candidates.map { candidate in
+            zip(points, weights).reduce(0.0) { result, pair in
+                distance(pair.0, candidate) <= dwellRadius
+                    ? result + pair.1
+                    : result
+            }
+        }.max() ?? 0
+        return min(1, greatestDwellWeight / totalWeight)
+    }
+
+    private static func sustainedSpeedMovementDuration(
+        _ points: [TrackedLocationPoint],
+        configuration: JournalRecordingClassificationConfiguration
+    ) -> TimeInterval {
+        let moving = points.filter { point in
+            guard let speed = point.speed else { return false }
+            return speed >= configuration.minimumMovingSpeedMetersPerSecond
+                && speed < configuration.maximumPlausibleSpeedMetersPerSecond
+        }
+        guard let first = moving.first else { return 0 }
+
+        var runStart = first.timestamp
+        var previous = first.timestamp
+        var longest: TimeInterval = 0
+        for point in moving.dropFirst() {
+            if point.timestamp.timeIntervalSince(previous)
+                > configuration.speedSampleMergeGap {
+                longest = max(longest, previous.timeIntervalSince(runStart))
+                runStart = point.timestamp
+            }
+            previous = point.timestamp
+        }
+        return max(longest, previous.timeIntervalSince(runStart))
+    }
+
+    private static func temporalWeights(
+        _ points: [TrackedLocationPoint]
+    ) -> [TimeInterval] {
+        guard points.count > 1 else { return [1] }
+        return points.indices.map { index in
+            let previousHalf = index > points.startIndex
+                ? max(
+                    0,
+                    points[index].timestamp.timeIntervalSince(
+                        points[index - 1].timestamp
+                    ) / 2
+                )
+                : 0
+            let nextHalf = index < points.index(before: points.endIndex)
+                ? max(
+                    0,
+                    points[index + 1].timestamp.timeIntervalSince(
+                        points[index].timestamp
+                    ) / 2
+                )
+                : 0
+            return previousHalf + nextHalf
         }
     }
 

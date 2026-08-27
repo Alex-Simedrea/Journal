@@ -42,9 +42,9 @@ struct EntryDetailPeoplePickerTests {
     #expect(usage[person.id] == 1)
   }
 
-  @Test("Most used grid is capped at eight people")
+  @Test("Most used grid is capped at three rows")
   func mostUsedGridLimit() {
-    let people = (1...10).map { Person(name: "Person \($0)") }
+    let people = (1...14).map { Person(name: "Person \($0)") }
     let usage = Dictionary(
       uniqueKeysWithValues: people.enumerated().map {
         ($0.element.id, people.count - $0.offset)
@@ -57,8 +57,8 @@ struct EntryDetailPeoplePickerTests {
       searchText: ""
     )
 
-    #expect(projection.mostUsed.count == 8)
-    #expect(projection.mostUsed.map(\.name) == people.prefix(8).map(\.name))
+    #expect(projection.mostUsed.count == 12)
+    #expect(projection.mostUsed.map(\.name) == people.prefix(12).map(\.name))
   }
 
   @Test("Most used grid excludes people with no usage")
@@ -73,6 +73,21 @@ struct EntryDetailPeoplePickerTests {
     )
 
     #expect(projection.mostUsed.map(\.name) == ["Used"])
+  }
+
+  @Test("Review drafts retain people after leaving the picker")
+  func reviewDraftRetainsPeople() {
+    let entry = LogEntry(kind: .placeVisit, needsReview: false)
+    let person = Person(name: "Alex")
+    let coordinator = EntryDetailCoordinator(entry: entry)
+    coordinator.present(.people)
+    coordinator.session.selectedPeopleIDs = [person.id]
+
+    coordinator.returnToDetailsPreservingDraft(for: .people)
+
+    #expect(coordinator.route == .details)
+    #expect(coordinator.session.selectedPeopleIDs == [person.id])
+    #expect(entry.people.isEmpty)
   }
 
   @Test("Search includes aliases and preserves alphabetic sections")

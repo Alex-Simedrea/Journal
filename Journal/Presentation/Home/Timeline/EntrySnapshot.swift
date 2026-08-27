@@ -1,7 +1,7 @@
 import CoreLocation
 import Foundation
 
-struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
+nonisolated struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
     let id: UUID
     let createdAt: Date
     let startTime: Date?
@@ -18,6 +18,7 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
     let transitSourceServiceIdentifier: String?
     let transitDistanceMeters: Double?
     let transitDistanceIsApproximate: Bool
+    let transitRecordedRoute: [RecordedRoutePoint]
     let origin: String
     let destination: String
     let originLocation: TimelineLocationSnapshot?
@@ -73,6 +74,7 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
         transitType = transit?.type ?? "Transit"
         transitSourceOrganizationName = transit?.sourceOrganizationName
         transitSourceServiceIdentifier = transit?.sourceServiceIdentifier
+        transitRecordedRoute = transit?.recordedRoute ?? []
         origin = transit?.originPlace?.name
             ?? transit?.originLocation?.timelineName
             ?? transit?.originRawText?.nilIfBlank
@@ -194,6 +196,7 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
         transitSourceOrganizationName: String? = nil,
         transitSourceServiceIdentifier: String? = nil,
         transitDistanceMeters: Double? = nil,
+        transitRecordedRoute: [RecordedRoutePoint] = [],
         origin: String = "Origin",
         destination: String = "Destination",
         originLocation: TimelineLocationSnapshot? = nil,
@@ -235,6 +238,7 @@ struct TimelineEntrySnapshot: Hashable, Identifiable, Sendable {
         self.transitSourceServiceIdentifier = transitSourceServiceIdentifier
         self.transitDistanceMeters = transitDistanceMeters
         transitDistanceIsApproximate = false
+        self.transitRecordedRoute = transitRecordedRoute
         self.origin = origin
         self.destination = destination
         self.originLocation = originLocation

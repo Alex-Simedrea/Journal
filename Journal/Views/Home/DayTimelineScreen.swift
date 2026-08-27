@@ -11,6 +11,7 @@ struct DayTimelineScreen: View {
         AutomationCandidateSnapshot?
     @State private var pendingEntryDeletionID: UUID?
     @State private var pendingCandidateDismissalID: UUID?
+    @State private var selectedTransitGap: TimelineTransitGapSelection?
     var showsCloseButton = true
     var contentRevision = 0
 
@@ -42,6 +43,8 @@ struct DayTimelineScreen: View {
             automationCandidates: presentation.automationCandidates,
             overviewData: presentation.overviewData,
             errorMessage: presentation.timelineErrorMessage,
+            pendingAutomationCandidateIDsByEntryID:
+                presentation.pendingAutomationCandidateIDsByEntryID,
             onSelect: { entryID in
                 if let candidate = presentation.pendingAutomationCandidate(
                     forEntryID: entryID
@@ -51,7 +54,10 @@ struct DayTimelineScreen: View {
                     presentation.sheet = .details(entryID)
                 }
             },
-            onSelectCandidate: { selectedAutomationCandidate = $0 }
+            onSelectCandidate: { selectedAutomationCandidate = $0 },
+            onAcceptCandidateEntry: acceptCandidateEntry,
+            onDismissCandidate: dismissCandidate,
+            onAddTransit: addTransit
         )
         .navigationTitle(title)
         .navigationSubtitle(
@@ -112,6 +118,13 @@ struct DayTimelineScreen: View {
                 onRequestDismiss: requestCandidateDismissal
             )
         }
+        .sheet(item: $selectedTransitGap) { selection in
+            TimelineTransitGapReviewSheet(
+                gapID: selection.gapID,
+                onCancel: { selectedTransitGap = nil },
+                onComplete: finishAddingTransit
+            )
+        }
         .alert(
             "Couldn’t Prepare Timeline",
             isPresented: Binding(
@@ -141,11 +154,14 @@ struct DayTimelineScreen: View {
             await presentation.loadWorkoutRoutes(for: selectedDay)
         }
         .onReceive(
-            NotificationCenter.default.publisher(
-                for: .automationCandidatesDidChange
-            )
-        ) { _ in
-            reloadTimelineAndRoutes()
+            TimelineDataChange.publisher
+        ) { change in
+            switch change {
+            case .enrichment:
+                reloadTimeline()
+            case .structure:
+                reloadTimelineAndRoutes()
+            }
         }
     }
 
@@ -185,6 +201,81 @@ struct DayTimelineScreen: View {
         selectedAutomationCandidate = nil
     }
 
+    private func acceptCandidateEntry(
+        _ entryID: UUID,
+        _ candidateID: UUID
+    ) {
+        do {
+            guard let acceptedEntryID = try AutomationCandidateStore
+                .acceptMaterializedTransit(
+                    candidateID: candidateID,
+                    entryID: entryID,
+                    in: modelContext
+                ) else {
+                reloadTimelineAndRoutes()
+                return
+            }
+            enrichAcceptedTransit(entryID: acceptedEntryID)
+        } catch {
+            presentation.setupErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func dismissCandidate(_ candidateID: UUID) {
+        do {
+            try AutomationCandidateStore.dismiss(
+                candidateID: candidateID,
+                in: modelContext
+            )
+        } catch {
+            presentation.setupErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func enrichAcceptedTransit(entryID: UUID) {
+        let container = modelContext.container
+        Task {
+            let enrichmentContext = ModelContext(container)
+            enrichmentContext.autosaveEnabled = false
+            _ = try? await EntryWeatherService.populate(
+                entryID: entryID,
+                in: enrichmentContext
+            )
+            await TransitDistanceService.populate(
+                entryID: entryID,
+                in: enrichmentContext
+            )
+            try? await PhotoAutoLinkService.synchronize(
+                in: enrichmentContext
+            )
+        }
+    }
+
+    private func addTransit(_ gapID: TimelineTransitGapID) {
+        selectedTransitGap = TimelineTransitGapSelection(gapID: gapID)
+    }
+
+    private func finishAddingTransit(_ entryID: UUID) {
+        selectedTransitGap = nil
+        reloadTimelineAndRoutes()
+        enrichGapTransit(entryID: entryID)
+    }
+
+    private func enrichGapTransit(entryID: UUID) {
+        let container = modelContext.container
+        Task {
+            let enrichmentContext = ModelContext(container)
+            enrichmentContext.autosaveEnabled = false
+            await TransitDistanceService.populate(
+                entryID: entryID,
+                in: enrichmentContext
+            )
+            try? await PhotoAutoLinkService.synchronize(
+                in: enrichmentContext
+            )
+        }
+    }
+
     private func finishCandidateSheet() {
         if let candidateID = pendingCandidateDismissalID {
             pendingCandidateDismissalID = nil
@@ -204,6 +295,12 @@ struct DayTimelineScreen: View {
 private struct TimelineReloadID: Equatable {
     let day: TimelineDayKey
     let contentRevision: Int
+}
+
+private struct TimelineTransitGapSelection: Identifiable {
+    let gapID: TimelineTransitGapID
+
+    var id: TimelineTransitGapID { gapID }
 }
 
 #Preview {

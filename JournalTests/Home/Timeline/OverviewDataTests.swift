@@ -123,6 +123,106 @@ struct TimelineOverviewDataTests {
         #expect(data.hasContent)
     }
 
+    @Test func recordedTransitUsesStoredRouteWithoutEndpoints() throws {
+        let start = try Date(
+            "2026-07-19T08:00:00Z",
+            strategy: .iso8601
+        )
+        let route = [
+            RecordedRoutePoint(
+                latitude: 44.4268,
+                longitude: 26.1025,
+                timestamp: start
+            ),
+            RecordedRoutePoint(
+                latitude: 44.4321,
+                longitude: 26.1134,
+                timestamp: start.addingTimeInterval(300)
+            ),
+            RecordedRoutePoint(
+                latitude: 44.4412,
+                longitude: 26.1217,
+                timestamp: start.addingTimeInterval(600)
+            ),
+        ]
+        let snapshot = TimelineEntrySnapshot(
+            createdAt: start,
+            startTime: start,
+            endTime: start.addingTimeInterval(600),
+            startTimeZoneIdentifier: "UTC",
+            endTimeZoneIdentifier: "UTC",
+            creationTimeZoneIdentifier: "UTC",
+            timeConfidence: .explicit,
+            kind: .transit,
+            transitType: "Walk",
+            transitRecordedRoute: route
+        )
+        let occurrence = try #require(
+            TimelineProjection.project(
+                entries: [snapshot],
+                for: TimelineDayKey(year: 2026, month: 7, day: 19)
+            ).occurrences.first
+        )
+
+        let data = TimelineOverviewData.make(occurrences: [occurrence])
+
+        let path = try #require(data.paths.first)
+        #expect(path.kind == .transit("Walk"))
+        #expect(path.coordinates.count == route.count)
+        for (coordinate, point) in zip(path.coordinates, route) {
+            #expect(coordinate.latitude == point.latitude)
+            #expect(coordinate.longitude == point.longitude)
+        }
+        #expect(data.markers.isEmpty)
+        #expect(data.hasContent)
+    }
+
+    @Test func transitWithoutRecordedRouteKeepsEndpointCurveFallback() throws {
+        let start = try Date(
+            "2026-07-19T08:00:00Z",
+            strategy: .iso8601
+        )
+        let origin = TimelineLocationSnapshot(
+            place: nil,
+            fallbackName: "Origin",
+            fallbackLocation: Location(latitude: 44.4268, longitude: 26.1025)
+        )
+        let destination = TimelineLocationSnapshot(
+            place: nil,
+            fallbackName: "Destination",
+            fallbackLocation: Location(latitude: 44.4412, longitude: 26.1217)
+        )
+        let snapshot = TimelineEntrySnapshot(
+            createdAt: start,
+            startTime: start,
+            endTime: start.addingTimeInterval(600),
+            startTimeZoneIdentifier: "UTC",
+            endTimeZoneIdentifier: "UTC",
+            creationTimeZoneIdentifier: "UTC",
+            timeConfidence: .explicit,
+            kind: .transit,
+            originLocation: origin,
+            destinationLocation: destination
+        )
+        let occurrence = try #require(
+            TimelineProjection.project(
+                entries: [snapshot],
+                for: TimelineDayKey(year: 2026, month: 7, day: 19)
+            ).occurrences.first
+        )
+
+        let data = TimelineOverviewData.make(occurrences: [occurrence])
+
+        let path = try #require(data.paths.first)
+        #expect(path.coordinates.count == 33)
+        let first = try #require(path.coordinates.first)
+        let last = try #require(path.coordinates.last)
+        #expect(abs(first.latitude - origin.latitude) < 0.000_000_001)
+        #expect(abs(first.longitude - origin.longitude) < 0.000_000_001)
+        #expect(abs(last.latitude - destination.latitude) < 0.000_000_001)
+        #expect(abs(last.longitude - destination.longitude) < 0.000_000_001)
+    }
+
     private func point(_ index: Int) -> WorkoutCoordinateSnapshot {
         WorkoutCoordinateSnapshot(
             latitude: 44.4 + Double(index) * 0.000_01,

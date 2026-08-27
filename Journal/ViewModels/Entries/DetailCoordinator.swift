@@ -198,6 +198,13 @@ final class EntryDetailCoordinator {
         errorMessage = nil
     }
 
+    func returnToDetailsPreservingDraft(for route: EntryDetailRoute) {
+        movesForward = false
+        session.commitDraft(for: route)
+        path = [.details]
+        errorMessage = nil
+    }
+
     func returnToLocations(entry: LogEntry) {
         movesForward = false
         session.reload(from: entry)
@@ -310,6 +317,15 @@ final class EntryDetailEditSession {
         }
     }
 
+    func commitDraft(for route: EntryDetailRoute) {
+        switch route {
+        case .people:
+            baseline.selectedPeopleIDs = selectedPeopleIDs
+        default:
+            break
+        }
+    }
+
     func selection(for role: EntryDetailLocationRole) -> EntryLocationSelection? {
         locationSelections[role]
     }
@@ -394,7 +410,7 @@ private struct EntryDetailDraftBaseline {
     let endTime: Date
     let startTimeZoneIdentifier: String
     let endTimeZoneIdentifier: String
-    let selectedPeopleIDs: Set<UUID>
+    var selectedPeopleIDs: Set<UUID>
     let photoReferences: [PhotoReference]
     let transitType: String
     let transitOperator: String

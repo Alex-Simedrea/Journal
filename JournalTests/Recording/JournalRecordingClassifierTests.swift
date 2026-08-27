@@ -89,6 +89,90 @@ struct JournalRecordingClassifierTests {
         #expect(mode == .automotive)
     }
 
+    @Test("A closed rectangular walk is transit")
+    func closedRectangularWalk() throws {
+        let points = [
+            point(north: 0, east: 0, minute: 0, speed: 1.4),
+            point(north: 0, east: 75, minute: 1, speed: 1.4),
+            point(north: 75, east: 75, minute: 2, speed: 1.4),
+            point(north: 75, east: 0, minute: 3, speed: 1.4),
+            point(north: 0, east: 0, minute: 4, speed: 1.4),
+        ]
+        let motion = [
+            RecordedMotionObservation(
+                startTime: start,
+                endTime: start.addingTimeInterval(4 * 60),
+                kind: .walking,
+                confidenceRawValue: 2
+            )
+        ]
+
+        let result = try #require(
+            JournalRecordingClassifier.classify(
+                points: points,
+                motion: motion
+            )
+        )
+
+        guard case .transit(_, _, _, let distance, let mode) = result else {
+            Issue.record("Expected the closed walk to be transit")
+            return
+        }
+        #expect(distance > 250)
+        #expect(mode == .walking)
+    }
+
+    @Test("An out-and-back route is transit without endpoint displacement")
+    func outAndBackRoute() throws {
+        let points = [
+            point(north: 0, east: 0, minute: 0, speed: 1.5),
+            point(north: 1_500, east: 0, minute: 15, speed: 1.5),
+            point(north: 3_000, east: 0, minute: 30, speed: 1.5),
+            point(north: 1_500, east: 0, minute: 45, speed: 1.5),
+            point(north: 0, east: 0, minute: 60, speed: 1.5),
+        ]
+
+        let result = try #require(
+            JournalRecordingClassifier.classify(points: points, motion: [])
+        )
+
+        guard case .transit(_, _, _, let distance, let mode) = result else {
+            Issue.record("Expected the out-and-back walk to be transit")
+            return
+        }
+        #expect(distance > 5_500)
+        #expect(mode == .walking)
+    }
+
+    @Test("Sustained motion supports a sparse short route")
+    func sparseRouteWithMotion() throws {
+        let points = [
+            point(north: 0, east: 0, minute: 0),
+            point(north: 50, east: 0, minute: 3),
+        ]
+        let motion = [
+            RecordedMotionObservation(
+                startTime: start,
+                endTime: start.addingTimeInterval(3 * 60),
+                kind: .walking,
+                confidenceRawValue: 2
+            )
+        ]
+
+        let result = try #require(
+            JournalRecordingClassifier.classify(
+                points: points,
+                motion: motion
+            )
+        )
+
+        guard case .transit(_, _, _, _, let mode) = result else {
+            Issue.record("Expected sparse sustained movement to be transit")
+            return
+        }
+        #expect(mode == .walking)
+    }
+
     @Test("High GPS speed alone is not classified as automotive")
     func speedDoesNotImplyCar() {
         let points = [

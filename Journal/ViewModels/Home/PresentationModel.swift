@@ -63,6 +63,10 @@ final class HomePresentationModel {
         pendingCandidateByEntryID[entryID]
     }
 
+    var pendingAutomationCandidateIDsByEntryID: [UUID: UUID] {
+        pendingCandidateByEntryID.mapValues(\.id)
+    }
+
     func reloadTimeline(
         for selectedDay: TimelineDayKey,
         in modelContext: ModelContext

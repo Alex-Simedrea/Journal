@@ -61,7 +61,11 @@ struct TimelineOverviewMap: View {
                 )
             }
         }
-        .mapStyle(.standard)
+        .mapStyle(
+            JournalMapDisplayStylePolicy.mapStyle(
+                for: data.markers.map(\.coordinate)
+            )
+        )
         .onChange(of: data, initial: true) {
             position = .automatic
         }

@@ -62,20 +62,11 @@ final class VisitMonitoringCoordinator: NSObject, CLLocationManagerDelegate {
             longitude: visit.coordinate.longitude,
             horizontalAccuracyMeters: visit.horizontalAccuracy
         )
-        let context = ModelContext(modelContainer)
-        do {
-            guard try AutomationCandidateStore.upsertVisit(
-                snapshot,
-                in: context
-            ) != nil else { return }
-            try context.save()
-            NotificationCenter.default.post(
-                name: .automationCandidatesDidChange,
-                object: nil
+        Task {
+            let maintenance = await JournalPersistenceActors.shared.maintenance(
+                for: JournalModelContainerReference(modelContainer)
             )
-        } catch {
-            context.rollback()
-            print("Visit persistence failed: \(error)")
+            await maintenance.persistVisit(snapshot)
         }
     }
 
@@ -86,7 +77,9 @@ final class VisitMonitoringCoordinator: NSObject, CLLocationManagerDelegate {
         print("Visit monitoring failed: \(error)")
     }
 
-    func enrichClosedVisits(in modelContext: ModelContext) async throws {
+    nonisolated static func enrichClosedVisits(
+        in modelContext: ModelContext
+    ) async throws {
         let candidates = try modelContext.fetch(
             FetchDescriptor<AutomationCandidate>()
         ).filter {

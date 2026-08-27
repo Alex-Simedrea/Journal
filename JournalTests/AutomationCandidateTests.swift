@@ -87,6 +87,52 @@ struct AutomationCandidateTests {
         #expect(try context.fetch(FetchDescriptor<LogEntry>()).isEmpty)
     }
 
+    @Test("Quick accepting a transit keeps its materialized entry in place")
+    func quickAcceptTransitKeepsMaterializedEntry() throws {
+        let context = try makeJournalContext()
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let candidate = AutomationCandidate(
+            sourceFingerprint: "quick-accept-transit",
+            kind: .transit,
+            startTime: start,
+            endTime: start.addingTimeInterval(900),
+            motionKind: .walk,
+            motionConfidenceRawValue: 2,
+            originLocation: Location(latitude: 44.43, longitude: 26.10),
+            destinationLocation: Location(latitude: 44.44, longitude: 26.11)
+        )
+        context.insert(candidate)
+        try context.save()
+        try AutomationCandidateEntryService.synchronizePending(in: context)
+
+        let entry = try #require(
+            try context.fetch(FetchDescriptor<LogEntry>()).first
+        )
+        let entryID = entry.id
+        #expect(entry.needsReview)
+        #expect(entry.transitDetails?.fieldReviews.isEmpty == false)
+
+        let acceptedID = try AutomationCandidateStore
+            .acceptMaterializedTransit(
+                candidateID: candidate.id,
+                entryID: entryID,
+                in: context
+            )
+
+        #expect(acceptedID == entryID)
+        #expect(candidate.status == .accepted)
+        #expect(candidate.acceptedEntryID == entryID)
+        #expect(entry.automationCandidateID == candidate.id)
+        #expect(!entry.needsReview)
+        #expect(entry.transitDetails?.fieldReviews.isEmpty == true)
+        #expect(try context.fetch(FetchDescriptor<LogEntry>()).count == 1)
+        #expect(
+            try AutomationCandidateEntryService.synchronizePending(
+                in: context
+            ) == 0
+        )
+    }
+
     @Test("Invalid visit intervals are ignored")
     func invalidVisits() throws {
         let context = try makeContext()
@@ -142,6 +188,49 @@ struct AutomationCandidateTests {
         ).count == 1)
     }
 
+    @Test("Pending motion reconciliation promotes saved endpoint identities")
+    func pendingMotionEndpointPromotion() throws {
+        let context = try makeContext()
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let homeID = UUID()
+        let officeID = UUID()
+        let initial = MotionTransitDetection(
+            kind: .walk,
+            confidenceRawValue: 1,
+            startTime: start,
+            endTime: start.addingTimeInterval(900),
+            originLocation: Location(latitude: 44.43, longitude: 26.10),
+            originPlaceID: nil,
+            destinationLocation: Location(latitude: 44.44, longitude: 26.11),
+            destinationPlaceID: nil
+        )
+        let candidate = try #require(
+            try AutomationCandidateStore.upsertMotion(initial, in: context)
+        )
+        try context.save()
+
+        let enriched = MotionTransitDetection(
+            kind: .walk,
+            confidenceRawValue: 2,
+            startTime: start,
+            endTime: start.addingTimeInterval(900),
+            originLocation: Location(latitude: 44.431, longitude: 26.101),
+            originPlaceID: homeID,
+            destinationLocation: Location(latitude: 44.441, longitude: 26.111),
+            destinationPlaceID: officeID
+        )
+        let reconciled = try #require(
+            try AutomationCandidateStore.upsertMotion(enriched, in: context)
+        )
+
+        #expect(reconciled.id == candidate.id)
+        #expect(reconciled.originPlaceID == homeID)
+        #expect(reconciled.destinationPlaceID == officeID)
+        #expect(reconciled.originLocation == enriched.originLocation)
+        #expect(reconciled.destinationLocation == enriched.destinationLocation)
+        #expect(reconciled.motionConfidenceRawValue == 2)
+    }
+
     @Test("Pending candidates materialize once with endpoint metadata")
     func pendingCandidateMaterialization() throws {
         let context = try makeJournalContext()
@@ -190,6 +279,265 @@ struct AutomationCandidateTests {
         #expect(entry.startTimeZoneIdentifier == "Europe/London")
         #expect(entry.endTimeZoneIdentifier == "America/New_York")
         #expect(TimelineEntrySnapshot(entry: entry).destination == "5th Avenue")
+    }
+
+    @Test("Pending transit entries retroactively adopt adjacent saved places")
+    func materializedTransitEndpointPromotion() throws {
+        let context = try makeJournalContext()
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let end = start.addingTimeInterval(30 * 60)
+        let candidate = AutomationCandidate(
+            sourceFingerprint: "retroactive-endpoint-place-promotion",
+            kind: .transit,
+            startTime: start,
+            endTime: end,
+            motionKind: .walk,
+            motionConfidenceRawValue: 2,
+            originLocation: Location(
+                latitude: 44.43,
+                longitude: 26.10,
+                formattedAddress: "Detected home address"
+            ),
+            destinationLocation: Location(
+                latitude: 44.44,
+                longitude: 26.11,
+                formattedAddress: "Detected office address"
+            )
+        )
+        context.insert(candidate)
+        try context.save()
+        try AutomationCandidateEntryService.synchronizePending(in: context)
+
+        let home = Place(
+            name: "Home",
+            location: Location(latitude: 44.431, longitude: 26.101),
+            accuracyRadiusMeters: 200
+        )
+        let office = Place(
+            name: "Office",
+            location: Location(latitude: 44.441, longitude: 26.111),
+            accuracyRadiusMeters: 200
+        )
+        let previousVisit = LogEntry(
+            kind: .placeVisit,
+            startTime: start.addingTimeInterval(-3_600),
+            endTime: start,
+            needsReview: false
+        )
+        previousVisit.placeVisitDetails = PlaceVisitDetails(place: home)
+        let nextVisit = LogEntry(
+            kind: .placeVisit,
+            startTime: end,
+            endTime: end.addingTimeInterval(3_600),
+            needsReview: false
+        )
+        nextVisit.placeVisitDetails = PlaceVisitDetails(place: office)
+        context.insert(home)
+        context.insert(office)
+        context.insert(previousVisit)
+        context.insert(nextVisit)
+        try context.save()
+
+        try AutomationCandidateEntryService.synchronizePending(in: context)
+
+        let candidateID = candidate.id
+        let transit = try #require(try context.fetch(
+            FetchDescriptor<LogEntry>(
+                predicate: #Predicate { $0.id == candidateID }
+            )
+        ).first)
+        #expect(candidate.originPlaceID == home.id)
+        #expect(candidate.destinationPlaceID == office.id)
+        #expect(transit.transitDetails?.originPlace?.id == home.id)
+        #expect(transit.transitDetails?.destinationPlace?.id == office.id)
+        #expect(TimelineEntrySnapshot(entry: transit).origin == "Home")
+        #expect(TimelineEntrySnapshot(entry: transit).destination == "Office")
+
+        let day = TimelineDayKey(date: start, timeZone: .current)
+        let projection = TimelineProjection.project(
+            entries: [previousVisit, transit, nextVisit].map(
+                TimelineEntrySnapshot.init(entry:)
+            ),
+            for: day
+        )
+        let transitPresentation = try #require(
+            projection.rows.first {
+                $0.occurrence.entryID == transit.id
+            }?.transitPresentation
+        )
+        #expect(!transitPresentation.origin.showsPseudoEntry)
+        #expect(!transitPresentation.destination.showsPseudoEntry)
+    }
+
+    @Test("Established moving entries suppress pending transit materialization")
+    func establishedMovementSuppressesTransit() throws {
+        let context = try makeJournalContext()
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let workout = LogEntry(
+            kind: .workout,
+            startTime: start,
+            endTime: start.addingTimeInterval(30 * 60),
+            needsReview: false
+        )
+        workout.workoutDetails = WorkoutDetails(
+            healthKitWorkoutUUID: UUID(),
+            activityTypeRawValue: 0,
+            activityName: "Walking",
+            movementKind: .moving
+        )
+        let candidate = motionCandidate(
+            fingerprint: "covered-motion",
+            start: start.addingTimeInterval(2 * 60),
+            end: start.addingTimeInterval(28 * 60)
+        )
+        context.insert(workout)
+        context.insert(candidate)
+        try context.save()
+
+        #expect(
+            try AutomationCandidateEntryService.synchronizePending(in: context)
+                == 0
+        )
+        #expect(try context.fetch(FetchDescriptor<LogEntry>()).count == 1)
+        #expect(candidate.status == .pending)
+        #expect(AutomationCandidateSnapshot(candidate) != nil)
+    }
+
+    @Test("Duplicate suppression removes an existing review entry retroactively")
+    func establishedMovementRemovesMaterializedTransit() throws {
+        let context = try makeJournalContext()
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let candidate = motionCandidate(
+            fingerprint: "retroactive-covered-motion",
+            start: start,
+            end: start.addingTimeInterval(20 * 60)
+        )
+        context.insert(candidate)
+        try context.save()
+        try AutomationCandidateEntryService.synchronizePending(in: context)
+        #expect(try context.fetch(FetchDescriptor<LogEntry>()).count == 1)
+
+        let workout = LogEntry(
+            kind: .workout,
+            startTime: start,
+            endTime: start.addingTimeInterval(20 * 60),
+            needsReview: false
+        )
+        workout.workoutDetails = WorkoutDetails(
+            healthKitWorkoutUUID: UUID(),
+            activityTypeRawValue: 0,
+            activityName: "Walking",
+            movementKind: .moving
+        )
+        context.insert(workout)
+        try context.save()
+
+        try AutomationCandidateEntryService.synchronizePending(in: context)
+
+        let entries = try context.fetch(FetchDescriptor<LogEntry>())
+        #expect(entries.count == 1)
+        #expect(entries.first?.id == workout.id)
+        #expect(candidate.status == .pending)
+    }
+
+    @Test("Established place entries suppress pending visit materialization")
+    func establishedPlaceSuppressesVisitMaterialization() throws {
+        let context = try makeJournalContext()
+        let start = Date(timeIntervalSinceReferenceDate: 18_000)
+        let end = start.addingTimeInterval(30 * 60)
+        let placeEntry = LogEntry(
+            kind: .placeVisit,
+            startTime: start,
+            endTime: end,
+            startTimeZoneIdentifier: "Europe/Bucharest",
+            endTimeZoneIdentifier: "Europe/Bucharest",
+            needsReview: false
+        )
+        placeEntry.placeVisitDetails = PlaceVisitDetails(
+            location: Location(latitude: 45.65, longitude: 25.60)
+        )
+        let candidate = AutomationCandidate(
+            sourceFingerprint: "visit-established-overlap",
+            kind: .visit,
+            startTime: start.addingTimeInterval(2 * 60),
+            endTime: end.addingTimeInterval(-2 * 60),
+            visitLocation: Location(latitude: 45.65, longitude: 25.60)
+        )
+        context.insert(placeEntry)
+        context.insert(candidate)
+        try context.save()
+
+        let inserted = try AutomationCandidateEntryService.synchronizePending(
+            in: context
+        )
+
+        #expect(inserted == 0)
+        let entries = try context.fetch(FetchDescriptor<LogEntry>())
+        #expect(entries.count == 1)
+        #expect(entries.first?.id == placeEntry.id)
+        #expect(candidate.status == .pending)
+    }
+
+    @Test("Candidate boundaries snap to established entries within five minutes")
+    func establishedBoundarySnapping() throws {
+        let context = try makeJournalContext()
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let establishedStart = start.addingTimeInterval(14 * 60)
+        let visit = LogEntry(
+            kind: .placeVisit,
+            startTime: establishedStart,
+            endTime: start.addingTimeInterval(45 * 60),
+            needsReview: false
+        )
+        visit.placeVisitDetails = PlaceVisitDetails(
+            location: Location(latitude: 44.43, longitude: 26.10)
+        )
+        let transit = motionCandidate(
+            fingerprint: "snap-to-established",
+            start: start,
+            end: start.addingTimeInterval(16 * 60)
+        )
+        context.insert(visit)
+        context.insert(transit)
+        try context.save()
+
+        try AutomationCandidateEntryService.synchronizePending(in: context)
+
+        #expect(transit.endTime == establishedStart)
+        let transitID = transit.id
+        let materialized = try #require(try context.fetch(
+            FetchDescriptor<LogEntry>(
+                predicate: #Predicate { $0.id == transitID }
+            )
+        ).first)
+        #expect(materialized.endTime == establishedStart)
+    }
+
+    @Test("Motion transit boundaries take precedence over visit suggestions")
+    func motionBoundarySnapsVisitCandidate() throws {
+        let context = try makeJournalContext()
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let transitEnd = start.addingTimeInterval(16 * 60)
+        let transit = motionCandidate(
+            fingerprint: "motion-source-of-truth",
+            start: start,
+            end: transitEnd
+        )
+        let visit = AutomationCandidate(
+            sourceFingerprint: "visit-near-motion",
+            kind: .visit,
+            startTime: start.addingTimeInterval(14 * 60),
+            endTime: start.addingTimeInterval(45 * 60),
+            visitLocation: Location(latitude: 44.44, longitude: 26.11)
+        )
+        context.insert(transit)
+        context.insert(visit)
+        try context.save()
+
+        try AutomationCandidateEntryService.synchronizePending(in: context)
+
+        #expect(transit.endTime == transitEnd)
+        #expect(visit.startTime == transitEnd)
     }
 
     @Test("A multi-day candidate remains reviewable away from its start day")
@@ -509,6 +857,24 @@ struct AutomationCandidateTests {
             latitude: 44.4268,
             longitude: 26.1025,
             horizontalAccuracyMeters: 50
+        )
+    }
+
+
+    private func motionCandidate(
+        fingerprint: String,
+        start: Date,
+        end: Date
+    ) -> AutomationCandidate {
+        AutomationCandidate(
+            sourceFingerprint: fingerprint,
+            kind: .transit,
+            startTime: start,
+            endTime: end,
+            motionKind: .walk,
+            motionConfidenceRawValue: 2,
+            originLocation: Location(latitude: 44.42, longitude: 26.10),
+            destinationLocation: Location(latitude: 44.45, longitude: 26.13)
         )
     }
 }

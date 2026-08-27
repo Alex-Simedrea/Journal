@@ -36,45 +36,71 @@ actor LocationGeographyClient {
     }
 }
 
-@MainActor
-enum LocationGeographyService {
+nonisolated enum LocationGeographyService {
     static func populateMissing(in modelContext: ModelContext) async {
         do {
-            let placeIDs = try modelContext.fetch(FetchDescriptor<Place>())
-                .map(\.id)
-            let entryIDs = try modelContext.fetch(FetchDescriptor<LogEntry>())
-                .map(\.id)
-            var changed = false
+            let placeTargets = try modelContext.fetch(FetchDescriptor<Place>())
+                .compactMap { place -> PlaceGeographyTarget? in
+                    guard needsEnrichment(place.location) else { return nil }
+                    return PlaceGeographyTarget(
+                        id: place.id,
+                        original: place.location
+                    )
+                }
+            let entryTargets = try modelContext.fetch(
+                FetchDescriptor<LogEntry>()
+            ).compactMap { entry -> EntryGeographyTarget? in
+                let original = snapshot(for: entry)
+                return original.needsEnrichment
+                    ? EntryGeographyTarget(id: entry.id, original: original)
+                    : nil
+            }
 
-            for placeID in placeIDs {
-                guard let original = try placeLocation(
-                    withID: placeID,
-                    in: modelContext
-                ), needsEnrichment(original) else { continue }
+            var placeUpdates: [PlaceGeographyUpdate] = []
+            for target in placeTargets {
                 let enriched = await LocationGeographyClient.shared.enriched(
-                    original
+                    target.original
                 )
-                guard enriched != original,
-                      let place = try place(withID: placeID, in: modelContext),
-                      place.location == original else { continue }
-                place.location = enriched
-                changed = true
+                guard enriched != target.original else { continue }
+                placeUpdates.append(.init(
+                    id: target.id,
+                    original: target.original,
+                    enriched: enriched
+                ))
             }
 
-            for entryID in entryIDs {
-                guard let original = try entrySnapshot(
-                    withID: entryID,
-                    in: modelContext
-                ) else { continue }
-                let enriched = await enrich(original)
-                guard enriched != original,
-                      let entry = try entry(withID: entryID, in: modelContext),
-                      snapshot(for: entry) == original else { continue }
-                apply(enriched, to: entry)
-                changed = true
+            var entryUpdates: [EntryGeographyUpdate] = []
+            for target in entryTargets {
+                let enriched = await enrich(target.original)
+                guard enriched != target.original else { continue }
+                entryUpdates.append(.init(
+                    id: target.id,
+                    original: target.original,
+                    enriched: enriched
+                ))
             }
 
-            if changed { try modelContext.save() }
+            guard !placeUpdates.isEmpty || !entryUpdates.isEmpty else { return }
+            let placesByID = Dictionary(uniqueKeysWithValues: try modelContext
+                .fetch(FetchDescriptor<Place>()).map { ($0.id, $0) })
+            let entriesByID = Dictionary(uniqueKeysWithValues: try modelContext
+                .fetch(FetchDescriptor<LogEntry>()).map { ($0.id, $0) })
+            var changed = false
+            for update in placeUpdates {
+                guard let place = placesByID[update.id],
+                      place.location == update.original else { continue }
+                place.location = update.enriched
+                changed = true
+            }
+            for update in entryUpdates {
+                guard let entry = entriesByID[update.id],
+                      snapshot(for: entry) == update.original else { continue }
+                apply(update.enriched, to: entry)
+                changed = true
+            }
+            guard changed else { return }
+            try modelContext.save()
+            await TimelineDataChange.post()
         } catch {
             // Geography is supplementary; partial summaries remain useful.
         }
@@ -163,44 +189,31 @@ enum LocationGeographyService {
         }
     }
 
-    private static func placeLocation(
-        withID id: UUID,
-        in modelContext: ModelContext
-    ) throws -> Location? {
-        try place(withID: id, in: modelContext)?.location
-    }
-
-    private static func place(
-        withID id: UUID,
-        in modelContext: ModelContext
-    ) throws -> Place? {
-        var descriptor = FetchDescriptor<Place>(
-            predicate: #Predicate { $0.id == id }
-        )
-        descriptor.fetchLimit = 1
-        return try modelContext.fetch(descriptor).first
-    }
-
-    private static func entrySnapshot(
-        withID id: UUID,
-        in modelContext: ModelContext
-    ) throws -> EntryGeographySnapshot? {
-        try entry(withID: id, in: modelContext).map(snapshot(for:))
-    }
-
-    private static func entry(
-        withID id: UUID,
-        in modelContext: ModelContext
-    ) throws -> LogEntry? {
-        var descriptor = FetchDescriptor<LogEntry>(
-            predicate: #Predicate { $0.id == id }
-        )
-        descriptor.fetchLimit = 1
-        return try modelContext.fetch(descriptor).first
-    }
 }
 
-private struct EntryGeographySnapshot: Equatable {
+nonisolated private struct PlaceGeographyTarget: Sendable {
+    let id: UUID
+    let original: Location
+}
+
+nonisolated private struct PlaceGeographyUpdate: Sendable {
+    let id: UUID
+    let original: Location
+    let enriched: Location
+}
+
+nonisolated private struct EntryGeographyTarget: Sendable {
+    let id: UUID
+    let original: EntryGeographySnapshot
+}
+
+nonisolated private struct EntryGeographyUpdate: Sendable {
+    let id: UUID
+    let original: EntryGeographySnapshot
+    let enriched: EntryGeographySnapshot
+}
+
+nonisolated private struct EntryGeographySnapshot: Equatable, Sendable {
     let transitOrigin: Location?
     let transitDestination: Location?
     let transitOriginCandidates: [LocationCandidate]
@@ -210,6 +223,26 @@ private struct EntryGeographySnapshot: Equatable {
     let workoutSource: Location?
     let workoutOrigin: Location?
     let workoutDestination: Location?
+
+    var needsEnrichment: Bool {
+        let locations = [
+            transitOrigin,
+            transitDestination,
+            visitLocation,
+            workoutSource,
+            workoutOrigin,
+            workoutDestination,
+        ] + transitOriginCandidates.map(\.location)
+            + transitDestinationCandidates.map(\.location)
+            + visitCandidates.map(\.location)
+        return locations.contains { location in
+            location.map {
+                $0.cityName == nil
+                    || $0.countryName == nil
+                    || $0.countryCode == nil
+            } ?? false
+        }
+    }
 }
 
 nonisolated private extension Location {

@@ -6,7 +6,7 @@
 import Foundation
 import SwiftData
 
-enum PlaceVisitEntryStore {
+nonisolated enum PlaceVisitEntryStore {
     static func insert(
         draft: ResolvedPlaceVisitDraft,
         rawInput: String?,

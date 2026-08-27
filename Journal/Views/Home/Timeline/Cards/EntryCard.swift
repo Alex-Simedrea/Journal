@@ -7,6 +7,15 @@ import MapKit
 import Photos
 import SwiftUI
 
+enum TimelineEntryCardReviewPresentation {
+    static func showsOrangeInnerShadow(
+        kind: LogKind,
+        needsReview: Bool
+    ) -> Bool {
+        kind == .placeVisit && needsReview
+    }
+}
+
 struct TimelineEntryCard: View {
     let occurrence: TimelineOccurrence
     let onTap: () -> Void
@@ -44,10 +53,25 @@ struct TimelineInteractiveEntryCard: View {
                 TimelineUnmatchedReviewStrip(occurrence: occurrence)
             }
             .padding(7)
-            .background(
-                Color(uiColor: .secondarySystemGroupedBackground),
-                in: .rect(cornerRadius: 22)
-            )
+            .background {
+                RoundedRectangle(cornerRadius: 22)
+                    .fill(
+                        Color(uiColor: .secondarySystemGroupedBackground)
+                            .shadow(
+                                .inner(
+                                    color: Color.orange.opacity(
+                                        TimelineEntryCardReviewPresentation
+                                            .showsOrangeInnerShadow(
+                                                kind: occurrence.kind,
+                                                needsReview: occurrence.needsReview
+                                            ) ? 1 : 0
+                                    ),
+                                    radius: 3
+                                )
+                            )
+                    )
+                    .allowsHitTesting(false)
+            }
             .contentShape(.rect(cornerRadius: 22))
         }
         .buttonStyle(.plain)

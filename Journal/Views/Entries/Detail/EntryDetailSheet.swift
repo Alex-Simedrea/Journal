@@ -266,6 +266,9 @@ struct EntryDetailSheet: View {
         case .details:
             EntryDetailOverview(
                 entry: entry,
+                peopleOverride: draftPresentation == nil ? nil : people.filter {
+                    coordinator.session.selectedPeopleIDs.contains($0.id)
+                },
                 routeModel: routeModel,
                 topContentInset: chromeHeight,
                 isScrolled: $contentIsScrolled,
@@ -561,7 +564,11 @@ private extension EntryDetailSheet {
                     in: modelContext,
                     persist: persist
                 )
-                coordinator.returnToDetails(entry: entry)
+                if persist {
+                    coordinator.returnToDetails(entry: entry)
+                } else {
+                    coordinator.returnToDetailsPreservingDraft(for: .people)
+                }
             case .photos:
                 try EntryDetailEditingService.savePhotos(
                     entry: entry,

@@ -5,7 +5,7 @@
 
 import MapKit
 
-struct TimelineMapMarker: Hashable, Identifiable, Sendable {
+nonisolated struct TimelineMapMarker: Hashable, Identifiable, Sendable {
     let id: String
     let name: String
     let latitude: Double
@@ -59,12 +59,12 @@ struct TimelineMapMarker: Hashable, Identifiable, Sendable {
     }
 }
 
-enum TimelineMapPathKind: Hashable, Sendable {
+nonisolated enum TimelineMapPathKind: Hashable, Sendable {
     case transit(String)
     case workout
 }
 
-struct TimelineMapPath: Hashable, Identifiable, Sendable {
+nonisolated struct TimelineMapPath: Hashable, Identifiable, Sendable {
     let id: UUID
     let kind: TimelineMapPathKind
     let coordinates: [CLLocationCoordinate2D]
@@ -88,7 +88,7 @@ struct TimelineMapPath: Hashable, Identifiable, Sendable {
     }
 }
 
-struct TimelineOverviewData: Equatable, Sendable {
+nonisolated struct TimelineOverviewData: Equatable, Sendable {
     var markers: [TimelineMapMarker] = []
     var paths: [TimelineMapPath] = []
 
@@ -117,19 +117,22 @@ struct TimelineOverviewData: Equatable, Sendable {
                 if let destination, destination.hasCoordinate {
                     markersByID[destination.id] = TimelineMapMarker(location: destination)
                 }
-                if let origin,
-                   let destination,
-                   origin.hasCoordinate,
-                   destination.hasCoordinate {
+                let route = TransitRouteGeometry.coordinates(
+                    recordedRoute: occurrence.snapshot.transitRecordedRoute,
+                    origin: origin?.hasCoordinate == true
+                        ? origin?.coordinate
+                        : nil,
+                    destination: destination?.hasCoordinate == true
+                        ? destination?.coordinate
+                        : nil,
+                    bendPositive: occurrence.entryID.uuid.0 % 2 == 0
+                )
+                if route.count > 1 {
                     paths.append(
                         TimelineMapPath(
                             id: occurrence.entryID,
                             kind: .transit(occurrence.transitType),
-                            coordinates: curvedCoordinates(
-                                from: origin.coordinate,
-                                to: destination.coordinate,
-                                bendPositive: occurrence.entryID.uuid.0 % 2 == 0
-                            )
+                            coordinates: route
                         )
                     )
                 }
@@ -221,28 +224,10 @@ struct TimelineOverviewData: Equatable, Sendable {
         to destination: CLLocationCoordinate2D,
         bendPositive: Bool
     ) -> [CLLocationCoordinate2D] {
-        let start = MKMapPoint(origin)
-        let end = MKMapPoint(destination)
-        let dx = end.x - start.x
-        let dy = end.y - start.y
-        let length = max(hypot(dx, dy), 1)
-        let direction = bendPositive ? 1.0 : -1.0
-        let control = MKMapPoint(
-            x: (start.x + end.x) / 2 - dy / length * length * 0.18 * direction,
-            y: (start.y + end.y) / 2 + dx / length * length * 0.18 * direction
+        TransitRouteGeometry.curvedCoordinates(
+            from: origin,
+            to: destination,
+            bendPositive: bendPositive
         )
-
-        return (0...32).map { index in
-            let t = Double(index) / 32
-            let inverse = 1 - t
-            return MKMapPoint(
-                x: inverse * inverse * start.x
-                    + 2 * inverse * t * control.x
-                    + t * t * end.x,
-                y: inverse * inverse * start.y
-                    + 2 * inverse * t * control.y
-                    + t * t * end.y
-            ).coordinate
-        }
     }
 }

@@ -25,7 +25,7 @@ struct EntryWeatherAttribution: Equatable, Sendable {
     let legalPageURL: URL
 }
 
-private enum EntryWeatherServiceError: LocalizedError {
+nonisolated private enum EntryWeatherServiceError: LocalizedError {
     case noHourlyWeather
     case noDailyWeather
 
@@ -169,8 +169,7 @@ actor WeatherKitEntryClient {
     }
 }
 
-@MainActor
-enum EntryWeatherService {
+nonisolated enum EntryWeatherService {
     static func request(for entry: LogEntry) -> EntryWeatherRequest? {
         request(for: entry, endpoint: .start)
     }
@@ -200,14 +199,16 @@ enum EntryWeatherService {
         _ entry: LogEntry,
         in modelContext: ModelContext,
         force: Bool = false,
-        endpoint: EntryWeatherEndpoint = .start
+        endpoint: EntryWeatherEndpoint = .start,
+        postsTimelineChange: Bool = true
     ) async throws -> Bool {
         let entryID = entry.id
         return try await populate(
             entryID: entryID,
             in: modelContext,
             force: force,
-            endpoint: endpoint
+            endpoint: endpoint,
+            postsTimelineChange: postsTimelineChange
         )
     }
 
@@ -216,7 +217,8 @@ enum EntryWeatherService {
         entryID: UUID,
         in modelContext: ModelContext,
         force: Bool = false,
-        endpoint: EntryWeatherEndpoint = .start
+        endpoint: EntryWeatherEndpoint = .start,
+        postsTimelineChange: Bool = true
     ) async throws -> Bool {
         guard let entry = try entry(withID: entryID, in: modelContext) else {
             return false
@@ -245,25 +247,31 @@ enum EntryWeatherService {
         case .end: currentEntry.endWeather = weather
         }
         try modelContext.save()
+        if postsTimelineChange {
+            await TimelineDataChange.post()
+        }
         return true
     }
 
     static func populateEndpoints(
         _ entry: LogEntry,
         in modelContext: ModelContext,
-        force: Bool = false
+        force: Bool = false,
+        postsTimelineChange: Bool = true
     ) async {
         await populateEndpoints(
             entryID: entry.id,
             in: modelContext,
-            force: force
+            force: force,
+            postsTimelineChange: postsTimelineChange
         )
     }
 
     static func populateEndpoints(
         entryID: UUID,
         in modelContext: ModelContext,
-        force: Bool = false
+        force: Bool = false,
+        postsTimelineChange: Bool = true
     ) async {
         for endpoint in EntryWeatherEndpoint.allCases {
             do {
@@ -271,11 +279,15 @@ enum EntryWeatherService {
                     entryID: entryID,
                     in: modelContext,
                     force: force,
-                    endpoint: endpoint
+                    endpoint: endpoint,
+                    postsTimelineChange: false
                 )
             } catch {
                 print("WeatherKit \(endpoint.rawValue) lookup failed: \(error)")
             }
+        }
+        if postsTimelineChange {
+            await TimelineDataChange.post()
         }
     }
 
@@ -311,7 +323,14 @@ enum EntryWeatherService {
         }
 
         for entryID in entryIDs {
-            await populateEndpoints(entryID: entryID, in: modelContext)
+            await populateEndpoints(
+                entryID: entryID,
+                in: modelContext,
+                postsTimelineChange: false
+            )
+        }
+        if !entryIDs.isEmpty {
+            await TimelineDataChange.post()
         }
     }
 

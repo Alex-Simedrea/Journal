@@ -29,7 +29,7 @@ struct EntryDetailPeopleProjection {
               == .orderedAscending
             : lhsCount > rhsCount
         }
-        .prefix(8)
+        .prefix(12)
     )
 
     let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)

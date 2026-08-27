@@ -20,7 +20,7 @@ enum DurationSource: String, Codable, Hashable, Sendable {
     case manualOverride
 }
 
-enum TransitReviewField: String, Codable, CaseIterable, Hashable {
+nonisolated enum TransitReviewField: String, Codable, CaseIterable, Hashable, Sendable {
     case transitType
     case origin
     case destination
@@ -28,14 +28,14 @@ enum TransitReviewField: String, Codable, CaseIterable, Hashable {
     case people
 }
 
-struct TransitFieldReview: Codable, Hashable, Identifiable {
+nonisolated struct TransitFieldReview: Codable, Hashable, Identifiable, Sendable {
     var field: TransitReviewField
     var reason: String
 
     var id: TransitReviewField { field }
 }
 
-struct LocationCandidate: Codable, Hashable, Identifiable {
+nonisolated struct LocationCandidate: Codable, Hashable, Identifiable, Sendable {
     var id: UUID
     var name: String
     var address: String?
@@ -113,7 +113,18 @@ final class TransitDetails {
     var originCandidates: [LocationCandidate]
     var destinationCandidates: [LocationCandidate]
     var unresolvedPeople: [String]
-    var fieldReviews: [TransitFieldReview] = []
+    @Attribute(originalName: "fieldReviews")
+    private var fieldReviewsData: Data?
+
+    var fieldReviews: [TransitFieldReview] {
+        get {
+            PersistedJSON.decode(
+                [TransitFieldReview].self,
+                from: fieldReviewsData
+            ) ?? []
+        }
+        set { fieldReviewsData = PersistedJSON.encode(newValue) }
+    }
 
     init(
         type: String,
@@ -152,7 +163,7 @@ final class TransitDetails {
         self.originCandidates = originCandidates
         self.destinationCandidates = destinationCandidates
         self.unresolvedPeople = unresolvedPeople
-        self.fieldReviews = fieldReviews
+        self.fieldReviewsData = PersistedJSON.encode(fieldReviews)
     }
 
     func review(for field: TransitReviewField) -> TransitFieldReview? {

@@ -1,5 +1,3 @@
-import MapKit
-import Photos
 import SwiftUI
 
 struct TimelinePeopleTile: View {
@@ -7,30 +5,52 @@ struct TimelinePeopleTile: View {
     let needsReview: Bool
 
     var body: some View {
-        HStack(spacing: 7) {
+        GeometryReader { proxy in
             if people.isEmpty {
                 FixedSizeSymbol(
                     systemName: "person.crop.circle.badge.questionmark",
-                    size: 22
+                    size: 24
                 )
-                Text("People need review")
-                    .font(.caption2.weight(.semibold))
-                    .lineLimit(2)
-            } else if people.count <= 2 {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(people) { person in
-                        TimelineNamedPerson(person: person)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                let visiblePeople = Array(people.prefix(12))
+                let verticalPadding = 2.0
+                let contentHeight = max(
+                    0,
+                    proxy.size.height - verticalPadding * 2
+                )
+                let placements = EntryDetailPeopleConstellationMetrics.placements(
+                    count: visiblePeople.count
+                )
+                let widthScale = EntryDetailPeopleConstellationMetrics.scale(
+                    for: proxy.size.width,
+                    placements: placements
+                )
+                let heightScale = contentHeight
+                    / EntryDetailPeopleConstellationMetrics.height
+                let scale = min(widthScale, heightScale)
+
+                ZStack {
+                    ForEach(
+                        visiblePeople.enumerated(),
+                        id: \.element.id
+                    ) { index, person in
+                        let placement = placements[index]
+                        PersonAvatar(
+                            name: person.name,
+                            contactIdentifier: person.contactIdentifier,
+                            size: placement.diameter * scale
+                        )
+                        .position(
+                            x: proxy.size.width / 2
+                                + placement.center.x * scale,
+                            y: verticalPadding + contentHeight / 2
+                                + placement.center.y * scale
+                        )
                     }
                 }
-            } else if let first = people.first {
-                TimelinePeopleGroup(
-                    first: first,
-                    remaining: Array(people.dropFirst())
-                )
             }
         }
-        .padding(.horizontal, 8)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(
             Color(uiColor: .tertiarySystemGroupedBackground),
             in: .rect(cornerRadius: 16)
@@ -40,52 +60,15 @@ struct TimelinePeopleTile: View {
                 ReviewBadge(size: 17).padding(5)
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
     }
-}
 
-struct TimelinePeopleGroup: View {
-    let first: TimelinePersonSnapshot
-    let remaining: [TimelinePersonSnapshot]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            TimelineNamedPerson(person: first)
-            TimelinePeopleSummary(people: remaining)
+    private var accessibilityLabel: String {
+        guard !people.isEmpty else {
+            return String(localized: "People need review")
         }
-    }
-}
-
-struct TimelineNamedPerson: View {
-    let person: TimelinePersonSnapshot
-
-    var body: some View {
-        HStack(spacing: 4) {
-            PersonAvatar(
-                name: person.name,
-                contactIdentifier: person.contactIdentifier,
-                size: 20
-            )
-            Text(person.name)
-                .font(.footnote.weight(.medium))
-                .lineLimit(1)
-                .minimumScaleFactor(0.65)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-struct TimelinePeopleSummary: View {
-    let people: [TimelinePersonSnapshot]
-
-    var body: some View {
-        HStack(spacing: 6) {
-            TimelinePeopleAvatarStack(
-                people: Array(people.prefix(3))
-            )
-            Text("\(people.count) more")
-                .font(.footnote.weight(.medium))
-                .lineLimit(1)
-        }
+        return people.map(\.name).formatted(.list(type: .and, width: .short))
     }
 }
 
@@ -94,7 +77,7 @@ struct TimelinePeopleAvatarStack: View {
 
     var body: some View {
         HStack(spacing: -8) {
-            ForEach(people) { person in
+            ForEach(people.prefix(3)) { person in
                 PersonAvatar(
                     name: person.name,
                     contactIdentifier: person.contactIdentifier,

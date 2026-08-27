@@ -104,49 +104,52 @@ private struct LocationSearchContent: View {
     let places: [Place]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            LocationSearchResults(
-                suggestions: model.search.suggestions,
-                searchErrorMessage: model.search.errorMessage,
-                resolutionErrorMessage: model.errorMessage,
-                isSearching: model.search.isSearching,
-                isResolving: model.isResolving,
-                onSelect: { suggestion in
-                    Task { await model.resolve(suggestion) }
-                }
-            )
-
-            SavedPlacesSection(
-                places: places,
-                selectedPlaceID: model.selection?.placeID,
-                hasSearchQuery: true,
-                onSelect: model.select
-            )
-        }
+        LocationSearchResults(
+            places: places,
+            selectedPlaceID: model.selection?.placeID,
+            suggestions: model.search.suggestions,
+            searchErrorMessage: model.search.errorMessage,
+            resolutionErrorMessage: model.errorMessage,
+            isSearching: model.search.isSearching,
+            isResolving: model.isResolving,
+            onSelectPlace: model.select,
+            onSelectSuggestion: { suggestion in
+                Task { await model.resolve(suggestion) }
+            }
+        )
     }
 }
 
 private struct LocationSearchResults: View {
+    let places: [Place]
+    let selectedPlaceID: UUID?
     let suggestions: [LocationSearchSuggestion]
     let searchErrorMessage: String?
     let resolutionErrorMessage: String?
     let isSearching: Bool
     let isResolving: Bool
-    let onSelect: (LocationSearchSuggestion) -> Void
+    let onSelectPlace: (Place) -> Void
+    let onSelectSuggestion: (LocationSearchSuggestion) -> Void
 
     var body: some View {
+        let results = EntryLocationPickerProjection.interleavedSearchResults(
+            places: places,
+            suggestions: suggestions
+        )
         VStack(alignment: .leading, spacing: 10) {
-            Text("Map Results")
+            Text("Results")
                 .font(.headline)
                 .padding(.horizontal, 4)
 
             VStack(spacing: 0) {
-                if !suggestions.isEmpty {
-                    ForEach(suggestions) { suggestion in
-                        LocationSearchSuggestionRow(
-                            suggestion: suggestion,
-                            showsDivider: suggestion.id != suggestions.first?.id,
-                            onSelect: onSelect
+                if !results.isEmpty {
+                    ForEach(results) { result in
+                        EntryLocationSearchResultRow(
+                            result: result,
+                            selectedPlaceID: selectedPlaceID,
+                            showsDivider: result.id != results.first?.id,
+                            onSelectPlace: onSelectPlace,
+                            onSelectSuggestion: onSelectSuggestion
                         )
                     }
                 }
@@ -155,11 +158,39 @@ private struct LocationSearchResults: View {
                     LocationSearchErrorRow(message: message)
                 } else if isResolving || isSearching {
                     LocationSearchLoadingRow()
-                } else if suggestions.isEmpty {
+                } else if results.isEmpty {
                     LocationSearchEmptyRow()
                 }
             }
             .dynamicSheetSurface()
+        }
+    }
+}
+
+private struct EntryLocationSearchResultRow: View {
+    let result: EntryLocationSearchResult
+    let selectedPlaceID: UUID?
+    let showsDivider: Bool
+    let onSelectPlace: (Place) -> Void
+    let onSelectSuggestion: (LocationSearchSuggestion) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            switch result {
+            case .savedPlace(let place):
+                SavedPlaceRow(
+                    place: place,
+                    isSelected: selectedPlaceID == place.id,
+                    showsDivider: showsDivider,
+                    onSelect: onSelectPlace
+                )
+            case .mapKit(let suggestion):
+                LocationSearchSuggestionRow(
+                    suggestion: suggestion,
+                    showsDivider: showsDivider,
+                    onSelect: onSelectSuggestion
+                )
+            }
         }
     }
 }

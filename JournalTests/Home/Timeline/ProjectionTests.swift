@@ -52,6 +52,185 @@ struct TimelineProjectionTests {
         #expect(presentation.timelineRevision == 2)
     }
 
+    @Test("Reload picks up enrichment saved by another model context")
+    func reloadAfterBackgroundEnrichment() throws {
+        let schema = Schema([
+            LogEntry.self,
+            Person.self,
+            Place.self,
+            TransitDetails.self,
+            PlaceVisitDetails.self,
+            WorkoutDetails.self,
+            TransitType.self,
+            AutomationCandidate.self,
+        ])
+        let container = try ModelContainer(
+            for: schema,
+            configurations: [
+                ModelConfiguration(isStoredInMemoryOnly: true),
+            ]
+        )
+        let entryID = UUID()
+        let start = Date.now.addingTimeInterval(-3_600)
+        let entry = LogEntry(
+            id: entryID,
+            kind: .placeVisit,
+            createdAt: start,
+            startTime: start,
+            endTime: start.addingTimeInterval(1_800),
+            needsReview: false
+        )
+        entry.placeVisitDetails = PlaceVisitDetails(
+            location: Location(latitude: 44.43, longitude: 26.10)
+        )
+        let seedContext = ModelContext(container)
+        seedContext.insert(entry)
+        try seedContext.save()
+
+        let timelineContext = ModelContext(container)
+        let presentation = HomePresentationModel()
+        presentation.reloadTimeline(in: timelineContext)
+        var snapshot = try #require(
+            presentation.timelineRows.first?.occurrence.snapshot
+        )
+        #expect(snapshot.photoReferences.isEmpty)
+        #expect(snapshot.weather == nil)
+
+        let enrichmentContext = ModelContext(container)
+        var descriptor = FetchDescriptor<LogEntry>(
+            predicate: #Predicate { $0.id == entryID }
+        )
+        descriptor.fetchLimit = 1
+        let enrichedEntry = try #require(
+            try enrichmentContext.fetch(descriptor).first
+        )
+        enrichedEntry.photoReferences.append(
+            PhotoReference(assetLocalIdentifier: "asset-1")
+        )
+        enrichedEntry.weather = EntryWeather(
+            condition: "Clear",
+            symbolName: "sun.max.fill",
+            temperatureCelsius: 24,
+            humidity: 0.4,
+            date: start
+        )
+        try enrichmentContext.save()
+
+        presentation.reloadTimeline(in: timelineContext)
+        snapshot = try #require(
+            presentation.timelineRows.first?.occurrence.snapshot
+        )
+        #expect(snapshot.photoReferences.map(\.assetLocalIdentifier) == [
+            "asset-1",
+        ])
+        #expect(snapshot.weather?.condition == "Clear")
+    }
+
+    @Test("Weather and photos do not restart map snapshot prewarming")
+    func enrichmentKeepsMapSnapshotRevisionStable() async throws {
+        let schema = Schema([
+            LogEntry.self,
+            Person.self,
+            Place.self,
+            TransitDetails.self,
+            PlaceVisitDetails.self,
+            WorkoutDetails.self,
+            TransitType.self,
+            AutomationCandidate.self,
+        ])
+        let container = try ModelContainer(
+            for: schema,
+            configurations: [
+                ModelConfiguration(isStoredInMemoryOnly: true),
+            ]
+        )
+        let context = ModelContext(container)
+        let start = Date.now.addingTimeInterval(-3_600)
+        let entry = LogEntry(
+            kind: .placeVisit,
+            startTime: start,
+            endTime: start.addingTimeInterval(1_800),
+            needsReview: false
+        )
+        entry.placeVisitDetails = PlaceVisitDetails(
+            location: Location(latitude: 44.43, longitude: 26.10)
+        )
+        context.insert(entry)
+        try context.save()
+
+        let model = HomeFeedModel()
+        await model.reload(in: context)
+        await model.loadPeriodPhotoMetadata()
+        let initialRevision = model.mapSnapshotRevision
+
+        entry.photoReferences.append(
+            PhotoReference(assetLocalIdentifier: "asset-1")
+        )
+        entry.weather = EntryWeather(
+            condition: "Clear",
+            symbolName: "sun.max.fill",
+            temperatureCelsius: 24,
+            humidity: 0.4,
+            date: start
+        )
+        try context.save()
+        await model.reload(in: context)
+        await model.loadPeriodPhotoMetadata()
+
+        #expect(model.mapSnapshotRevision == initialRevision)
+
+        entry.placeVisitDetails?.location = Location(
+            latitude: 45.65,
+            longitude: 25.60
+        )
+        try context.save()
+        await model.reload(in: context)
+        await model.loadPeriodPhotoMetadata()
+
+        #expect(model.mapSnapshotRevision == initialRevision + 1)
+    }
+
+    @Test("Period rows finish projecting even when there are no photos")
+    func periodProjectionWithoutPhotos() async throws {
+        let schema = Schema([
+            LogEntry.self,
+            Person.self,
+            Place.self,
+            TransitDetails.self,
+            PlaceVisitDetails.self,
+            WorkoutDetails.self,
+            TransitType.self,
+            AutomationCandidate.self,
+        ])
+        let container = try ModelContainer(
+            for: schema,
+            configurations: [ModelConfiguration(isStoredInMemoryOnly: true)]
+        )
+        let context = ModelContext(container)
+        let start = try Date(
+            "2026-08-20T10:00:00+03:00",
+            strategy: .iso8601
+        )
+        let entry = LogEntry(
+            kind: .placeVisit,
+            startTime: start,
+            endTime: start.addingTimeInterval(1_800),
+            needsReview: false
+        )
+        entry.placeVisitDetails = PlaceVisitDetails(
+            location: Location(latitude: 44.43, longitude: 26.10)
+        )
+        context.insert(entry)
+        try context.save()
+
+        let model = HomeFeedModel()
+        await model.reload(in: context)
+        await model.loadPeriodPhotoMetadata()
+
+        #expect(model.monthRows.map(\.summary.entryCount) == [1])
+        #expect(model.yearRows.map(\.summary.entryCount) == [1])
+    }
+
     @Test("Same-zone intervals appear on every overlapping day")
     func sameAndMultipleDayIntervals() {
         let sameDay = entry(

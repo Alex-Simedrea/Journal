@@ -6,7 +6,7 @@ import Photos
 import SwiftData
 import UIKit
 
-extension Notification.Name {
+nonisolated extension Notification.Name {
     static let automationCandidatesDidChange = Notification.Name(
         "journal.automationCandidatesDidChange"
     )
@@ -17,14 +17,6 @@ enum JournalModelContainer {
     static let shared: ModelContainer = {
         do {
             let configuration = ModelConfiguration()
-            // This is deliberately checked on every cold launch. It is a
-            // small, idempotent repair and protects against a relationship
-            // row disappearing after any interrupted edit, not just during a
-            // one-time automation migration.
-            _ = try SwiftDataStoreIntegrityRepair
-                .clearDanglingEntryDetailReferences(
-                    at: configuration.url
-                )
             let container = try ModelContainer(
                 for: LogEntry.self,
                 Person.self,
@@ -36,9 +28,6 @@ enum JournalModelContainer {
                 AutomationCandidate.self,
                 ActiveJournalRecording.self,
                 configurations: configuration
-            )
-            try AutomationCandidateStoreRepair.runIfNeeded(
-                in: container.mainContext
             )
             return container
         } catch {
@@ -271,7 +260,7 @@ final class AutomationCoordinator {
         refreshPermissionStates()
     }
 
-    func start(in modelContext: ModelContext) async {
+    func start(using maintenance: JournalBackgroundMaintenance) async {
         guard Self.isEnabledForCurrentProcess else { return }
         guard !isSynchronizing else { return }
         isSynchronizing = true
@@ -280,16 +269,22 @@ final class AutomationCoordinator {
             refreshPermissionStates()
         }
         await requestPhotoPermissionIfNeeded()
-        await synchronizeMotion(in: modelContext)
+        let motionSegments = await historicalMotionSegments()
         VisitMonitoringCoordinator.shared.requestAlwaysAuthorizationIfNeeded()
         VisitMonitoringCoordinator.shared.resumeIfAuthorized()
-        await synchronizeNonMotion(in: modelContext)
+        await maintenance.synchronizeDetections(
+            motionSegments: motionSegments
+        )
+        await Task.yield()
+        await maintenance.synchronizeCandidates()
+        await Task.yield()
+        await maintenance.synchronizePhotos()
         MotionTransitDetectionService.shared.startLiveUpdates(
             modelContainer: JournalModelContainer.shared
         )
     }
 
-    func synchronize(in modelContext: ModelContext) async {
+    func synchronize(using maintenance: JournalBackgroundMaintenance) async {
         guard Self.isEnabledForCurrentProcess else { return }
         guard !isSynchronizing else { return }
         isSynchronizing = true
@@ -297,8 +292,14 @@ final class AutomationCoordinator {
             isSynchronizing = false
             refreshPermissionStates()
         }
-        await synchronizeMotion(in: modelContext)
-        await synchronizeNonMotion(in: modelContext)
+        let motionSegments = await historicalMotionSegments()
+        await maintenance.synchronizeDetections(
+            motionSegments: motionSegments
+        )
+        await Task.yield()
+        await maintenance.synchronizeCandidates()
+        await Task.yield()
+        await maintenance.synchronizePhotos()
         VisitMonitoringCoordinator.shared.resumeIfAuthorized()
         MotionTransitDetectionService.shared.startLiveUpdates(
             modelContainer: JournalModelContainer.shared
@@ -348,34 +349,14 @@ final class AutomationCoordinator {
         refreshPermissionStates()
     }
 
-    private func synchronizeMotion(in modelContext: ModelContext) async {
+    private func historicalMotionSegments() async -> [MotionActivitySegment] {
         do {
-            try await MotionTransitDetectionService.shared.reconcile(
-                in: modelContext
-            )
+            return try await MotionTransitDetectionService.shared
+                .historicalSegments()
         } catch {
             print("Motion activity synchronization failed: \(error)")
+            return []
         }
     }
 
-    private func synchronizeNonMotion(in modelContext: ModelContext) async {
-        do {
-            try await VisitMonitoringCoordinator.shared
-                .enrichClosedVisits(in: modelContext)
-        } catch {
-            print("Visit enrichment failed: \(error)")
-        }
-        do {
-            try AutomationCandidateEntryService.synchronizePending(
-                in: modelContext
-            )
-        } catch {
-            print("Candidate timeline synchronization failed: \(error)")
-        }
-        do {
-            try await PhotoAutoLinkService.synchronize(in: modelContext)
-        } catch {
-            print("Automatic photo linking failed: \(error)")
-        }
-    }
 }

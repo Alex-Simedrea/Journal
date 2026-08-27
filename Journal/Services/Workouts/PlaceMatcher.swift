@@ -42,13 +42,13 @@ nonisolated struct WorkoutCoordinateSnapshot: Codable, Hashable, Sendable {
     }
 }
 
-enum WorkoutPlaceMatchResult {
+nonisolated enum WorkoutPlaceMatchResult {
     case matched(Place)
     case ambiguous
     case unmatched
 }
 
-enum WorkoutPlaceMatcher {
+nonisolated enum WorkoutPlaceMatcher {
     static let minimumRadiusMeters = 50.0
     static let requiredRunnerUpSeparationMeters = 25.0
 

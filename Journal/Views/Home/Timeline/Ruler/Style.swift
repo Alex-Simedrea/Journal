@@ -31,6 +31,8 @@ enum TimelineRulerMetrics {
     static let lineWidth: CGFloat = 1
     static let activeRangeExpansion: CGFloat = 14
     static let minimumSeparateEntryGap: CGFloat = 8
+    static let distinctContiguousBoundaryGap: CGFloat = tickPitch
+    static let addTransitGapExpansion: CGFloat = tickPitch
     static let maximumSeparateEntryGap: CGFloat = 112
 
     static func boundaryConnectionRange(

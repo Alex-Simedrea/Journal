@@ -1,10 +1,53 @@
 import Foundation
+import MapKit
 import Testing
 
 @testable import Journal
 
 @Suite("Summary map snapshot cache")
 struct SummaryMapSnapshotTests {
+    @Test("Globe framing is unaffected by duplicate endpoint markers")
+    func globeFramingIgnoresDuplicateCoordinates() throws {
+        let route = [
+            CLLocationCoordinate2D(latitude: 40.71, longitude: -74.01),
+            CLLocationCoordinate2D(latitude: 47.50, longitude: -35.00),
+            CLLocationCoordinate2D(latitude: 45.66, longitude: 25.61),
+        ]
+        let size = CGSize(width: 440, height: 290)
+        let routeOnly = try #require(
+            SummaryMapOverviewCamera.region(for: route, size: size)
+        )
+        let withMarkers = try #require(
+            SummaryMapOverviewCamera.region(
+                for: route + [route[0], route[2], route[2]],
+                size: size
+            )
+        )
+
+        #expect(routeOnly.center.latitude == withMarkers.center.latitude)
+        #expect(routeOnly.center.longitude == withMarkers.center.longitude)
+        #expect(
+            routeOnly.span.latitudeDelta == withMarkers.span.latitudeDelta
+        )
+        #expect(
+            routeOnly.span.longitudeDelta == withMarkers.span.longitudeDelta
+        )
+    }
+
+    @Test("Globe framing uses the shortest dateline interval")
+    func globeFramingAcrossDateline() throws {
+        let region = try #require(SummaryMapOverviewCamera.region(
+            for: [
+                CLLocationCoordinate2D(latitude: 35, longitude: 170),
+                CLLocationCoordinate2D(latitude: 40, longitude: -170),
+            ],
+            size: CGSize(width: 440, height: 290)
+        ))
+
+        #expect(region.span.longitudeDelta < 60)
+        #expect(abs(abs(region.center.longitude) - 180) < 1)
+    }
+
     @Test("A rendered snapshot survives a new store instance")
     func diskHitAcrossStores() async throws {
         let directory = temporaryDirectory()
@@ -36,19 +79,33 @@ struct SummaryMapSnapshotTests {
         #expect(renderCount == 1)
     }
 
-    @Test("Changing map content invalidates the stable day slot")
-    func contentInvalidation() async throws {
+    @Test("A slot retains multiple content revisions for later reuse")
+    func contentRevisionReuse() async throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
+        let counter = InvocationCounter()
         let store = SummaryMapSnapshotStore(
             directory: directory,
-            renderer: { request in Data(request.contentHash.utf8) }
+            renderer: { request in
+                await counter.increment()
+                return Data(request.contentHash.utf8)
+            }
         )
         let oldRequest = request(slot: "day-2026-8-5", version: 1)
         let newRequest = request(slot: "day-2026-8-5", version: 2)
 
         _ = try await store.data(for: oldRequest)
         _ = try await store.data(for: newRequest)
+
+        let reopened = SummaryMapSnapshotStore(
+            directory: directory,
+            renderer: { _ in
+                await counter.increment()
+                return Data("unexpected rerender".utf8)
+            }
+        )
+        _ = try await reopened.data(for: oldRequest)
+        _ = try await reopened.data(for: newRequest)
 
         let slot = directory.appending(
             path: newRequest.slotHash,
@@ -58,9 +115,12 @@ struct SummaryMapSnapshotTests {
             at: slot,
             includingPropertiesForKeys: nil
         )
-        #expect(contentDirectories.map(\.lastPathComponent) == [
+        #expect(Set(contentDirectories.map(\.lastPathComponent)) == Set([
+            oldRequest.contentHash,
             newRequest.contentHash,
-        ])
+        ]))
+        let renderCount = await counter.value
+        #expect(renderCount == 2)
     }
 
     @Test("Concurrent readers share one render task")
@@ -85,6 +145,53 @@ struct SummaryMapSnapshotTests {
 
         #expect(values[0] == values[1])
         #expect(renderCount == 1)
+    }
+
+    @Test("Cached-only prewarming never starts a render")
+    func cachedOnlyPrewarming() async {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let counter = InvocationCounter()
+        let store = SummaryMapSnapshotStore(
+            directory: directory,
+            renderer: { _ in
+                await counter.increment()
+                return Data("unexpected render".utf8)
+            }
+        )
+
+        await store.prewarm(
+            [request(slot: "uncached", version: 1)],
+            rendersMissingSnapshots: false
+        )
+
+        let renderCount = await counter.value
+        #expect(renderCount == 0)
+    }
+
+    @Test("Cancelling the only reader cancels its render")
+    func renderCancellation() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let counter = InvocationCounter()
+        let store = SummaryMapSnapshotStore(
+            directory: directory,
+            renderer: { _ in
+                await counter.increment()
+                try await Task.sleep(for: .seconds(30))
+                return Data("late render".utf8)
+            }
+        )
+        let request = request(slot: "cancelled", version: 1)
+        let load = Task { try await store.data(for: request) }
+
+        while await counter.value == 0 { await Task.yield() }
+        load.cancel()
+        await #expect(throws: CancellationError.self) {
+            try await load.value
+        }
+        let cached = await store.cachedData(for: request)
+        #expect(cached == nil)
     }
 
     @Test("Disk storage is trimmed to the configured byte cap")

@@ -80,21 +80,21 @@ nonisolated struct TimelineDayKey: Comparable, Hashable, Identifiable, Sendable 
     }
 }
 
-enum TimelineOccurrenceRole: String, Hashable, Sendable {
+nonisolated enum TimelineOccurrenceRole: String, Hashable, Sendable {
     case intervalDay
     case crossZoneArrival
     case unresolvedReview
     case wakeUp
 }
 
-struct TimelineOccurrenceID: Hashable, Sendable {
+nonisolated struct TimelineOccurrenceID: Hashable, Sendable {
     let entryID: UUID
     let day: TimelineDayKey
     let timeZoneIdentifier: String
     let role: TimelineOccurrenceRole
 }
 
-struct TimelineLocationSnapshot: Hashable, Identifiable, Sendable {
+nonisolated struct TimelineLocationSnapshot: Hashable, Identifiable, Sendable {
     let id: String
     let savedPlaceID: UUID?
     let name: String
@@ -191,13 +191,13 @@ struct TimelineLocationSnapshot: Hashable, Identifiable, Sendable {
     }
 }
 
-struct TimelinePersonSnapshot: Hashable, Identifiable, Sendable {
+nonisolated struct TimelinePersonSnapshot: Hashable, Identifiable, Sendable {
     let id: UUID
     let name: String
     let contactIdentifier: String?
 }
 
-enum TimelineReviewTarget: String, Hashable, Sendable {
+nonisolated enum TimelineReviewTarget: String, Hashable, Sendable {
     case entryKind
     case transitType
     case origin
@@ -207,7 +207,7 @@ enum TimelineReviewTarget: String, Hashable, Sendable {
     case people
 }
 
-struct TimelineReviewSnapshot: Hashable, Identifiable, Sendable {
+nonisolated struct TimelineReviewSnapshot: Hashable, Identifiable, Sendable {
     let target: TimelineReviewTarget
     let reason: String
 

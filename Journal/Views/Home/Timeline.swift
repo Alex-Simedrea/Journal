@@ -8,8 +8,12 @@ struct HomeTimeline: View {
     let automationCandidates: [AutomationCandidateSnapshot]
     let overviewData: TimelineOverviewData
     let errorMessage: String?
+    let pendingAutomationCandidateIDsByEntryID: [UUID: UUID]
     let onSelect: (UUID) -> Void
     let onSelectCandidate: (AutomationCandidateSnapshot) -> Void
+    let onAcceptCandidateEntry: (UUID, UUID) -> Void
+    let onDismissCandidate: (UUID) -> Void
+    let onAddTransit: (TimelineTransitGapID) -> Void
 
     var body: some View {
         ScrollView {
@@ -30,7 +34,12 @@ struct HomeTimeline: View {
                     if !rows.isEmpty {
                         TimelineRulerSequence(
                             rows: rows,
-                            onSelect: onSelect
+                            pendingAutomationCandidateIDsByEntryID:
+                                pendingAutomationCandidateIDsByEntryID,
+                            onSelect: onSelect,
+                            onAcceptCandidateEntry: onAcceptCandidateEntry,
+                            onDismissCandidate: onDismissCandidate,
+                            onAddTransit: onAddTransit
                         )
                     }
 

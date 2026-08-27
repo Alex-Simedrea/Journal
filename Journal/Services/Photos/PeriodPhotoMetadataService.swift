@@ -6,8 +6,7 @@ nonisolated struct PeriodPhotoMetadata: Equatable, Sendable {
     let creationDate: Date?
 }
 
-@MainActor
-enum PeriodPhotoMetadataService {
+nonisolated enum PeriodPhotoMetadataService {
     static func metadata(
         for references: [PhotoReference]
     ) -> [String: PeriodPhotoMetadata] {

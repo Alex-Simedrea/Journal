@@ -37,21 +37,34 @@ private struct JournalApplicationContent: View {
     @State private var workoutImports = WorkoutImportCoordinator()
     @State private var automation = AutomationCoordinator.shared
     @State private var contentRevision = 0
+    @State private var isInitialFeedReady = false
+    @State private var hasStartedBackgroundServices = false
 
     var body: some View {
-        HomeScreen(contentRevision: contentRevision)
-        .task {
-            let automationContext = backgroundContext()
+        HomeScreen(
+            contentRevision: contentRevision,
+            onInitialFeedReady: { isInitialFeedReady = true }
+        )
+        .task(id: isInitialFeedReady) {
+            guard isInitialFeedReady else { return }
+            // The first feed interaction is more important than launch-time
+            // enrichment. Give SwiftUI a quiet window to finish layout and
+            // handle input before these best-effort synchronizations begin.
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            hasStartedBackgroundServices = true
+            let maintenance = await JournalPersistenceActors.shared.maintenance(
+                for: JournalModelContainerReference(modelContext.container)
+            )
             let contactContext = backgroundContext()
-            let workoutContext = backgroundContext()
-            let enrichmentContext = backgroundContext()
-            await automation.start(in: automationContext)
+            await automation.start(using: maintenance)
+            async let backgroundMaintenance: Void = runBackgroundMaintenance(
+                maintenance
+            )
             _ = try? await ContactPersonSyncService
                 .synchronizeAllContacts(in: contactContext)
-            await workoutImports.start(in: workoutContext)
-            await EntryWeatherService.populateMissing(in: enrichmentContext)
-            await TransitDistanceService.populateMissing(in: enrichmentContext)
-            await LocationGeographyService.populateMissing(in: enrichmentContext)
+            await workoutImports.start(modelContainer: modelContext.container)
+            await backgroundMaintenance
             contentRevision &+= 1
             boardingPassImports.loadNextIfNeeded()
         }
@@ -59,21 +72,22 @@ private struct JournalApplicationContent: View {
             if newPhase == .active {
                 JournalRecordingCoordinator.shared.appDidBecomeActive()
                 boardingPassImports.loadNextIfNeeded()
+                guard isInitialFeedReady,
+                      hasStartedBackgroundServices else { return }
                 Task {
-                    let automationContext = backgroundContext()
-                    let workoutContext = backgroundContext()
-                    let enrichmentContext = backgroundContext()
-                    await automation.synchronize(in: automationContext)
-                    await workoutImports.synchronize(in: workoutContext)
-                    await EntryWeatherService.populateMissing(
-                        in: enrichmentContext
+                    let maintenance = await JournalPersistenceActors.shared
+                        .maintenance(
+                            for: JournalModelContainerReference(
+                                modelContext.container
+                            )
+                        )
+                    await automation.synchronize(using: maintenance)
+                    async let backgroundMaintenance: Void =
+                        runBackgroundMaintenance(maintenance)
+                    await workoutImports.synchronize(
+                        modelContainer: modelContext.container
                     )
-                    await TransitDistanceService.populateMissing(
-                        in: enrichmentContext
-                    )
-                    await LocationGeographyService.populateMissing(
-                        in: enrichmentContext
-                    )
+                    await backgroundMaintenance
                     contentRevision &+= 1
                 }
             } else {
@@ -129,6 +143,12 @@ private struct JournalApplicationContent: View {
         let context = ModelContext(modelContext.container)
         context.autosaveEnabled = false
         return context
+    }
+
+    private func runBackgroundMaintenance(
+        _ maintenance: JournalBackgroundMaintenance
+    ) async {
+        await maintenance.populateEntryEnrichment()
     }
 }
 

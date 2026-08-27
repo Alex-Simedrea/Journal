@@ -31,8 +31,7 @@ nonisolated struct AutomaticPhotoMatchTarget: Hashable, Sendable {
     let geometry: AutomaticPhotoMatchGeometry
 }
 
-@MainActor
-enum PhotoAutoLinkService {
+nonisolated enum PhotoAutoLinkService {
     nonisolated static let minimumStaticRadiusMeters = 250.0
     nonisolated static let corridorMultiplier = 1.25
     nonisolated static let corridorAllowanceMeters = 2_000.0
@@ -41,7 +40,8 @@ enum PhotoAutoLinkService {
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         guard status == .authorized || status == .limited else { return }
 
-        let targetsByEntryID = try matchTargets(in: modelContext)
+        let matchInput = try matchTargets(in: modelContext)
+        let targetsByEntryID = matchInput.targets
         guard !targetsByEntryID.isEmpty else { return }
 
         let intervals = mergedIntervals(
@@ -64,13 +64,8 @@ enum PhotoAutoLinkService {
         guard !matchesByEntryID.isEmpty else { return }
 
         var changed = false
-        let currentEntries = try modelContext.fetch(FetchDescriptor<LogEntry>())
-        for entry in currentEntries {
-            guard let matchingIdentifiers = matchesByEntryID[entry.id]
-            else { continue }
-            guard target(for: entry) == targetsByEntryID[entry.id] else {
-                continue
-            }
+        for (entryID, matchingIdentifiers) in matchesByEntryID {
+            guard let entry = matchInput.entriesByID[entryID] else { continue }
             var identifiers = Set(
                 entry.photoReferences.map(\.assetLocalIdentifier)
             )
@@ -89,21 +84,62 @@ enum PhotoAutoLinkService {
         guard changed else { return }
         do {
             try modelContext.save()
+            await TimelineDataChange.post()
         } catch {
             modelContext.rollback()
             throw error
         }
     }
 
+    static func matchingPhotoReferences(
+        for entry: LogEntry
+    ) async -> [PhotoReference] {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard status == .authorized || status == .limited,
+              let target = target(for: entry) else {
+            return []
+        }
+
+        let identifiers = await Task.detached(priority: .utility) {
+            photoMetadata(
+                in: [
+                    DateInterval(
+                        start: target.startTime,
+                        end: target.endTime
+                    ),
+                ]
+            ).compactMap { photo in
+                matches(photo, target: target)
+                    ? photo.assetLocalIdentifier
+                    : nil
+            }
+        }.value
+        return identifiers.map {
+            PhotoReference(assetLocalIdentifier: $0)
+        }
+    }
+
     private static func matchTargets(
         in modelContext: ModelContext
-    ) throws -> [UUID: AutomaticPhotoMatchTarget] {
-        let entries = try modelContext.fetch(FetchDescriptor<LogEntry>())
-        return Dictionary(
-            uniqueKeysWithValues: entries.compactMap { entry in
-                target(for: entry).map { (entry.id, $0) }
-            }
+    ) throws -> (
+        targets: [UUID: AutomaticPhotoMatchTarget],
+        entriesByID: [UUID: LogEntry]
+    ) {
+        let entries = try modelContext.fetch(
+            FetchDescriptor<LogEntry>(
+                predicate: #Predicate {
+                    $0.startTime != nil && $0.endTime != nil
+                }
+            )
         )
+        var targets: [UUID: AutomaticPhotoMatchTarget] = [:]
+        var entriesByID: [UUID: LogEntry] = [:]
+        for entry in entries {
+            guard let target = target(for: entry) else { continue }
+            targets[entry.id] = target
+            entriesByID[entry.id] = entry
+        }
+        return (targets, entriesByID)
     }
 
     nonisolated static func matches(

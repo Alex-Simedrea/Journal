@@ -6,7 +6,7 @@
 import Foundation
 import SwiftData
 
-enum TransitEntryStore {
+nonisolated enum TransitEntryStore {
     static func insert(
         draft: ResolvedTransitDraft,
         rawInput: String?,

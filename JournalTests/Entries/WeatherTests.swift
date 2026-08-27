@@ -191,7 +191,7 @@ struct EntryWeatherTests {
     }
 
     @Test("Completed day summaries hydrate from persisted weather")
-    func completedDaySummaryHydratesFromStorage() throws {
+    func completedDaySummaryHydratesFromStorage() async throws {
         let schema = Schema([
             LogEntry.self,
             Person.self,
@@ -251,7 +251,7 @@ struct EntryWeatherTests {
         try context.save()
 
         let feed = HomeFeedModel()
-        feed.reload(in: context)
+        await feed.reload(in: context)
         let row = try #require(feed.rows.first)
         #expect(row.weatherState == .loaded(expected))
     }
@@ -294,7 +294,7 @@ struct EntryWeatherTests {
         try context.save()
 
         let feed = HomeFeedModel()
-        feed.reload(in: context)
+        await feed.reload(in: context)
         let row = try #require(feed.rows.first)
         let request = try #require(row.summary.weatherRequest)
         let expected = DayWeatherSummary(
@@ -310,7 +310,11 @@ struct EntryWeatherTests {
             routeClient: EmptyDayWorkoutRouteClient()
         )
 
-        let record = try #require(entry.dayWeatherRecords.first)
+        let verificationContext = ModelContext(container)
+        let persistedEntry = try #require(
+            verificationContext.fetch(FetchDescriptor<LogEntry>()).first
+        )
+        let record = try #require(persistedEntry.dayWeatherRecords.first)
         #expect(record.summary == expected)
         #expect(record.needsRefresh)
         #expect(row.weatherState == .loaded(expected))

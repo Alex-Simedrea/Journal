@@ -97,7 +97,7 @@ private struct PeriodSummaryTile: View {
                 PeriodPhotosTile(
                     references: summary.photos,
                     totalCount: summary.totalPhotoCount,
-                    loadsContent: loadsDeferredContent
+                    loadsContent: true
                 )
             case .busiestDay:
                 if let day = summary.busiestDay {
@@ -488,6 +488,11 @@ private struct PeriodPhotosTile: View {
             }
         }
         .accessibilityLabel("\(totalCount) photos")
+        .task(id: references.map(\.assetLocalIdentifier)) {
+            await SummaryPhotoThumbnailService.prewarm(
+                Array(references.prefix(4))
+            )
+        }
     }
 }
 

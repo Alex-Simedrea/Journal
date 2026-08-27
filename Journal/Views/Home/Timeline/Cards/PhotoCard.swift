@@ -114,6 +114,7 @@ struct TimelinePhotoThumbnail: View {
                     )
                 )
             }
+            guard !Task.isCancelled else { return }
             didFinishLoading = true
         }
     }

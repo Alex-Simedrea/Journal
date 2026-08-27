@@ -21,7 +21,7 @@ enum HealthKitWorkoutClientError: LocalizedError {
     }
 }
 
-struct HealthKitWorkoutSnapshot: Sendable {
+nonisolated struct HealthKitWorkoutSnapshot: Sendable {
     let uuid: UUID
     let activityTypeRawValue: Int
     let activityName: String
@@ -36,7 +36,7 @@ struct HealthKitWorkoutSnapshot: Sendable {
     let routeEnd: WorkoutCoordinateSnapshot?
 }
 
-struct HealthKitWorkoutChangeSet: Sendable {
+nonisolated struct HealthKitWorkoutChangeSet: Sendable {
     let workouts: [HealthKitWorkoutSnapshot]
     let deletedWorkoutUUIDs: [UUID]
     let newAnchor: HKQueryAnchor
