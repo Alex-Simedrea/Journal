@@ -57,21 +57,6 @@ struct EntryDetailOverview: View {
                 EntryDetailPhotoGrid(references: entry.photoReferences)
 
                 if showsDestructiveActions {
-                    Button {
-                        onPresent(.advanced)
-                    } label: {
-                        HStack {
-                            Label("Advanced", systemImage: "hammer")
-                            Spacer()
-                            DisclosureChevron()
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding()
-                        .background(.background, in: .rect(cornerRadius: 16))
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.top, 24)
-
                     EntryDetailDestructiveButton(
                         title: "Delete entry",
                         action: {
@@ -80,6 +65,7 @@ struct EntryDetailOverview: View {
                             )
                         }
                     )
+                    .padding(.top, 24)
                 }
 
                 if showsDismissAction {

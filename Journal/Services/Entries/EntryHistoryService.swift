@@ -1,13 +1,8 @@
-//
-//  EntryPromptHistoryService.swift
-//  Journal
-//
-
 import Foundation
 import SwiftData
 
 @MainActor
-enum EntryPromptHistoryService {
+enum EntryHistoryService {
     static func entries(
         around selectedDay: TimelineDayKey,
         in modelContext: ModelContext

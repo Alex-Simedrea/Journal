@@ -1,6 +1,6 @@
 import MapKit
 
-extension PlaceSystemImage {
+nonisolated extension PlaceSystemImage {
     init?(
         pointOfInterestCategory category: MKPointOfInterestCategory?
     ) {

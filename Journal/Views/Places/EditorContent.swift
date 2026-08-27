@@ -53,7 +53,6 @@ private struct PlaceNameField: View {
             .focused($isFocused)
             .onSubmit {
                 isFocused = false
-                model.nameSubmitted()
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
@@ -72,10 +71,7 @@ private struct PlaceSymbolSelectionButton: View {
 
                 Spacer()
 
-                PlaceEditorSymbolImage(
-                    systemImage: model.selectedSymbol,
-                    isLoading: model.isSuggestingSymbol
-                )
+                PlaceEditorSymbolImage(systemImage: model.selectedSymbol)
 
                 DisclosureChevron()
             }

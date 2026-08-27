@@ -36,10 +36,6 @@ final class LogEntry {
     var creationTimeZoneIdentifier: String
     var timeConfidence: TimeConfidence
     var rawInputString: String?
-    var modelInstructions: String?
-    var modelPrompt: String?
-    var modelToolTranscript: String?
-    var modelResponse: String?
     var automationCandidateID: UUID?
     var journalRecordingID: UUID?
     var needsReview: Bool
@@ -68,10 +64,6 @@ final class LogEntry {
         creationTimeZoneIdentifier: String = TimeZone.current.identifier,
         timeConfidence: TimeConfidence = .unresolved,
         rawInputString: String? = nil,
-        modelInstructions: String? = nil,
-        modelPrompt: String? = nil,
-        modelToolTranscript: String? = nil,
-        modelResponse: String? = nil,
         automationCandidateID: UUID? = nil,
         journalRecordingID: UUID? = nil,
         photoReferences: [PhotoReference] = [],
@@ -95,10 +87,6 @@ final class LogEntry {
         self.creationTimeZoneIdentifier = creationTimeZoneIdentifier
         self.timeConfidence = timeConfidence
         self.rawInputString = rawInputString
-        self.modelInstructions = modelInstructions
-        self.modelPrompt = modelPrompt
-        self.modelToolTranscript = modelToolTranscript
-        self.modelResponse = modelResponse
         self.automationCandidateID = automationCandidateID
         self.journalRecordingID = journalRecordingID
         self.photoReferences = photoReferences
@@ -120,10 +108,6 @@ final class LogEntry {
         creationTimeZoneIdentifier: String = TimeZone.current.identifier,
         timeConfidence: TimeConfidence = .unresolved,
         rawInputString: String? = nil,
-        modelInstructions: String? = nil,
-        modelPrompt: String? = nil,
-        modelToolTranscript: String? = nil,
-        modelResponse: String? = nil,
         automationCandidateID: UUID? = nil,
         journalRecordingID: UUID? = nil,
         photoReferences: [PhotoReference] = [],
@@ -146,10 +130,6 @@ final class LogEntry {
             creationTimeZoneIdentifier: creationTimeZoneIdentifier,
             timeConfidence: timeConfidence,
             rawInputString: rawInputString,
-            modelInstructions: modelInstructions,
-            modelPrompt: modelPrompt,
-            modelToolTranscript: modelToolTranscript,
-            modelResponse: modelResponse,
             automationCandidateID: automationCandidateID,
             journalRecordingID: journalRecordingID,
             photoReferences: photoReferences,
@@ -161,14 +141,5 @@ final class LogEntry {
             entryKindReviewReason: entryKindReviewReason,
             needsReview: needsReview
         )
-    }
-}
-
-extension LogEntry {
-    var hasModelExchange: Bool {
-        modelInstructions != nil
-            || modelPrompt != nil
-            || modelToolTranscript != nil
-            || modelResponse != nil
     }
 }

@@ -13,7 +13,7 @@ class Place {
     @Attribute(.unique) var id: UUID
 
     var name: String
-    var aliases: [String]  // spellings the llm identified
+    var aliases: [String]
     var systemImage: PlaceSystemImage = PlaceSystemImage.mappin
 
     var location: Location

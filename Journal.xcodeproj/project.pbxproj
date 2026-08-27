@@ -7,8 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A11A00000000000000000003 /* AnyLanguageModel in Frameworks */ = {isa = PBXBuildFile; productRef = A11A00000000000000000002 /* AnyLanguageModel */; };
-		A11B00000000000000000003 /* KeychainSwift in Frameworks */ = {isa = PBXBuildFile; productRef = A11B00000000000000000002 /* KeychainSwift */; };
 		A11C00000000000000000003 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = A11C00000000000000000002 /* ZIPFoundation */; };
 		A11C00000000000000000004 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = A11C00000000000000000005 /* ZIPFoundation */; };
 		B0A000000000000000000001 /* BoardingPassShareExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = B0A000000000000000000002 /* BoardingPassShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -129,8 +127,6 @@
 		000000000000000130000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
-				A11A00000000000000000003 /* AnyLanguageModel in Frameworks */,
-				A11B00000000000000000003 /* KeychainSwift in Frameworks */,
 				A11C00000000000000000003 /* ZIPFoundation in Frameworks */,
 			);
 		};
@@ -202,8 +198,6 @@
 			);
 			name = Journal;
 			packageProductDependencies = (
-				A11A00000000000000000002 /* AnyLanguageModel */,
-				A11B00000000000000000002 /* KeychainSwift */,
 				A11C00000000000000000002 /* ZIPFoundation */,
 			);
 			productName = MyApp;
@@ -315,8 +309,6 @@
 			mainGroup = 000000000000000000000001;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				A11A00000000000000000001 /* XCRemoteSwiftPackageReference "AnyLanguageModel" */,
-				A11B00000000000000000001 /* XCRemoteSwiftPackageReference "keychain-swift" */,
 				A11C00000000000000000001 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
 			);
 			preferredProjectObjectVersion = 90;
@@ -841,22 +833,6 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		A11A00000000000000000001 /* XCRemoteSwiftPackageReference "AnyLanguageModel" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/huggingface/AnyLanguageModel.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.8.0;
-			};
-		};
-		A11B00000000000000000001 /* XCRemoteSwiftPackageReference "keychain-swift" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/evgenyneu/keychain-swift.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 24.0.0;
-			};
-		};
 		A11C00000000000000000001 /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/weichsel/ZIPFoundation.git";
@@ -868,16 +844,6 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		A11A00000000000000000002 /* AnyLanguageModel */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = A11A00000000000000000001 /* XCRemoteSwiftPackageReference "AnyLanguageModel" */;
-			productName = AnyLanguageModel;
-		};
-		A11B00000000000000000002 /* KeychainSwift */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = A11B00000000000000000001 /* XCRemoteSwiftPackageReference "keychain-swift" */;
-			productName = KeychainSwift;
-		};
 		A11C00000000000000000002 /* ZIPFoundation */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = A11C00000000000000000001 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;

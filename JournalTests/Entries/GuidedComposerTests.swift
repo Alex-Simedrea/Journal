@@ -3934,7 +3934,6 @@ struct GuidedComposerTests {
         #expect(entry.placeVisitDetails?.description == "Watch The Odyssey")
         #expect(entry.rawInputString == raw)
         #expect(entry.needsReview == false)
-        #expect(entry.hasModelExchange == false)
     }
 
     @Test("Stay remains descriptionless and old visit data stays readable")

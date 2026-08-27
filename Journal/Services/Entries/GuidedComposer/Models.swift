@@ -1,10 +1,5 @@
 import Foundation
 
-enum GuidedComposerMode: Equatable {
-    case guided
-    case legacyAI
-}
-
 enum ComposerEntryKind: Equatable, Hashable, Sendable {
     case transit(canonicalName: String)
     case placeVisit(description: String?)

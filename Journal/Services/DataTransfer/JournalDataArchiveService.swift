@@ -53,10 +53,6 @@ struct JournalDataArchive: Codable {
         let creationTimeZoneIdentifier: String
         let timeConfidence: TimeConfidence
         let rawInputString: String?
-        let modelInstructions: String?
-        let modelPrompt: String?
-        let modelToolTranscript: String?
-        let modelResponse: String?
         let automationCandidateID: UUID?
         let journalRecordingID: UUID?
         let needsReview: Bool
@@ -331,10 +327,6 @@ enum JournalDataArchiveService {
             creationTimeZoneIdentifier: entry.creationTimeZoneIdentifier,
             timeConfidence: entry.timeConfidence,
             rawInputString: entry.rawInputString,
-            modelInstructions: entry.modelInstructions,
-            modelPrompt: entry.modelPrompt,
-            modelToolTranscript: entry.modelToolTranscript,
-            modelResponse: entry.modelResponse,
             automationCandidateID: entry.automationCandidateID,
             journalRecordingID: entry.journalRecordingID,
             needsReview: entry.needsReview,
@@ -517,10 +509,6 @@ enum JournalDataArchiveService {
                 creationTimeZoneIdentifier: record.creationTimeZoneIdentifier,
                 timeConfidence: record.timeConfidence,
                 rawInputString: record.rawInputString,
-                modelInstructions: record.modelInstructions,
-                modelPrompt: record.modelPrompt,
-                modelToolTranscript: record.modelToolTranscript,
-                modelResponse: record.modelResponse,
                 automationCandidateID: record.automationCandidateID,
                 journalRecordingID: record.journalRecordingID,
                 photoReferences: record.photoReferences,

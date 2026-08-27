@@ -82,10 +82,6 @@ struct JournalDataArchiveTests {
             creationTimeZoneIdentifier: "Asia/Tokyo",
             timeConfidence: .manualOverride,
             rawInputString: "raw",
-            modelInstructions: "instructions",
-            modelPrompt: "prompt",
-            modelToolTranscript: "tools",
-            modelResponse: "response",
             automationCandidateID: candidateID,
             journalRecordingID: recordingID,
             photoReferences: [

@@ -407,13 +407,6 @@ struct EntryDetailSheet: View {
                     )
                 }
             }
-        case .advanced:
-            EntryDetailEditorViewport(
-                topContentInset: chromeHeight,
-                isScrolled: $contentIsScrolled
-            ) {
-                EntryDetailAdvancedEditor(entry: entry)
-            }
         case .destructiveConfirmation(let action):
             EntryDetailDestructiveConfirmation(
                 action: action,
@@ -611,7 +604,7 @@ private extension EntryDetailSheet {
                 try addPerson()
             case .addPlace(let role):
                 addPlace(for: role)
-            case .details, .locations, .placeSymbol, .advanced,
+            case .details, .locations, .placeSymbol,
                  .destructiveConfirmation:
                 break
             }

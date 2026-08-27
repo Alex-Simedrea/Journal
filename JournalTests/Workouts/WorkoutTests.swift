@@ -396,58 +396,6 @@ struct WorkoutTests {
         #expect(request.longitude == 26.1)
     }
 
-    @Test("Selected-day model context includes workouts but forbids generating them")
-    func workoutLLMHistory() {
-        let home = place(name: "Home", latitude: 45.65)
-        let entry = LogEntry(
-            kind: .workout,
-            startTime: Date(timeIntervalSince1970: 100_000),
-            endTime: Date(timeIntervalSince1970: 103_600),
-            startTimeZoneIdentifier: "Europe/Bucharest",
-            endTimeZoneIdentifier: "Europe/Bucharest",
-            creationTimeZoneIdentifier: "Europe/Bucharest",
-            timeConfidence: .explicit,
-            needsReview: false
-        )
-        entry.workoutDetails = WorkoutDetails(
-            healthKitWorkoutUUID: UUID(),
-            activityTypeRawValue: WorkoutActivityCatalog.walkingRawValue,
-            activityName: "Walking",
-            movementKind: .moving,
-            distanceMeters: 3_200,
-            originPlace: home,
-            destinationPlace: home
-        )
-        let references = EntryPromptReferences(places: [home], people: [])
-        let prompt = EntryLanguageModelService.prompt(
-            input: "walk home from there",
-            context: EntryPromptContext(
-                places: [home],
-                people: [],
-                transitTypes: [],
-                visitStatisticsByPlaceID: [:],
-                selectedDay: TimelineDayKey(
-                    year: 2026,
-                    month: 7,
-                    day: 18
-                ),
-                selectedDayEntries: [entry],
-                currentDate: Date(timeIntervalSince1970: 104_000),
-                currentLocation: home.location
-            ),
-            references: references
-        )
-
-        #expect(prompt.contains(#""entryKind" : "workout""#))
-        #expect(prompt.contains(#""activityName" : "Walking""#))
-        #expect(prompt.contains(#""distanceKilometers" : 3.2"#))
-        #expect(
-            EntryLanguageModelService.instructions.contains(
-                "workout and wakeUp are never output entry kinds"
-            )
-        )
-    }
-
     @Test("Locally deleted workouts receive an exclusion tombstone")
     func localDeletionTombstone() throws {
         let context = try makeContext()

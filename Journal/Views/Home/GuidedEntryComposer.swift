@@ -13,7 +13,6 @@ struct HomeGuidedEntryComposer: View {
     let selectedDay: TimelineDayKey
     let contextRevision: GuidedComposerContextRevision
     let onPresentSheet: (HomeComposerSheet) -> Void
-    let onToggleMode: () -> Void
     let onSubmit: () -> Bool
 
     @FocusState private var isFocused: Bool
@@ -26,9 +25,7 @@ struct HomeGuidedEntryComposer: View {
             HStack(alignment: .bottom, spacing: 8) {
                 HomeComposerAddMenu(
                     isDisabled: model.isSaving,
-                    mode: .guided,
-                    onSelect: onPresentSheet,
-                    onToggleMode: onToggleMode
+                    onSelect: onPresentSheet
                 )
 
                 GuidedComposerEditor(

@@ -10,13 +10,11 @@ nonisolated enum PlaceVisitEntryStore {
     static func insert(
         draft: ResolvedPlaceVisitDraft,
         rawInput: String?,
-        modelExchange: EntryModelExchange? = nil,
         in modelContext: ModelContext
     ) throws -> LogEntry {
         let entry = makeEntry(
             draft: draft,
-            rawInput: rawInput,
-            modelExchange: modelExchange
+            rawInput: rawInput
         )
         try insert(entry, in: modelContext)
         return entry
@@ -24,8 +22,7 @@ nonisolated enum PlaceVisitEntryStore {
 
     static func makeEntry(
         draft: ResolvedPlaceVisitDraft,
-        rawInput: String?,
-        modelExchange: EntryModelExchange? = nil
+        rawInput: String?
     ) -> LogEntry {
         let location = draft.location?.withFallbackDisplayName(
             draft.place?.name
@@ -53,10 +50,6 @@ nonisolated enum PlaceVisitEntryStore {
             creationTimeZoneIdentifier: creationZone,
             timeConfidence: draft.timeConfidence,
             rawInputString: rawInput,
-            modelInstructions: modelExchange?.instructions,
-            modelPrompt: modelExchange?.prompt,
-            modelToolTranscript: modelExchange?.toolTranscript,
-            modelResponse: modelExchange?.response,
             entryKindReviewReason: draft.entryKindReviewReason,
             needsReview: draft.needsReview
         )

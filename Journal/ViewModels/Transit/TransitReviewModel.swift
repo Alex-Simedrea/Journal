@@ -265,10 +265,10 @@ final class TransitReviewModel {
 
     private func addAlias(_ rawText: String?, to place: Place) {
         guard let rawText else { return }
-        let normalized = TransitResolutionService.normalize(rawText)
+        let normalized = EntryTextNormalization.normalize(rawText)
         let knownNames = [place.name] + place.aliases
         guard !knownNames.contains(where: {
-            TransitResolutionService.normalize($0) == normalized
+            EntryTextNormalization.normalize($0) == normalized
         }) else {
             return
         }
@@ -276,10 +276,10 @@ final class TransitReviewModel {
     }
 
     private func addAlias(_ rawText: String, to person: Person) {
-        let normalized = TransitResolutionService.normalize(rawText)
+        let normalized = EntryTextNormalization.normalize(rawText)
         let knownNames = [person.name] + person.aliases
         guard !knownNames.contains(where: {
-            TransitResolutionService.normalize($0) == normalized
+            EntryTextNormalization.normalize($0) == normalized
         }) else {
             return
         }

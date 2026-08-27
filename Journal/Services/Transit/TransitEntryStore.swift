@@ -10,7 +10,6 @@ nonisolated enum TransitEntryStore {
     static func insert(
         draft: ResolvedTransitDraft,
         rawInput: String?,
-        modelExchange: EntryModelExchange? = nil,
         sourceOrganizationName: String? = nil,
         sourceServiceIdentifier: String? = nil,
         in modelContext: ModelContext
@@ -18,7 +17,6 @@ nonisolated enum TransitEntryStore {
         let entry = makeEntry(
             draft: draft,
             rawInput: rawInput,
-            modelExchange: modelExchange,
             sourceOrganizationName: sourceOrganizationName,
             sourceServiceIdentifier: sourceServiceIdentifier
         )
@@ -29,7 +27,6 @@ nonisolated enum TransitEntryStore {
     static func makeEntry(
         draft: ResolvedTransitDraft,
         rawInput: String?,
-        modelExchange: EntryModelExchange? = nil,
         sourceOrganizationName: String? = nil,
         sourceServiceIdentifier: String? = nil
     ) -> LogEntry {
@@ -71,10 +68,6 @@ nonisolated enum TransitEntryStore {
             creationTimeZoneIdentifier: creationTimeZoneIdentifier,
             timeConfidence: draft.timeConfidence,
             rawInputString: rawInput,
-            modelInstructions: modelExchange?.instructions,
-            modelPrompt: modelExchange?.prompt,
-            modelToolTranscript: modelExchange?.toolTranscript,
-            modelResponse: modelExchange?.response,
             entryKindReviewReason: draft.entryKindReviewReason,
             needsReview: draft.needsReview
         )

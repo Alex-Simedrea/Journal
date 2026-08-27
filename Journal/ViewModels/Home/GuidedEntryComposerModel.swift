@@ -204,7 +204,7 @@ final class GuidedEntryComposerModel {
                 routingMode: $0.routingMode
             )
         }
-        let historyEntries = (try? EntryPromptHistoryService.entries(
+        let historyEntries = (try? EntryHistoryService.entries(
             around: selectedDay,
             in: modelContext
         )) ?? []

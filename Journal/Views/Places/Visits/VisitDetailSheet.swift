@@ -62,14 +62,6 @@ struct PlaceVisitDetailSheet: View {
                 if let rawInput = entry.rawInputString {
                     EntryOriginalInputSection(rawInput: rawInput)
                 }
-                if entry.hasModelExchange {
-                    EntryModelExchangeSection(
-                        instructions: entry.modelInstructions,
-                        prompt: entry.modelPrompt,
-                        toolTranscript: entry.modelToolTranscript,
-                        response: entry.modelResponse
-                    )
-                }
             }
             .navigationTitle("Visit Details")
             .navigationBarTitleDisplayMode(.inline)

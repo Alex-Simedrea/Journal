@@ -1,5 +1,5 @@
 //
-//  TransitResolutionService.swift
+//  ResolvedTransitDraft.swift
 //  Journal
 //
 

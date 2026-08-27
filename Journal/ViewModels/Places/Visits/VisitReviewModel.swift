@@ -154,8 +154,8 @@ final class PlaceVisitReviewModel {
         guard let rawText else { return }
         let known = [place.name] + place.aliases
         guard !known.contains(where: {
-            TransitResolutionService.normalize($0)
-                == TransitResolutionService.normalize(rawText)
+            EntryTextNormalization.normalize($0)
+                == EntryTextNormalization.normalize(rawText)
         }) else { return }
         place.aliases.append(rawText)
     }
@@ -163,8 +163,8 @@ final class PlaceVisitReviewModel {
     private func addAlias(_ rawText: String, to person: Person) {
         let known = [person.name] + person.aliases
         guard !known.contains(where: {
-            TransitResolutionService.normalize($0)
-                == TransitResolutionService.normalize(rawText)
+            EntryTextNormalization.normalize($0)
+                == EntryTextNormalization.normalize(rawText)
         }) else { return }
         person.aliases.append(rawText)
     }

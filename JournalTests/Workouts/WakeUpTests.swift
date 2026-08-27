@@ -142,46 +142,6 @@ struct WakeUpTests {
         #expect(wakeDay.occurrences.first?.visibleEndTime == wakeTime)
     }
 
-    @Test("Wake-ups are history context but never model output")
-    func wakeUpLLMHistory() {
-        let entry = LogEntry(
-            kind: .wakeUp,
-            startTime: date(0),
-            endTime: date(8 * 60 * 60 + 12 * 60),
-            startTimeZoneIdentifier: "Europe/Bucharest",
-            endTimeZoneIdentifier: "Europe/Bucharest",
-            creationTimeZoneIdentifier: "Europe/Bucharest",
-            timeConfidence: .explicit,
-            sleepDurationSeconds: 8 * 60 * 60 + 12 * 60,
-            needsReview: false
-        )
-        let prompt = EntryLanguageModelService.prompt(
-            input: "walked to work after waking up",
-            context: EntryPromptContext(
-                places: [],
-                people: [],
-                transitTypes: [],
-                visitStatisticsByPlaceID: [:],
-                selectedDay: TimelineDayKey(
-                    date: entry.endTime ?? .distantPast,
-                    timeZone: TimeZone(identifier: "Europe/Bucharest") ?? .gmt
-                ),
-                selectedDayEntries: [entry],
-                currentDate: date(9 * 60 * 60),
-                currentLocation: Location(latitude: 45.65, longitude: 25.60)
-            ),
-            references: EntryPromptReferences(places: [], people: [])
-        )
-
-        #expect(prompt.contains(#""entryKind" : "wakeUp""#))
-        #expect(prompt.contains(#""sleepDurationMinutes" : 492"#))
-        #expect(
-            EntryLanguageModelService.instructions.contains(
-                "workout and wakeUp are never output entry kinds"
-            )
-        )
-    }
-
     private func sleepSample(
         uuid: UUID = UUID(),
         start: TimeInterval,

@@ -20,7 +20,6 @@ final class PlaceEditorModel {
     var mapPosition: MapCameraPosition
     var isLoadingLocation: Bool
     var isResolvingSearch = false
-    var isSuggestingSymbol = false
     var locationErrorMessage: String?
     var searchErrorMessage: String?
     var saveErrorMessage: String?
@@ -30,9 +29,6 @@ final class PlaceEditorModel {
 
     @ObservationIgnored
     private var locationUpdateTask: Task<Void, Never>?
-
-    @ObservationIgnored
-    private var symbolSuggestionTask: Task<Void, Never>?
 
     @ObservationIgnored
     private var currentLocationRequestID: UUID?
@@ -175,7 +171,6 @@ final class PlaceEditorModel {
     func selectSearchSuggestion(_ suggestion: LocationSearchSuggestion) {
         invalidateCurrentLocationCapture()
         locationUpdateTask?.cancel()
-        symbolSuggestionTask?.cancel()
         searchErrorMessage = nil
         isResolvingSearch = true
 
@@ -218,35 +213,6 @@ final class PlaceEditorModel {
             } catch {
                 guard !Task.isCancelled else { return }
                 searchErrorMessage = error.localizedDescription
-            }
-        }
-    }
-
-    func nameSubmitted() {
-        let submittedName = trimmedName
-        guard !submittedName.isEmpty else { return }
-
-        symbolSuggestionTask?.cancel()
-        let previousSymbol = selectedSymbol
-        isSuggestingSymbol = true
-
-        symbolSuggestionTask = Task {
-            defer { isSuggestingSymbol = false }
-
-            do {
-                guard let suggestion = try await PlaceIconSuggestionService
-                    .suggestIcon(for: submittedName) else {
-                    return
-                }
-
-                guard !Task.isCancelled else { return }
-                guard trimmedName == submittedName else { return }
-                guard selectedSymbol == previousSymbol else { return }
-
-                selectedSymbol = suggestion
-            } catch {
-                // Icon suggestion is an enhancement. Keep the current selection
-                // when the configured model can't complete the request.
             }
         }
     }
@@ -301,7 +267,6 @@ final class PlaceEditorModel {
     func stop() {
         invalidateCurrentLocationCapture()
         mapDidDisappear()
-        symbolSuggestionTask?.cancel()
     }
 
     func setUserSelectedLocation(
