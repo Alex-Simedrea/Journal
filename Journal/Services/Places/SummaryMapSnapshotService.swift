@@ -207,7 +207,8 @@ nonisolated enum SummaryMapOverviewCamera {
 
 @MainActor
 enum SummaryMapSnapshotRequestFactory {
-    private static let renderVersion = 22
+    private static let overviewRenderVersion = 25
+    private static let placeRenderVersion = 26
 
     static func overview(
         slotID: String,
@@ -342,6 +343,13 @@ enum SummaryMapSnapshotRequestFactory {
                 },
                 strokes: strokes
             )
+        }
+        let renderVersion: Int
+        switch camera {
+        case .overview:
+            renderVersion = overviewRenderVersion
+        case .place:
+            renderVersion = placeRenderVersion
         }
         return SummaryMapSnapshotRequest(
             slotID: slotID,
@@ -821,6 +829,10 @@ private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
         )
     }
 
+    private var usesPlaceCamera: Bool {
+        if case .place = request.content.camera { true } else { false }
+    }
+
     init(request: SummaryMapSnapshotRequest) {
         self.request = request
         let styleCoordinates = request.content.paths.flatMap {
@@ -920,7 +932,10 @@ private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
         view.glyphTintColor = .white
         view.glyphImage = UIImage(systemName: annotation.systemImageName)
         view.displayPriority = .required
-        view.titleVisibility = .hidden
+        view.titleVisibility = switch request.content.camera {
+        case .place: .visible
+        case .overview: .hidden
+        }
     }
 
     private func scheduleFinishIfReady() {
@@ -952,6 +967,11 @@ private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
                 // Hybrid tiles can report fully rendered before MapKit's
                 // attribution and globe projection complete their layout.
                 try? await Task.sleep(for: .milliseconds(120))
+            } else if self?.usesPlaceCamera == true {
+                // SwiftUI's Marker waits for MapKit's deferred annotation
+                // layout. A fully-rendered tile callback does not guarantee
+                // that the native marker title has completed that pass.
+                await self?.waitForNativePlaceTitles()
             } else {
                 await Task.yield()
             }
@@ -976,11 +996,78 @@ private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
                     as? MKMarkerAnnotationView else { continue }
             configure(view, for: annotation)
             view.setNeedsLayout()
+            view.setNeedsDisplay()
             view.layoutIfNeeded()
         }
         mapView.setNeedsLayout()
+        mapView.setNeedsDisplay()
         mapView.layoutIfNeeded()
         CATransaction.flush()
+    }
+
+    private func waitForNativePlaceTitles() async {
+        // Under load, MKMarkerAnnotationView can install its title several
+        // display passes after the map tiles and marker balloon. Poll the
+        // native view hierarchy rather than caching whichever pass happens
+        // to land after a fixed delay.
+        for _ in 0..<20 {
+            guard !Task.isCancelled else { return }
+            prepareMarkerViewsForCapture()
+            if nativePlaceTitlesAreVisible { return }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+    }
+
+    private var nativePlaceTitlesAreVisible: Bool {
+        request.content.markers.allSatisfy { marker in
+            hierarchy(mapView, containsVisibleText: marker.name)
+                || layerHierarchy(
+                    mapView.layer,
+                    containsVisibleText: marker.name
+                )
+        }
+    }
+
+    private func hierarchy(
+        _ view: UIView,
+        containsVisibleText text: String
+    ) -> Bool {
+        if let label = view as? UILabel,
+           label.text == text,
+           !label.isHidden,
+           label.alpha > 0.01,
+           label.bounds.width > 0,
+           label.bounds.height > 0 {
+            return true
+        }
+        return view.subviews.contains {
+            hierarchy($0, containsVisibleText: text)
+        }
+    }
+
+    private func layerHierarchy(
+        _ layer: CALayer,
+        containsVisibleText text: String
+    ) -> Bool {
+        if let textLayer = layer as? CATextLayer,
+           renderedText(in: textLayer) == text,
+           !textLayer.isHidden,
+           textLayer.opacity > 0.01,
+           textLayer.bounds.width > 0,
+           textLayer.bounds.height > 0 {
+            return true
+        }
+        return layer.sublayers?.contains {
+            layerHierarchy($0, containsVisibleText: text)
+        } ?? false
+    }
+
+    private func renderedText(in layer: CATextLayer) -> String? {
+        switch layer.string {
+        case let value as String: value
+        case let value as NSAttributedString: value.string
+        default: nil
+        }
     }
 
     func mapView(

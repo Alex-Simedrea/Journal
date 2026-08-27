@@ -23,6 +23,7 @@ enum HomeTransitionSource: Hashable {
     case day(TimelineDayKey)
     case period(PeriodSummaryKey)
     case today
+    case search
     case empty(TimelineDayKey)
 }
 
@@ -33,17 +34,17 @@ private struct PresentedTimeline: Identifiable {
     var id: TimelineDayKey { selectedDay }
 }
 
-private enum HomeFeedAnchor: Hashable {
+enum HomeFeedAnchor: Hashable {
     case day(TimelineDayKey)
     case period(PeriodSummaryKey)
 }
 
-private enum HomeFeedScrollAlignment: Hashable {
+enum HomeFeedScrollAlignment: Hashable {
     case top
     case bottom
 }
 
-private struct HomeFeedScrollRequest: Hashable {
+struct HomeFeedScrollRequest: Hashable {
     let id = UUID()
     let scale: JournalSummaryScale
     let anchor: HomeFeedAnchor
@@ -83,6 +84,7 @@ struct HomeScreen: View {
     @State private var presentedTimeline: PresentedTimeline?
     @State private var isCalendarPresented = false
     @State private var isProfilePresented = false
+    @State private var isSearchPresented = false
     let contentRevision: Int
     let onInitialFeedReady: () -> Void
 
@@ -115,7 +117,7 @@ struct HomeScreen: View {
                         presentTimeline(today, source: .today)
                     },
                     onScaleReselected: scrollToBottom,
-                    onSearch: {}
+                    onSearch: { isSearchPresented = true }
                 )
             }
             .background(Color(uiColor: .systemGroupedBackground))
@@ -141,6 +143,17 @@ struct HomeScreen: View {
                 contentRevision: contentRevision,
                 namespace: timelineTransition,
                 onDayChange: timelineDayDidChange
+            )
+        }
+        .fullScreenCover(isPresented: $isSearchPresented) {
+            NavigationStack {
+                EntrySearchScreen()
+            }
+            .navigationTransition(
+                .zoom(
+                    sourceID: HomeTransitionSource.search,
+                    in: timelineTransition
+                )
             )
         }
         .task(id: contentRevision) {
@@ -169,30 +182,39 @@ struct HomeScreen: View {
     }
 
     private var feed: some View {
-        HomeFeedContent(
-            model: model,
-            scale: scale,
-            namespace: timelineTransition,
-            emptyTransitionDay: emptyTransitionDay,
-            prewarmingEnabled: isFeedPositioned,
-            scrollPosition: $scrollPosition,
-            scrollRequest: scrollRequest,
-            onVisibleAnchorChange: updateVisibleAnchor,
-            onScrollRequestApplied: scrollRequestDidApply,
-            onUserScroll: userDidScrollFeed,
-            onOpenDay: {
-                presentTimeline($0, source: .day($0))
-            },
-            onOpenPeriod: openPeriod,
-            onOpenPeriodDay: { day, period in
-                presentTimeline(day, source: .period(period))
-            },
-            onStartToday: {
-                let today = TimelineDayKey.today()
-                emptyTransitionDay = today
-                presentTimeline(today, source: .empty(today))
-            }
-        )
+        GeometryReader { proxy in
+            UIKitHomeFeed(
+                modelContext: modelContext,
+                model: model,
+                scale: scale,
+                contentRevision: contentRevision,
+                emptyTransitionDay: emptyTransitionDay,
+                scrollRequest: scrollRequest,
+                onVisibleAnchorChange: updateVisibleAnchor,
+                onScrollRequestApplied: scrollRequestDidApply,
+                onUserScroll: userDidScrollFeed,
+                onOpenDay: {
+                    presentTimeline($0, source: .day($0))
+                },
+                onOpenPeriod: openPeriod,
+                onOpenPeriodDay: { day, period in
+                    presentTimeline(day, source: .period(period))
+                },
+                onStartToday: {
+                    let today = TimelineDayKey.today()
+                    emptyTransitionDay = today
+                    presentTimeline(today, source: .empty(today))
+                },
+                onTimelineDayChange: timelineDayDidChange,
+                onTimelineDismiss: timelineDidDismiss
+            )
+            .modifier(HomeFeedPrewarmingModifier(
+                model: model,
+                isEnabled: isFeedPositioned,
+                contentWidth: min(440, max(0, proxy.size.width - 32))
+            ))
+        }
+        .ignoresSafeArea(.container, edges: [.top, .bottom])
         .opacity(isFeedPositioned ? 1 : 0)
         .allowsHitTesting(isFeedPositioned)
     }
@@ -526,7 +548,11 @@ struct HomeBottomToolbar: ToolbarContent {
             Button(action: onSearch) {
                 Label("Search", systemImage: "magnifyingglass")
             }
-            .accessibilityHint("Search is coming soon")
+            .matchedTransitionSource(
+                id: HomeTransitionSource.search,
+                in: namespace
+            )
+            .accessibilityHint("Search journal entries")
         }
     }
 }

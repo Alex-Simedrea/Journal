@@ -6,6 +6,44 @@ import Testing
 
 @Suite("Summary map snapshot cache")
 struct SummaryMapSnapshotTests {
+    @Test("Workout route geometry survives a new client instance")
+    func workoutRouteDiskCache() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let counter = InvocationCounter()
+        let workoutUUID = UUID()
+        let expected = [
+            WorkoutCoordinateSnapshot(
+                latitude: 44.43,
+                longitude: 26.10,
+                horizontalAccuracyMeters: 4
+            ),
+            WorkoutCoordinateSnapshot(
+                latitude: 44.44,
+                longitude: 26.11,
+                horizontalAccuracyMeters: 5
+            ),
+        ]
+        let first = HealthKitDayWorkoutRouteClient(
+            loader: { _ in
+                await counter.increment()
+                return expected
+            },
+            cacheDirectory: directory
+        )
+        #expect(try await first.route(for: workoutUUID) == expected)
+
+        let reopened = HealthKitDayWorkoutRouteClient(
+            loader: { _ in
+                await counter.increment()
+                return []
+            },
+            cacheDirectory: directory
+        )
+        #expect(try await reopened.route(for: workoutUUID) == expected)
+        #expect(await counter.value == 1)
+    }
+
     @Test("Globe framing is unaffected by duplicate endpoint markers")
     func globeFramingIgnoresDuplicateCoordinates() throws {
         let route = [

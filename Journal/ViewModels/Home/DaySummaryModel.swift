@@ -29,19 +29,32 @@ actor HealthKitDayWorkoutRouteClient: DayWorkoutRouteProviding {
     nonisolated static let shared = HealthKitDayWorkoutRouteClient()
 
     private let loader: Loader?
+    private let cacheDirectory: URL
     private var cache: [UUID: [WorkoutCoordinateSnapshot]] = [:]
     private var tasks: [
         UUID: Task<[WorkoutCoordinateSnapshot], any Error>
     ] = [:]
 
-    init(loader: Loader? = nil) {
+    init(loader: Loader? = nil, cacheDirectory: URL? = nil) {
         self.loader = loader
+        let caches = FileManager.default.urls(
+            for: .cachesDirectory,
+            in: .userDomainMask
+        ).first ?? FileManager.default.temporaryDirectory
+        self.cacheDirectory = cacheDirectory ?? caches.appending(
+            path: "DayWorkoutRoutes-v1",
+            directoryHint: .isDirectory
+        )
     }
 
     func route(for workoutUUID: UUID) async throws
         -> [WorkoutCoordinateSnapshot] {
         if let cached = cache[workoutUUID] {
             return cached
+        }
+        if let persisted = persistedRoute(for: workoutUUID) {
+            cache[workoutUUID] = persisted
+            return persisted
         }
         if let task = tasks[workoutUUID] {
             return try await task.value
@@ -59,18 +72,56 @@ actor HealthKitDayWorkoutRouteClient: DayWorkoutRouteProviding {
         tasks[workoutUUID] = task
 
         do {
-            let points = try await task.value
+            let points = SummaryRouteGeometry.samples(try await task.value)
             cache[workoutUUID] = points
             tasks[workoutUUID] = nil
+            if points.count > 1 {
+                persist(points, for: workoutUUID)
+            }
             return points
         } catch {
             tasks[workoutUUID] = nil
             throw error
         }
     }
+
+    private func persistedRoute(
+        for workoutUUID: UUID
+    ) -> [WorkoutCoordinateSnapshot]? {
+        guard let data = try? Data(contentsOf: fileURL(for: workoutUUID)),
+              let points = try? JSONDecoder().decode(
+                [WorkoutCoordinateSnapshot].self,
+                from: data
+              ),
+              points.count > 1 else { return nil }
+        return points
+    }
+
+    private func persist(
+        _ points: [WorkoutCoordinateSnapshot],
+        for workoutUUID: UUID
+    ) {
+        do {
+            try FileManager.default.createDirectory(
+                at: cacheDirectory,
+                withIntermediateDirectories: true
+            )
+            let data = try JSONEncoder().encode(points)
+            try data.write(to: fileURL(for: workoutUUID), options: .atomic)
+        } catch {
+            // HealthKit remains the source of truth. A cache write failure only
+            // means the route will be queried again on a later launch.
+        }
+    }
+
+    private func fileURL(for workoutUUID: UUID) -> URL {
+        cacheDirectory
+            .appending(path: workoutUUID.uuidString.lowercased())
+            .appendingPathExtension("json")
+    }
 }
 
-private enum SummaryRouteGeometry {
+nonisolated private enum SummaryRouteGeometry {
     static let maximumPointCount = 160
 
     static func samples<Element>(_ values: [Element]) -> [Element] {
@@ -90,6 +141,7 @@ final class DaySummaryRowModel: Identifiable {
     private(set) var overviewData: TimelineOverviewData
     private(set) var weatherState: DayWeatherLoadState = .idle
     private(set) var enrichmentRevision = 0
+    private(set) var isWorkoutRouteEnrichmentPending: Bool
 
     @ObservationIgnored
     private var didLoadRoutes = false
@@ -118,6 +170,10 @@ final class DaySummaryRowModel: Identifiable {
         layoutRecipe = DaySummaryLayoutRecipe.make(for: summary)
         overviewData = summary.overviewData
         self.weatherState = weatherState
+        isWorkoutRouteEnrichmentPending = summary.occurrences.contains {
+            $0.snapshot.workoutMovementKind == .moving
+                && $0.snapshot.workoutUUID != nil
+        }
         self.needsWeatherRefresh = needsWeatherRefresh
             ?? (summary.weatherRequest != nil && weatherState.summary == nil)
         self.persistWeather = persistWeather
@@ -210,7 +266,10 @@ final class DaySummaryRowModel: Identifiable {
             }
             return (occurrence.entryID, workoutUUID)
         }
-        guard !requests.isEmpty else { return }
+        guard !requests.isEmpty else {
+            isWorkoutRouteEnrichmentPending = false
+            return
+        }
 
         var routes: [UUID: [WorkoutCoordinateSnapshot]] = [:]
         for (entryID, workoutUUID) in requests {
@@ -240,6 +299,7 @@ final class DaySummaryRowModel: Identifiable {
             },
             workoutRoutes: routes
         )
+        isWorkoutRouteEnrichmentPending = false
     }
 }
 
