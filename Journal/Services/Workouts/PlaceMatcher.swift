@@ -51,6 +51,7 @@ nonisolated enum WorkoutPlaceMatchResult {
 nonisolated enum WorkoutPlaceMatcher {
     static let minimumRadiusMeters = 50.0
     static let requiredRunnerUpSeparationMeters = 25.0
+    static let minimumPreciseRunnerUpSeparationMeters = 5.0
 
     static func match(
         coordinate: WorkoutCoordinateSnapshot,
@@ -84,8 +85,15 @@ nonisolated enum WorkoutPlaceMatcher {
         guard candidates.count > 1 else { return .matched(nearest.place) }
 
         let runnerUp = candidates[1]
+        let requiredSeparation = min(
+            requiredRunnerUpSeparationMeters,
+            max(
+                minimumPreciseRunnerUpSeparationMeters,
+                coordinate.horizontalAccuracyMeters * 0.5
+            )
+        )
         guard runnerUp.distanceMeters - nearest.distanceMeters
-            >= requiredRunnerUpSeparationMeters else {
+            >= requiredSeparation else {
             return .ambiguous
         }
         return .matched(nearest.place)

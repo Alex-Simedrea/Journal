@@ -65,6 +65,38 @@ struct TransitContinuityTests {
         )
     }
 
+    @Test("A point-to-point workout suppresses a redundant transit action")
+    func pointToPointWorkoutSuppressesGapAction() {
+        let home = location(name: "Home", latitude: 44.43, longitude: 26.10)
+        let office = location(
+            name: "Office",
+            latitude: 44.44,
+            longitude: 26.11
+        )
+        let first = placeVisit(
+            start: "2026-07-17T09:00:00+03:00",
+            end: "2026-07-17T10:00:00+03:00",
+            location: home
+        )
+        let movement = snapshot(
+            kind: .workout,
+            start: "2026-07-17T10:05:00+03:00",
+            end: "2026-07-17T10:15:00+03:00",
+            workoutMovementKind: .moving,
+            workoutOrigin: home.name,
+            workoutDestination: office.name,
+            workoutOriginLocation: home,
+            workoutDestinationLocation: office
+        )
+        let second = placeVisit(
+            start: "2026-07-17T10:20:00+03:00",
+            end: "2026-07-17T12:00:00+03:00",
+            location: office
+        )
+
+        #expect(project([first, movement, second]).rows.last?.transitGap == nil)
+    }
+
     @Test("Matching neighbors suppress both pseudo-place rows")
     func fullyMatchingContinuity() throws {
         let home = location(name: "Home", latitude: 44.43, longitude: 26.10)
@@ -294,7 +326,7 @@ struct TransitContinuityTests {
         #expect(result.origin.showsPseudoEntry)
     }
 
-    @Test("Transit and workouts expose the correct adjacent endpoint")
+    @Test("Transit and point-to-point workouts share their boundary")
     func neighboringEndpointKinds() throws {
         let home = location(name: "Home", latitude: 44.43, longitude: 26.10)
         let station = location(
@@ -328,13 +360,18 @@ struct TransitContinuityTests {
             workoutDestinationLocation: home
         )
 
-        let result = try #require(
-            project([firstTrip, secondTrip, movingWorkout])
-                .rows.first { $0.occurrence.entryID == secondTrip.id }?
-                .transitPresentation
+        let rows = project([firstTrip, secondTrip, movingWorkout]).rows
+        let transitRow = try #require(
+            rows.first { $0.occurrence.entryID == secondTrip.id }
         )
-        #expect(!result.origin.showsPseudoEntry)
-        #expect(!result.destination.showsPseudoEntry)
+        let workoutRow = try #require(
+            rows.first { $0.occurrence.entryID == movingWorkout.id }
+        )
+        let presentation = try #require(transitRow.transitPresentation)
+
+        #expect(!presentation.origin.showsPseudoEntry)
+        #expect(presentation.destination.showsPseudoEntry)
+        #expect(workoutRow.startBoundaryRenderedByPrevious)
     }
 
     @Test("Separated transits share one place between both timestamps")
@@ -617,6 +654,50 @@ struct TransitContinuityTests {
         #expect(transitPresentation.showsReviewBadge)
     }
 
+    @Test("Only point-to-point workouts use compact transit presentation")
+    func workoutPresentationThreshold() throws {
+        let origin = location(
+            name: "Park entrance",
+            latitude: 44.4300,
+            longitude: 26.1000
+        )
+        let nearbyDestination = location(
+            name: "Park exit",
+            latitude: 44.4310,
+            longitude: 26.1000
+        )
+        let distantDestination = location(
+            name: "Office",
+            latitude: 44.4400,
+            longitude: 26.1000
+        )
+
+        let loop = workout(
+            movementKind: .moving,
+            origin: origin,
+            destination: nearbyDestination
+        )
+        let pointToPoint = workout(
+            movementKind: .moving,
+            origin: origin,
+            destination: distantDestination
+        )
+        let stationary = workout(
+            movementKind: .staticWorkout,
+            origin: origin,
+            destination: distantDestination
+        )
+
+        #expect(project([loop]).rows.first?.transitPresentation == nil)
+        #expect(project([stationary]).rows.first?.transitPresentation == nil)
+
+        let presentation = try #require(
+            project([pointToPoint]).rows.first?.transitPresentation
+        )
+        #expect(presentation.origin.name == "Park entrance")
+        #expect(presentation.destination.name == "Office")
+    }
+
     @Test("Pseudo-place identity survives presentation edits")
     func stableBoundaryIdentity() throws {
         let entryID = UUID()
@@ -705,6 +786,23 @@ struct TransitContinuityTests {
         )
     }
 
+    private func workout(
+        movementKind: WorkoutMovementKind,
+        origin: TimelineLocationSnapshot,
+        destination: TimelineLocationSnapshot
+    ) -> TimelineEntrySnapshot {
+        snapshot(
+            kind: .workout,
+            start: "2026-07-17T10:00:00+03:00",
+            end: "2026-07-17T10:30:00+03:00",
+            workoutMovementKind: movementKind,
+            workoutOrigin: origin.name,
+            workoutDestination: destination.name,
+            workoutOriginLocation: origin,
+            workoutDestinationLocation: destination
+        )
+    }
+
     private func snapshot(
         id: UUID = UUID(),
         kind: LogKind,
@@ -717,6 +815,8 @@ struct TransitContinuityTests {
         visitPlace: String = "Place",
         visitLocation: TimelineLocationSnapshot? = nil,
         workoutMovementKind: WorkoutMovementKind? = nil,
+        workoutOrigin: String = "Origin",
+        workoutDestination: String = "Destination",
         workoutOriginLocation: TimelineLocationSnapshot? = nil,
         workoutDestinationLocation: TimelineLocationSnapshot? = nil,
         workoutPlaceLocation: TimelineLocationSnapshot? = nil,
@@ -741,6 +841,8 @@ struct TransitContinuityTests {
             visitPlace: visitPlace,
             visitLocation: visitLocation,
             workoutMovementKind: workoutMovementKind,
+            workoutOrigin: workoutOrigin,
+            workoutDestination: workoutDestination,
             workoutOriginLocation: workoutOriginLocation,
             workoutDestinationLocation: workoutDestinationLocation,
             workoutPlaceLocation: workoutPlaceLocation,

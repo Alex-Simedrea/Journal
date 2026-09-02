@@ -99,6 +99,7 @@ struct EntrySearchScreen: View {
                 .padding(.bottom, 28)
             }
             .scrollDismissesKeyboard(.interactively)
+            .scrollEdgeEffectStyle(.soft, for: [.top, .bottom])
         }
     }
 
@@ -138,9 +139,20 @@ private struct EntrySearchResultSection: View {
             Button {
                 onOpenDay(section.day)
             } label: {
-                Text(DaySummaryDatePresentation.dayTitle(for: section.day))
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Text(DaySummaryDatePresentation.dayTitle(for: section.day))
+                        .font(.title3.weight(.semibold))
+
+                    Spacer(minLength: 0)
+
+                    Image(systemName: "chevron.right")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(.rect)
+                .foregroundStyle(.primary)
             }
             .buttonStyle(.plain)
             .matchedTransitionSource(id: section.day, in: namespace)

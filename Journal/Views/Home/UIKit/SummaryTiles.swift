@@ -492,6 +492,7 @@ final class UIKitWeatherSummaryTileView: UIKitRoundedSummaryTileView {
     private var weather: DayWeatherSummary?
     private var state: DayWeatherLoadState = .idle
     private var request: DayWeatherRequest?
+    private var symbolImageKey = ""
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -593,28 +594,31 @@ final class UIKitWeatherSummaryTileView: UIKitRoundedSummaryTileView {
         let compact = bounds.height < 60
         let padding: CGFloat = compact ? 8 : 10
         if let weather {
-            let swiftUIPalette = WeatherSymbolPalette.colors(
-                for: weather.symbolName
-            )
-            let palette = [
-                UIColor(swiftUIPalette.primary),
-                UIColor(swiftUIPalette.secondary),
-                UIColor(swiftUIPalette.tertiary),
-            ]
             let pointSize: CGFloat = compact ? 26 : 32
-            let base = UIImage.SymbolConfiguration(
-                pointSize: pointSize,
-                weight: .semibold
-            )
-            let colors = UIImage.SymbolConfiguration(paletteColors: palette)
-            let filledName = weather.symbolName.hasSuffix(".fill")
-                ? weather.symbolName
-                : weather.symbolName + ".fill"
-            symbolView.image = (
-                UIImage(systemName: filledName)
-                    ?? UIImage(systemName: weather.symbolName)
-            )?
-                .applyingSymbolConfiguration(base.applying(colors))
+            let key = "\(weather.symbolName)|\(pointSize)|\(traitCollection.userInterfaceStyle.rawValue)"
+            if key != symbolImageKey {
+                symbolImageKey = key
+                let swiftUIPalette = WeatherSymbolPalette.colors(
+                    for: weather.symbolName
+                )
+                let palette = [
+                    UIColor(swiftUIPalette.primary),
+                    UIColor(swiftUIPalette.secondary),
+                    UIColor(swiftUIPalette.tertiary),
+                ]
+                let base = UIImage.SymbolConfiguration(
+                    pointSize: pointSize,
+                    weight: .semibold
+                )
+                let colors = UIImage.SymbolConfiguration(paletteColors: palette)
+                let filledName = weather.symbolName.hasSuffix(".fill")
+                    ? weather.symbolName
+                    : weather.symbolName + ".fill"
+                symbolView.image = (
+                    UIImage(systemName: filledName)
+                        ?? UIImage(systemName: weather.symbolName)
+                )?.applyingSymbolConfiguration(base.applying(colors))
+            }
         }
         spinner.frame = CGRect(
             x: padding,
@@ -1180,7 +1184,7 @@ final class UIKitPeriodMovementSummaryTileView: UIKitRoundedSummaryTileView {
 
     func configure(_ movement: DayMovementSummary) {
         self.movement = movement
-        let visibleCount = min(movement.icons.count, 5)
+        let visibleCount = min(movement.icons.count, 9)
         while badgeViews.count < visibleCount {
             let badge = UIKitMovementBadgeView()
             badgeViews.append(badge)
@@ -1198,7 +1202,7 @@ final class UIKitPeriodMovementSummaryTileView: UIKitRoundedSummaryTileView {
     override func layoutSubviews() {
         super.layoutSubviews()
         guard let movement else { return }
-        let count = min(movement.icons.count, 5)
+        let count = min(movement.icons.count, 9)
         let badgeSize = min(36, max(28, bounds.height * 0.42))
         for index in badgeViews.indices {
             badgeViews[index].isHidden = index >= count
@@ -1297,6 +1301,13 @@ final class UIKitMovementBadgeView: UIView {
 
 @MainActor
 final class UIKitWakeSummaryTileView: UIKitRoundedSummaryTileView {
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        return formatter
+    }()
+
     private let iconBackground = UIView()
     private let iconGradient = CAGradientLayer()
     private let iconView = UIImageView()
@@ -1338,11 +1349,10 @@ final class UIKitWakeSummaryTileView: UIKitRoundedSummaryTileView {
     }
 
     func configure(_ wake: DayWakeSummary) {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        formatter.dateStyle = .none
-        formatter.timeZone = TimeZone(identifier: wake.timeZoneIdentifier) ?? .current
-        timeLabel.text = formatter.string(from: wake.wakeTime)
+        Self.timeFormatter.timeZone = TimeZone(
+            identifier: wake.timeZoneIdentifier
+        ) ?? .current
+        timeLabel.text = Self.timeFormatter.string(from: wake.wakeTime)
         durationLabel.text = wake.durationSeconds.map {
             Duration.seconds($0).formatted(.units(
                 allowed: [.hours, .minutes],
@@ -1796,6 +1806,7 @@ final class UIKitPeriodHighlightTileView: UIControl {
     private let titleLabel = UILabel()
     private var action: (() -> Void)?
     private var symbolName = ""
+    private var configuredSymbolPointSize: CGFloat = -1
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1830,6 +1841,7 @@ final class UIKitPeriodHighlightTileView: UIControl {
         eyebrowLabel.text = eyebrow
         titleLabel.text = title
         symbolName = symbol
+        configuredSymbolPointSize = -1
         symbolView.image = UIImage(systemName: symbol)
         symbolView.tintColor = tint
         self.action = action
@@ -1849,13 +1861,16 @@ final class UIKitPeriodHighlightTileView: UIControl {
         let symbolPointSize = UIFont.preferredFont(
             forTextStyle: compact ? .caption2 : .caption1
         ).pointSize
-        symbolView.image = UIImage(
-            systemName: symbolName,
-            withConfiguration: UIImage.SymbolConfiguration(
-                pointSize: symbolPointSize,
-                weight: .semibold
+        if configuredSymbolPointSize != symbolPointSize {
+            configuredSymbolPointSize = symbolPointSize
+            symbolView.image = UIImage(
+                systemName: symbolName,
+                withConfiguration: UIImage.SymbolConfiguration(
+                    pointSize: symbolPointSize,
+                    weight: .semibold
+                )
             )
-        )
+        }
         let iconSize = symbolView.image?.size ?? CGSize(
             width: symbolPointSize,
             height: symbolPointSize
@@ -1961,6 +1976,7 @@ final class UIKitPeriodReviewTileView: UIKitRoundedSummaryTileView {
 final class UIKitPeriodNewGroundTileView: UIKitRoundedSummaryTileView {
     private let symbolView = UIImageView()
     private let label = UILabel()
+    private var symbolIsCompact: Bool?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1989,12 +2005,14 @@ final class UIKitPeriodNewGroundTileView: UIKitRoundedSummaryTileView {
         let compact = bounds.height < 76
         let padding: CGFloat = compact ? 7 : 8
         let pointSize: CGFloat = compact ? 12 : 23
-        symbolView.image = UIImage(systemName: "sparkles")?.applyingSymbolConfiguration(
-            UIImage.SymbolConfiguration(
-                pointSize: pointSize,
-                weight: compact ? .semibold : .regular
-            )
-        )
+        if symbolIsCompact != compact {
+            symbolIsCompact = compact
+            symbolView.image = UIImage(systemName: "sparkles")?
+                .applyingSymbolConfiguration(UIImage.SymbolConfiguration(
+                    pointSize: pointSize,
+                    weight: compact ? .semibold : .regular
+                ))
+        }
         symbolView.frame = CGRect(
             x: padding,
             y: padding,
@@ -2024,6 +2042,7 @@ final class UIKitPeriodSleepTileView: UIKitRoundedSummaryTileView {
     private let symbolView = UIImageView()
     private let timeLabel = UILabel()
     private let rhythmLabel = UILabel()
+    private var symbolIsCompact: Bool?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -2061,12 +2080,14 @@ final class UIKitPeriodSleepTileView: UIKitRoundedSummaryTileView {
         let compact = bounds.height < 76
         let padding: CGFloat = compact ? 7 : 8
         let pointSize: CGFloat = compact ? 12 : 23
-        symbolView.image = UIImage(systemName: "sunrise.fill")?.applyingSymbolConfiguration(
-            UIImage.SymbolConfiguration(
-                pointSize: pointSize,
-                weight: compact ? .semibold : .regular
-            )
-        )
+        if symbolIsCompact != compact {
+            symbolIsCompact = compact
+            symbolView.image = UIImage(systemName: "sunrise.fill")?
+                .applyingSymbolConfiguration(UIImage.SymbolConfiguration(
+                    pointSize: pointSize,
+                    weight: compact ? .semibold : .regular
+                ))
+        }
         symbolView.frame = CGRect(
             x: padding,
             y: padding,
@@ -2172,7 +2193,13 @@ final class UIKitActivitySummaryTileView: UIKitRoundedSummaryTileView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        symbolView.image = UIImage(systemName: "square.grid.3x3.fill")
+        symbolView.image = UIImage(
+            systemName: "square.grid.3x3.fill",
+            withConfiguration: UIImage.SymbolConfiguration(
+                pointSize: 11,
+                weight: .semibold
+            )
+        )
         symbolView.tintColor = .label
         titleLabel.font = summaryFont(.caption2, weight: .semibold)
         [symbolView, titleLabel].forEach(addSubview)
@@ -2202,13 +2229,6 @@ final class UIKitActivitySummaryTileView: UIKitRoundedSummaryTileView {
     override func layoutSubviews() {
         super.layoutSubviews()
         let labelHeight = titleLabel.font.lineHeight
-        symbolView.image = UIImage(
-            systemName: "square.grid.3x3.fill",
-            withConfiguration: UIImage.SymbolConfiguration(
-                pointSize: 11,
-                weight: .semibold
-            )
-        )
         symbolView.frame = CGRect(x: 8, y: 8, width: 11, height: labelHeight)
         titleLabel.frame = CGRect(
             x: 25,

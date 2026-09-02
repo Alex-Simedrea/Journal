@@ -57,6 +57,7 @@ actor HealthKitWorkoutClient {
             HKObjectType.workoutType(),
             HKSeriesType.workoutRoute(),
             HKQuantityType(.activeEnergyBurned),
+            HKQuantityType(.distanceCycling),
             HKQuantityType(.distanceWalkingRunning),
             HKCategoryType(.sleepAnalysis),
         ]
@@ -265,7 +266,9 @@ actor HealthKitWorkoutClient {
     nonisolated static func distanceMeters(
         for workout: HKWorkout
     ) -> Double? {
-        let type = HKQuantityType(.distanceWalkingRunning)
+        let type = workout.workoutActivityType == .cycling
+            ? HKQuantityType(.distanceCycling)
+            : HKQuantityType(.distanceWalkingRunning)
         return distanceMeters(
             from: workout.statistics(for: type)?.sumQuantity()
         )

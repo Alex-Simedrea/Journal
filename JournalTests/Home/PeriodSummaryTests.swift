@@ -113,6 +113,104 @@ struct PeriodSummaryTests {
         )
 
         #expect(summary.frequentRoute?.count == 2)
+        #expect(summary.overviewData.pathDisplayMode == .visibleAtMapScale)
+        #expect(Set(summary.overviewData.markers.map(\.name)) == [
+            "Home",
+            "Beach",
+        ])
+    }
+
+    @Test("A period with multiple cities shows one marker per city")
+    func periodCityMarkers() throws {
+        let home = location(
+            "Home",
+            latitude: 44.4268,
+            longitude: 26.1025,
+            city: "Bucharest"
+        )
+        let cafe = location(
+            "Cafe",
+            latitude: 44.4378,
+            longitude: 26.0969,
+            city: "Bucharest"
+        )
+        let hotel = location(
+            "Hotel",
+            latitude: 48.8566,
+            longitude: 2.3522,
+            city: "Paris"
+        )
+        let museum = location(
+            "Museum",
+            latitude: 48.8606,
+            longitude: 2.3376,
+            city: "Paris"
+        )
+        let entries = [
+            snapshot(
+                start: date("2026-07-04T10:00:00+03:00"),
+                end: date("2026-07-04T13:00:00+03:00"),
+                origin: home,
+                destination: hotel
+            ),
+            snapshot(
+                start: date("2026-07-05T10:00:00+03:00"),
+                end: date("2026-07-05T13:00:00+03:00"),
+                origin: cafe,
+                destination: museum
+            ),
+        ]
+        let summary = try #require(
+            PeriodSummaryProjector.makeMonthSummaries(
+                entries: entries,
+                daySummaries: DaySummaryProjector.makeSummaries(
+                    entries: entries
+                )
+            ).first
+        )
+
+        #expect(Set(summary.overviewData.markers.map(\.name)) == [
+            "Bucharest",
+            "Paris",
+        ])
+        #expect(summary.overviewData.markers.allSatisfy {
+            $0.systemImage == .buildings
+        })
+    }
+
+    @Test("A period with one city keeps its individual place markers")
+    func singleCityPlaceMarkers() throws {
+        let home = location(
+            "Home",
+            latitude: 44.4268,
+            longitude: 26.1025,
+            city: "Bucharest"
+        )
+        let work = location(
+            "Work",
+            latitude: 44.4378,
+            longitude: 26.0969,
+            city: "Bucharest"
+        )
+        let entries = [snapshot(
+            start: date("2026-07-04T10:00:00+03:00"),
+            end: date("2026-07-04T11:00:00+03:00"),
+            origin: home,
+            destination: work
+        )]
+        let summary = try #require(
+            PeriodSummaryProjector.makeMonthSummaries(
+                entries: entries,
+                daySummaries: DaySummaryProjector.makeSummaries(
+                    entries: entries
+                )
+            ).first
+        )
+
+        #expect(Set(summary.overviewData.markers.map(\.name)) == [
+            "Home",
+            "Work",
+        ])
     }
 
     @Test("Longest journey requires at least one hundred kilometers")
@@ -224,12 +322,14 @@ struct PeriodSummaryTests {
     private func location(
         _ name: String,
         latitude: Double,
-        longitude: Double
+        longitude: Double,
+        city: String? = nil
     ) -> TimelineLocationSnapshot {
         TimelineLocationSnapshot(
             name: name,
             latitude: latitude,
-            longitude: longitude
+            longitude: longitude,
+            cityName: city
         )
     }
 

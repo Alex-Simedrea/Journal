@@ -11,11 +11,14 @@ nonisolated struct WorkoutActivityPresentation: Equatable, Sendable {
 }
 
 nonisolated enum WorkoutActivityCatalog {
+    static let cyclingRawValue = 13
     static let walkingRawValue = 52
     static let runningRawValue = 37
 
     static func movementKind(for rawValue: Int) -> WorkoutMovementKind {
-        rawValue == walkingRawValue || rawValue == runningRawValue
+        rawValue == cyclingRawValue
+            || rawValue == walkingRawValue
+            || rawValue == runningRawValue
             ? .moving
             : .staticWorkout
     }
@@ -34,7 +37,8 @@ nonisolated enum WorkoutActivityCatalog {
         case 10: activity("Cricket", symbol: "cricket.ball.fill")
         case 11: activity("Cross Training", symbol: "figure.cross.training")
         case 12: activity("Curling", symbol: "figure.curling")
-        case 13: activity("Cycling", symbol: "figure.outdoor.cycle")
+        case cyclingRawValue:
+            activity("Cycling", symbol: "figure.outdoor.cycle")
         case 14, 15, 77, 78: activity("Dance", symbol: "figure.dance")
         case 16: activity("Elliptical", symbol: "figure.elliptical")
         case 17: activity("Equestrian Sports", symbol: "figure.equestrian.sports")

@@ -72,7 +72,23 @@ final class LocationService {
         throw LocationCaptureError.locationUnavailable
     }
 
-    func location(at coordinate: CLLocationCoordinate2D) async -> Location {
+    nonisolated func location(
+        at coordinate: CLLocationCoordinate2D
+    ) async -> Location {
+        await Self.resolvedLocation(at: coordinate)
+    }
+
+    nonisolated static func resolvedLocation(
+        at coordinate: CLLocationCoordinate2D
+    ) async -> Location {
+        await Task.detached(priority: .utility) {
+            await resolveLocation(at: coordinate)
+        }.value
+    }
+
+    nonisolated private static func resolveLocation(
+        at coordinate: CLLocationCoordinate2D
+    ) async -> Location {
         let currentLocation = CLLocation(
             latitude: coordinate.latitude,
             longitude: coordinate.longitude
@@ -91,7 +107,7 @@ final class LocationService {
         )
     }
 
-    static func compactAddress(for mapItem: MKMapItem) -> String? {
+    nonisolated static func compactAddress(for mapItem: MKMapItem) -> String? {
         let primary = nonempty(mapItem.name)
             ?? nonempty(mapItem.address?.shortAddress)
         let city = nonempty(mapItem.addressRepresentations?.cityName)
@@ -127,7 +143,7 @@ final class LocationService {
         )
     }
 
-    private func reverseGeocode(
+    nonisolated private static func reverseGeocode(
         _ location: CLLocation
     ) async -> (
         address: String?,
@@ -158,19 +174,21 @@ final class LocationService {
         }
     }
 
-    private static func nonempty(_ value: String?) -> String? {
+    nonisolated private static func nonempty(_ value: String?) -> String? {
         let value = value?.trimmingCharacters(in: .whitespacesAndNewlines)
         return value?.isEmpty == false ? value : nil
     }
 
-    private static func normalized(_ value: String) -> String {
+    nonisolated private static func normalized(_ value: String) -> String {
         value.folding(
             options: [.caseInsensitive, .diacriticInsensitive],
             locale: .current
         )
     }
 
-    private static func countryCode(for countryName: String?) -> String? {
+    nonisolated private static func countryCode(
+        for countryName: String?
+    ) -> String? {
         guard let countryName = nonempty(countryName) else { return nil }
         return Locale.Region.isoRegions.first { region in
             guard let localized = Locale.current.localizedString(

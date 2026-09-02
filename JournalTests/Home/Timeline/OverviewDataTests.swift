@@ -4,6 +4,57 @@ import Testing
 @testable import Journal
 
 struct TimelineOverviewDataTests {
+    @Test func markersAtTheSameDisplayedLocationAreDeduplicated() {
+        let coordinate = CLLocationCoordinate2D(
+            latitude: 44.4268,
+            longitude: 26.1025
+        )
+        let data = TimelineOverviewData(markers: [
+            TimelineMapMarker(
+                id: "home-as-origin",
+                name: "Home",
+                coordinate: coordinate,
+                systemImage: .house
+            ),
+            TimelineMapMarker(
+                id: "home-as-destination",
+                name: "Home",
+                coordinate: coordinate,
+                systemImage: .house
+            ),
+        ])
+
+        #expect(data.markers.count == 1)
+        #expect(data.markers.first?.name == "Home")
+    }
+
+    @Test func savedPlaceRadiusCentersAreUsedForMarkerDeduplication() {
+        let center = CLLocationCoordinate2D(
+            latitude: 44.4268,
+            longitude: 26.1025
+        )
+        let data = TimelineOverviewData(markers: [
+            TimelineMapMarker(
+                id: "first-visit",
+                name: "Home",
+                coordinate: .init(latitude: 44.427, longitude: 26.102),
+                systemImage: .house,
+                accuracyRadiusMeters: 200,
+                radiusCenterCoordinate: center
+            ),
+            TimelineMapMarker(
+                id: "second-visit",
+                name: "Home",
+                coordinate: .init(latitude: 44.426, longitude: 26.103),
+                systemImage: .house,
+                accuracyRadiusMeters: 200,
+                radiusCenterCoordinate: center
+            ),
+        ])
+
+        #expect(data.markers.count == 1)
+    }
+
     @Test func savedPlaceRadiusReachesOverviewMarkers() throws {
         let place = Place(
             name: "City center",

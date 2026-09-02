@@ -5,11 +5,11 @@ import OSLog
 nonisolated struct JournalRecordingClassificationConfiguration: Sendable {
     var maximumHorizontalAccuracy = 120.0
     var visitCoverageFraction = 0.9
-    var minimumStrongTransitDistanceMeters = 150.0
-    var minimumMotionSupportedTransitDistanceMeters = 75.0
-    var minimumSparseTransitDistanceMeters = 40.0
-    var maximumVisitDistanceMeters = 75.0
-    var minimumVisitDwellFraction = 0.85
+    var minimumStrongTransitDistanceMeters = 250.0
+    var minimumMotionSupportedTransitDistanceMeters = 110.0
+    var minimumSparseTransitDistanceMeters = 70.0
+    var maximumVisitDistanceMeters = 180.0
+    var minimumVisitDwellFraction = 0.72
     var minimumSupportedMovementDuration: TimeInterval = 60
     var minimumSparseMovementDuration: TimeInterval = 120
     var movementMergeGap: TimeInterval = 15
@@ -20,9 +20,13 @@ nonisolated struct JournalRecordingClassificationConfiguration: Sendable {
     var maximumDwellRadiusMeters = 60.0
     var dwellAccuracyMultiplier = 2.0
     var maximumDwellCandidateCount = 64
-    var minimumRouteSimplificationToleranceMeters = 12.0
-    var maximumRouteSimplificationToleranceMeters = 35.0
-    var routeSimplificationAccuracyMultiplier = 1.5
+    var minimumRouteSimplificationToleranceMeters = 45.0
+    var maximumRouteSimplificationToleranceMeters = 80.0
+    var routeSimplificationAccuracyMultiplier = 2.5
+    var routeDenoisingInterval: TimeInterval = 30
+    var savedPlaceMarginMeters = 25.0
+    var minimumSavedPlaceRadiusMeters = 50.0
+    var minimumSavedPlaceCoverageFraction = 0.88
     var endpointFraction = 0.2
     var maximumEndpointSampleCount = 6
     var polylineToleranceMeters = 25.0
@@ -47,6 +51,7 @@ nonisolated enum JournalRecordingClassifier {
     static func classify(
         points: [TrackedLocationPoint],
         motion: [RecordedMotionObservation],
+        placeRegions: [JournalRecordingPlaceRegion] = [],
         configuration: JournalRecordingClassificationConfiguration = .init()
     ) -> JournalRecordingClassification? {
         let reliable = points
@@ -92,6 +97,17 @@ nonisolated enum JournalRecordingClassifier {
             reliable,
             configuration: configuration
         )
+        let savedPlaceCoverage = placeRegions.map { region in
+            temporalCoverage(
+                of: reliable,
+                latitude: region.latitude,
+                longitude: region.longitude,
+                radiusMeters: max(
+                    configuration.minimumSavedPlaceRadiusMeters,
+                    region.radiusMeters + configuration.savedPlaceMarginMeters
+                )
+            )
+        }.max() ?? 0
 
         let hasStrongRoute = traveledDistance
             >= configuration.minimumStrongTransitDistanceMeters
@@ -111,11 +127,13 @@ nonisolated enum JournalRecordingClassifier {
             && dwellFraction >= configuration.minimumVisitDwellFraction
             && movementDuration
                 < configuration.minimumSupportedMovementDuration
+        let isSavedPlaceVisit = savedPlaceCoverage
+            >= configuration.minimumSavedPlaceCoverageFraction
         JournalRecordingLog.classifier.info(
-            "[Classifier] confirmed path \(traveledDistance)m; sustained movement \(movementDuration)s; dominant dwell \(dwellFraction)"
+            "[Classifier] confirmed path \(traveledDistance)m; sustained movement \(movementDuration)s; dominant dwell \(dwellFraction); saved-place coverage \(savedPlaceCoverage)"
         )
 
-        if !isTransit, isVisit {
+        if isSavedPlaceVisit || (!isTransit && isVisit) {
             return .visit(
                 coordinate: RecordedRoutePoint(
                     latitude: center.latitude,
@@ -132,15 +150,9 @@ nonisolated enum JournalRecordingClassifier {
         )
         let origin = representativePoint(Array(reliable.prefix(endpointCount)))
         let destination = representativePoint(Array(reliable.suffix(endpointCount)))
-        let route = simplify(
-            reliable.map {
-                RecordedRoutePoint(
-                    latitude: $0.latitude,
-                    longitude: $0.longitude,
-                    timestamp: $0.timestamp
-                )
-            },
-            toleranceMeters: configuration.polylineToleranceMeters
+        let route = denoisedRoute(
+            reliable,
+            configuration: configuration
         )
         return .transit(
             origin: origin,
@@ -231,8 +243,12 @@ nonisolated enum JournalRecordingClassifier {
         _ points: [TrackedLocationPoint],
         configuration: JournalRecordingClassificationConfiguration = .init()
     ) -> Double {
-        guard points.count > 1 else { return 0 }
-        let accuracies = points.map(\.horizontalAccuracy).sorted()
+        let denoised = denoisedPoints(
+            points,
+            interval: configuration.routeDenoisingInterval
+        )
+        guard denoised.count > 1 else { return 0 }
+        let accuracies = denoised.map(\.horizontalAccuracy).sorted()
         let medianAccuracy = accuracies[accuracies.count / 2]
         let tolerance = min(
             configuration.maximumRouteSimplificationToleranceMeters,
@@ -243,7 +259,7 @@ nonisolated enum JournalRecordingClassifier {
             )
         )
         let confirmedRoute = simplify(
-            points.map {
+            denoised.map {
                 RecordedRoutePoint(
                     latitude: $0.latitude,
                     longitude: $0.longitude,
@@ -264,6 +280,33 @@ nonisolated enum JournalRecordingClassifier {
                 )
             )
         }
+    }
+
+    static func denoisedRoute(
+        _ points: [TrackedLocationPoint],
+        configuration: JournalRecordingClassificationConfiguration = .init()
+    ) -> [RecordedRoutePoint] {
+        let denoised = denoisedPoints(
+            points,
+            interval: configuration.routeDenoisingInterval
+        )
+        guard denoised.count > 2 else {
+            return denoised.map(RecordedRoutePoint.init)
+        }
+        let accuracies = denoised.map(\.horizontalAccuracy).sorted()
+        let medianAccuracy = accuracies[accuracies.count / 2]
+        let tolerance = min(
+            configuration.maximumRouteSimplificationToleranceMeters,
+            max(
+                configuration.minimumRouteSimplificationToleranceMeters,
+                medianAccuracy
+                    * configuration.routeSimplificationAccuracyMultiplier
+            )
+        )
+        return simplify(
+            denoised.map(RecordedRoutePoint.init),
+            toleranceMeters: tolerance
+        )
     }
 
     static func dominantDwellFraction(
@@ -366,6 +409,67 @@ nonisolated enum JournalRecordingClassifier {
         }
     }
 
+    private static func temporalCoverage(
+        of points: [TrackedLocationPoint],
+        latitude: Double,
+        longitude: Double,
+        radiusMeters: Double
+    ) -> Double {
+        let weights = temporalWeights(points)
+        let total = weights.reduce(0, +)
+        guard total > 0 else { return 1 }
+        let center = CLLocation(latitude: latitude, longitude: longitude)
+        let covered = zip(points, weights).reduce(0.0) { result, pair in
+            let location = CLLocation(
+                latitude: pair.0.latitude,
+                longitude: pair.0.longitude
+            )
+            return location.distance(from: center) <= radiusMeters
+                ? result + pair.1
+                : result
+        }
+        return min(1, covered / total)
+    }
+
+    private static func denoisedPoints(
+        _ points: [TrackedLocationPoint],
+        interval: TimeInterval
+    ) -> [TrackedLocationPoint] {
+        let ordered = points.sorted { $0.timestamp < $1.timestamp }
+        guard let first = ordered.first, interval > 0 else { return ordered }
+        let buckets = Dictionary(grouping: ordered) { point in
+            Int(point.timestamp.timeIntervalSince(first.timestamp) / interval)
+        }
+        return buckets.keys.sorted().compactMap { key in
+            guard let bucket = buckets[key], !bucket.isEmpty else { return nil }
+            let weighted = bucket.reduce(
+                into: (latitude: 0.0, longitude: 0.0, weight: 0.0)
+            ) { result, point in
+                let accuracy = max(5, point.horizontalAccuracy)
+                let weight = 1 / (accuracy * accuracy)
+                result.latitude += point.latitude * weight
+                result.longitude += point.longitude * weight
+                result.weight += weight
+            }
+            guard weighted.weight > 0 else { return nil }
+            let accuracies = bucket.map(\.horizontalAccuracy).sorted()
+            let speeds = bucket.compactMap(\.speed).sorted()
+            let courses = bucket.compactMap(\.course).sorted()
+            let altitudes = bucket.compactMap(\.altitude).sorted()
+            return TrackedLocationPoint(
+                latitude: weighted.latitude / weighted.weight,
+                longitude: weighted.longitude / weighted.weight,
+                timestamp: bucket[bucket.count / 2].timestamp,
+                horizontalAccuracy: accuracies[accuracies.count / 2],
+                altitude: altitudes.isEmpty
+                    ? nil
+                    : altitudes[altitudes.count / 2],
+                speed: speeds.isEmpty ? nil : speeds[speeds.count / 2],
+                course: courses.isEmpty ? nil : courses[courses.count / 2]
+            )
+        }
+    }
+
     private static func medianPoint(
         _ points: [TrackedLocationPoint]
     ) -> TrackedLocationPoint {
@@ -457,6 +561,16 @@ nonisolated enum JournalRecordingClassifier {
     ) -> Double {
         CLLocation(latitude: lhs.latitude, longitude: lhs.longitude).distance(
             from: CLLocation(latitude: rhs.latitude, longitude: rhs.longitude)
+        )
+    }
+}
+
+nonisolated private extension RecordedRoutePoint {
+    init(_ point: TrackedLocationPoint) {
+        self.init(
+            latitude: point.latitude,
+            longitude: point.longitude,
+            timestamp: point.timestamp
         )
     }
 }

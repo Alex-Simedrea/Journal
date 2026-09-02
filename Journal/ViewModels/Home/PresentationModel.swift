@@ -92,6 +92,9 @@ final class HomePresentationModel {
 
         do {
             let entries = try modelContext.fetch(descriptor)
+            if WorkoutTimelinePlaceReconciler.reconcile(entries: entries) {
+                try modelContext.save()
+            }
             let places = try modelContext.fetch(FetchDescriptor<Place>())
             let placesByID = Dictionary(
                 uniqueKeysWithValues: places.map { ($0.id, $0) }

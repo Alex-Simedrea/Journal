@@ -293,12 +293,20 @@ final class DaySummaryRowModel: Identifiable {
             didLoadRoutes = false
             return
         }
-        overviewData = TimelineOverviewData.make(
-            occurrences: summary.occurrences.filter {
-                $0.role != .unresolvedReview
-            },
-            workoutRoutes: routes
-        )
+        let occurrences = summary.occurrences.filter {
+            $0.role != .unresolvedReview
+        }
+        let projected = await Task.detached(priority: .utility) {
+            TimelineOverviewData.make(
+                occurrences: occurrences,
+                workoutRoutes: routes
+            )
+        }.value
+        guard !Task.isCancelled else {
+            didLoadRoutes = false
+            return
+        }
+        overviewData = projected
         isWorkoutRouteEnrichmentPending = false
     }
 }
@@ -306,9 +314,9 @@ final class DaySummaryRowModel: Identifiable {
 @MainActor
 @Observable
 final class HomeFeedModel {
-    private struct MapSlotSource: Equatable {
+    nonisolated private struct MapSlotSource: Equatable, Sendable {
         let id: String
-        let data: TimelineOverviewData
+        let fingerprint: Int
     }
 
     private(set) var rows: [DaySummaryRowModel] = []
@@ -382,7 +390,7 @@ final class HomeFeedModel {
                     persistWeather: persistence
                 )
             }
-            updateMapSnapshotRevision(
+            await updateMapSnapshotRevision(
                 days: summaries,
                 periods: (monthRows + yearRows).map(\.summary)
             )
@@ -481,7 +489,7 @@ final class HomeFeedModel {
                   revision == periodProjectionRevision else { return }
             monthRows = stablePeriodRows(result.0, existing: monthRows)
             yearRows = stablePeriodRows(result.1, existing: yearRows)
-            updateMapSnapshotRevision(
+            await updateMapSnapshotRevision(
                 days: daySummaries,
                 periods: result.0 + result.1
             )
@@ -491,33 +499,59 @@ final class HomeFeedModel {
     private func updateMapSnapshotRevision(
         days: [DaySummary],
         periods: [PeriodSummary]
-    ) {
-        let sources = days.map {
-            MapSlotSource(id: "day-\($0.day.id)-overview", data: $0.overviewData)
+    ) async {
+        let sources = await Task.detached(priority: .utility) {
+            Self.mapSlotSources(days: days, periods: periods)
+        }.value
+        guard !Task.isCancelled else { return }
+        guard sources != mapSlotSources else { return }
+        mapSlotSources = sources
+        mapSnapshotRevision &+= 1
+    }
+
+    nonisolated private static func mapSlotSources(
+        days: [DaySummary],
+        periods: [PeriodSummary]
+    ) -> [MapSlotSource] {
+        days.map {
+            MapSlotSource(
+                id: "day-\($0.day.id)-overview",
+                fingerprint: fingerprint(of: $0.overviewData)
+            )
         } + periods.flatMap { summary in
             var result = [
                 MapSlotSource(
                     id: "period-\(summary.id.id)-overview",
-                    data: summary.overviewData
+                    fingerprint: fingerprint(of: summary.overviewData)
                 ),
             ]
             if let route = summary.frequentRoute {
                 result.append(MapSlotSource(
                     id: "period-\(summary.id.id)-frequent-route",
-                    data: route.mapData
+                    fingerprint: fingerprint(of: route.mapData)
                 ))
             }
             if let journey = summary.longestJourney {
                 result.append(MapSlotSource(
                     id: "period-\(summary.id.id)-longest-journey",
-                    data: journey.mapData
+                    fingerprint: fingerprint(of: journey.mapData)
                 ))
             }
             return result
         }
-        guard sources != mapSlotSources else { return }
-        mapSlotSources = sources
-        mapSnapshotRevision &+= 1
+    }
+
+    nonisolated private static func fingerprint(
+        of data: TimelineOverviewData
+    ) -> Int {
+        var hasher = Hasher()
+        hasher.combine(data.markers)
+        hasher.combine(data.paths)
+        switch data.pathDisplayMode {
+        case .all: hasher.combine(0)
+        case .visibleAtMapScale: hasher.combine(1)
+        }
+        return hasher.finalize()
     }
 
     private func weatherPersistence(
@@ -568,31 +602,15 @@ final class PeriodSummaryRowModel: Identifiable {
     func loadEnrichment() async {
         guard !didLoadRoute else { return }
         didLoadRoute = true
-        var requests: [(entryID: UUID, workoutUUID: UUID, distance: Double)] = []
-        var seen: Set<UUID> = []
-        for occurrence in summary.days.flatMap(\.occurrences) {
-            guard seen.insert(occurrence.entryID).inserted,
-                  occurrence.snapshot.workoutMovementKind == .moving,
-                  let workoutUUID = occurrence.snapshot.workoutUUID else {
-                continue
-            }
-            requests.append((
-                occurrence.entryID,
-                workoutUUID,
-                occurrence.snapshot.workoutDistanceMeters ?? 0
-            ))
-        }
-        guard !requests.isEmpty else { return }
-
-        guard let longest = requests.max(by: { $0.distance < $1.distance }) else {
+        let summary = summary
+        let selected = await Task.detached(priority: .utility) {
+            PeriodRouteEnrichmentPlan.requests(for: summary)
+        }.value
+        guard !Task.isCancelled else {
+            didLoadRoute = false
             return
         }
-        var selected = [longest]
-        if let routeEntryID = summary.frequentRoute?.representativeEntryID,
-           let frequent = requests.first(where: { $0.entryID == routeEntryID }),
-           frequent.entryID != longest.entryID {
-            selected.append(frequent)
-        }
+        guard !selected.isEmpty else { return }
 
         for request in selected {
             do {
@@ -603,26 +621,44 @@ final class PeriodSummaryRowModel: Identifiable {
                     didLoadRoute = !Task.isCancelled
                     return
                 }
-                overviewData = replacingWorkoutPath(
-                    in: overviewData,
-                    entryID: request.entryID,
-                    points: points
-                )
-                if summary.frequentRoute?.representativeEntryID == request.entryID,
-                   let data = frequentRouteData {
-                    frequentRouteData = replacingWorkoutPath(
-                        in: data,
-                        entryID: request.entryID,
-                        points: points
+                let currentOverview = overviewData
+                let currentFrequent = frequentRouteData
+                let currentLongest = longestJourneyData
+                let replacements = await Task.detached(priority: .utility) {
+                    (
+                        PeriodRouteEnrichmentPlan.replacingWorkoutPath(
+                            in: currentOverview,
+                            entryID: request.entryID,
+                            points: points
+                        ),
+                        currentFrequent.map {
+                            PeriodRouteEnrichmentPlan.replacingWorkoutPath(
+                                in: $0,
+                                entryID: request.entryID,
+                                points: points
+                            )
+                        },
+                        currentLongest.map {
+                            PeriodRouteEnrichmentPlan.replacingWorkoutPath(
+                                in: $0,
+                                entryID: request.entryID,
+                                points: points
+                            )
+                        }
                     )
+                }.value
+                guard !Task.isCancelled else {
+                    didLoadRoute = false
+                    return
+                }
+                overviewData = replacements.0
+                if summary.frequentRoute?.representativeEntryID == request.entryID,
+                   currentFrequent != nil {
+                    frequentRouteData = replacements.1
                 }
                 if summary.longestJourney?.representativeEntryID == request.entryID,
-                   let data = longestJourneyData {
-                    longestJourneyData = replacingWorkoutPath(
-                        in: data,
-                        entryID: request.entryID,
-                        points: points
-                    )
+                   currentLongest != nil {
+                    longestJourneyData = replacements.2
                 }
             } catch is CancellationError {
                 didLoadRoute = false
@@ -633,7 +669,47 @@ final class PeriodSummaryRowModel: Identifiable {
         }
     }
 
-    private func replacingWorkoutPath(
+}
+
+nonisolated private struct PeriodRouteEnrichmentRequest: Sendable {
+    let entryID: UUID
+    let workoutUUID: UUID
+    let distance: Double
+}
+
+nonisolated private enum PeriodRouteEnrichmentPlan {
+    static func requests(
+        for summary: PeriodSummary
+    ) -> [PeriodRouteEnrichmentRequest] {
+        var requests: [PeriodRouteEnrichmentRequest] = []
+        var seen: Set<UUID> = []
+        for occurrence in summary.days.flatMap(\.occurrences) {
+            guard seen.insert(occurrence.entryID).inserted,
+                  occurrence.snapshot.workoutMovementKind == .moving,
+                  let workoutUUID = occurrence.snapshot.workoutUUID else {
+                continue
+            }
+            requests.append(PeriodRouteEnrichmentRequest(
+                entryID: occurrence.entryID,
+                workoutUUID: workoutUUID,
+                distance: occurrence.snapshot.workoutDistanceMeters ?? 0
+            ))
+        }
+        guard let longest = requests.max(by: {
+            $0.distance < $1.distance
+        }) else { return [] }
+        var selected = [longest]
+        if let routeEntryID = summary.frequentRoute?.representativeEntryID,
+           let frequent = requests.first(where: {
+               $0.entryID == routeEntryID
+           }),
+           frequent.entryID != longest.entryID {
+            selected.append(frequent)
+        }
+        return selected
+    }
+
+    static func replacingWorkoutPath(
         in data: TimelineOverviewData,
         entryID: UUID,
         points: [WorkoutCoordinateSnapshot]
@@ -645,6 +721,10 @@ final class PeriodSummaryRowModel: Identifiable {
             kind: .workout,
             coordinates: displayPoints.map(\.coordinate)
         ))
-        return TimelineOverviewData(markers: data.markers, paths: paths)
+        return TimelineOverviewData(
+            markers: data.markers,
+            paths: paths,
+            pathDisplayMode: data.pathDisplayMode
+        )
     }
 }

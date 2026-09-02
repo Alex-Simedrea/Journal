@@ -393,7 +393,27 @@ nonisolated private extension String {
     }
 }
 
-extension TimelineEntrySnapshot {
+nonisolated extension TimelineEntrySnapshot {
+    static let compactWorkoutEndpointDistanceThresholdMeters: CLLocationDistance = 150
+
+    var usesCompactMovementPresentation: Bool {
+        kind == .transit || isPointToPointWorkout
+    }
+
+    var isPointToPointWorkout: Bool {
+        guard kind == .workout,
+              workoutMovementKind == .moving,
+              let origin = workoutOriginLocation,
+              let destination = workoutDestinationLocation,
+              origin.hasCoordinate,
+              destination.hasCoordinate else {
+            return false
+        }
+
+        return Self.geodesicDistance(from: origin, to: destination)
+            > Self.compactWorkoutEndpointDistanceThresholdMeters
+    }
+
     var workoutWeatherLocation: TimelineLocationSnapshot? {
         workoutMovementKind == .moving
             ? workoutOriginLocation

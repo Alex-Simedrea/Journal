@@ -26,7 +26,7 @@ actor LocationGeographyClient {
         }
         let coordinate = location.coordinate
         let task = Task<Location, Never> {
-            await LocationService.shared.location(at: coordinate)
+            await LocationService.resolvedLocation(at: coordinate)
         }
         tasks[key] = task
         let resolved = await task.value

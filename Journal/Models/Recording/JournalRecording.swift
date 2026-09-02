@@ -13,6 +13,11 @@ nonisolated enum JournalRecordingStartPath: String, Codable, Hashable, Sendable 
     case foregroundFallback
 }
 
+nonisolated enum JournalRecordingMode: String, Codable, Hashable, Sendable {
+    case singleEntry
+    case continuous
+}
+
 nonisolated enum RecordedMotionKind: String, Codable, Hashable, Sendable {
     case stationary
     case walking
@@ -70,6 +75,24 @@ nonisolated struct RecordedMotionObservation: Codable, Hashable, Sendable {
     var confidenceRawValue: Int
 }
 
+nonisolated struct JournalRecordingPlaceRegion: Hashable, Sendable {
+    var id: UUID
+    var name: String
+    var latitude: Double
+    var longitude: Double
+    var radiusMeters: Double
+    var isHome: Bool
+}
+
+nonisolated struct JournalRecordingVisitEvidence: Hashable, Sendable {
+    var startTime: Date
+    var endTime: Date
+    var latitude: Double
+    var longitude: Double
+    var horizontalAccuracyMeters: Double
+    var placeID: UUID?
+}
+
 @Model
 final class ActiveJournalRecording {
     @Attribute(.unique) var id: UUID
@@ -78,6 +101,7 @@ final class ActiveJournalRecording {
     var lastUpdatedAt: Date
     var status: JournalRecordingStatus
     var startPath: JournalRecordingStartPath
+    var mode: JournalRecordingMode = JournalRecordingMode.singleEntry
     var activityID: String?
     var approximateDistanceMeters: Double
     var currentMovement: RecordedTransitMode
@@ -91,6 +115,7 @@ final class ActiveJournalRecording {
         lastUpdatedAt: Date = .now,
         status: JournalRecordingStatus = .starting,
         startPath: JournalRecordingStartPath,
+        mode: JournalRecordingMode = .singleEntry,
         activityID: String? = nil,
         approximateDistanceMeters: Double = 0,
         currentMovement: RecordedTransitMode = .unknown,
@@ -103,6 +128,7 @@ final class ActiveJournalRecording {
         self.lastUpdatedAt = lastUpdatedAt
         self.status = status
         self.startPath = startPath
+        self.mode = mode
         self.activityID = activityID
         self.approximateDistanceMeters = approximateDistanceMeters
         self.currentMovement = currentMovement

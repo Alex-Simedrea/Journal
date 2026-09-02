@@ -2,8 +2,14 @@ import MapKit
 import Photos
 import SwiftUI
 
-struct TimelineCompactTransitRow: View {
-    let transitType: String
+enum TimelineCompactMovementStyle {
+    case transit(TransitPresentation)
+    case workout(systemImageName: String)
+}
+
+struct TimelineCompactMovementRow: View {
+    let title: String
+    let style: TimelineCompactMovementStyle
     let organizationName: String?
     let serviceIdentifier: String?
     let distanceMeters: Double?
@@ -16,17 +22,13 @@ struct TimelineCompactTransitRow: View {
     let onDismissCandidate: (UUID) -> Void
     let onTap: () -> Void
 
-    private var presentation: TransitPresentation {
-        TransitPresentationCatalog.presentation(for: transitType)
-    }
-
     var body: some View {
         HStack(spacing: 6) {
             Button(action: onTap) {
                 HStack(
                     spacing: TimelineRulerMetrics.compactEntryContentSpacing
                 ) {
-                    TimelineCompactTransitBadge(presentation: presentation)
+                    TimelineCompactMovementBadge(style: style)
 
                     Text(summary)
                         .lineLimit(1)
@@ -42,7 +44,7 @@ struct TimelineCompactTransitRow: View {
             }
             .buttonStyle(.plain)
             .accessibilityElement(children: .combine)
-            .accessibilityHint("Opens transit details")
+            .accessibilityHint("Opens entry details")
 
             if let reviewCandidateID {
                 TimelineTransitQuickReviewButton(
@@ -73,7 +75,7 @@ struct TimelineCompactTransitRow: View {
     }
 
     private var summary: AttributedString {
-        var result = AttributedString(transitType)
+        var result = AttributedString(title)
         result.font = .headline.weight(.semibold)
 
         if let organizationName = normalized(organizationName) {
@@ -144,22 +146,41 @@ private struct TimelineTransitQuickReviewButton: View {
     }
 }
 
-struct TimelineCompactTransitBadge: View {
-    let presentation: TransitPresentation
+struct TimelineCompactMovementBadge: View {
+    let style: TimelineCompactMovementStyle
 
     var body: some View {
-        TransitPresentationIcon(
-            presentation: presentation,
-            size: TimelineRulerMetrics.compactEntryIconSize,
-            weight: .semibold
-        )
-        .foregroundStyle(presentation.foregroundColor)
+        Group {
+            switch style {
+            case .transit(let presentation):
+                TransitPresentationIcon(
+                    presentation: presentation,
+                    size: TimelineRulerMetrics.compactEntryIconSize,
+                    weight: .semibold
+                )
+                .foregroundStyle(presentation.foregroundColor)
+            case .workout(let systemImageName):
+                FixedSizeSymbol(
+                    systemName: systemImageName,
+                    size: TimelineRulerMetrics.compactEntryIconSize,
+                    weight: .semibold
+                )
+                .foregroundStyle(.black)
+            }
+        }
         .frame(
             width: TimelineRulerMetrics.compactEntryBadgeSize,
             height: TimelineRulerMetrics.compactEntryBadgeSize
         )
-        .background(presentation.color.gradient, in: .circle)
+        .background(backgroundColor.gradient, in: .circle)
         .accessibilityHidden(true)
+    }
+
+    private var backgroundColor: Color {
+        switch style {
+        case .transit(let presentation): presentation.color
+        case .workout: Color(hex: 0xB6FF00)
+        }
     }
 }
 

@@ -331,8 +331,8 @@ nonisolated enum PeriodSummaryProjector {
             key: key,
             days: sortedDays,
             entryCount: entries.count,
-            overviewData: TimelineOverviewData.make(
-                occurrences: representativeOccurrences(occurrences)
+            overviewData: TimelineOverviewData.makePeriod(
+                occurrences: occurrences
             ),
             people: people,
             movement: movement,
@@ -719,16 +719,6 @@ nonisolated enum PeriodSummaryProjector {
         guard let start = snapshot.startTime,
               let end = snapshot.endTime, end > start else { return nil }
         return DateInterval(start: start, end: end)
-    }
-
-    private static func representativeOccurrences(
-        _ occurrences: [TimelineOccurrence],
-        limit: Int = 120
-    ) -> [TimelineOccurrence] {
-        guard occurrences.count > limit else { return occurrences }
-        return (0..<limit).map { index in
-            occurrences[index * (occurrences.count - 1) / (limit - 1)]
-        }
     }
 
     private static func duration(_ snapshot: TimelineEntrySnapshot) -> TimeInterval {

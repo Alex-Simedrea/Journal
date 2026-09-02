@@ -40,6 +40,9 @@ nonisolated struct TimelineOccurrence: Hashable, Identifiable, Sendable {
     var workoutOrigin: String { snapshot.workoutOrigin }
     var workoutDestination: String { snapshot.workoutDestination }
     var workoutPlace: String { snapshot.workoutPlace }
+    var usesCompactMovementPresentation: Bool {
+        snapshot.usesCompactMovementPresentation
+    }
     var wakeUpSleepDurationSeconds: Double? {
         snapshot.wakeUpSleepDurationSeconds
     }
@@ -338,7 +341,7 @@ nonisolated struct TimelineProjection: Sendable {
         }
 
         let hasTransit = allOccurrences.contains { candidate in
-            guard candidate.kind == .transit,
+            guard candidate.usesCompactMovementPresentation,
                   let start = candidate.startTime,
                   let end = candidate.endTime else {
                 return false
@@ -376,17 +379,17 @@ nonisolated struct TimelineProjection: Sendable {
         sharesOriginWithPreviousTransit: Bool,
         sharesDestinationWithNextTransit: Bool
     ) -> TimelineTransitRowPresentation? {
-        guard occurrence.kind == .transit else { return nil }
+        guard occurrence.usesCompactMovementPresentation else { return nil }
 
         let originMatches = TimelineBoundaryMatcher.matches(
             transitTime: occurrence.visibleStartTime,
-            transitLocation: occurrence.snapshot.originLocation,
+            transitLocation: movementOriginLocation(for: occurrence),
             adjacentTime: previous?.visibleEndTime,
             adjacentLocation: previous.flatMap(boundaryEndLocation)
         )
         let destinationMatches = TimelineBoundaryMatcher.matches(
             transitTime: occurrence.visibleEndTime,
-            transitLocation: occurrence.snapshot.destinationLocation,
+            transitLocation: movementDestinationLocation(for: occurrence),
             adjacentTime: next?.visibleStartTime,
             adjacentLocation: next.flatMap(boundaryStartLocation)
         )
@@ -400,8 +403,8 @@ nonisolated struct TimelineProjection: Sendable {
         let origin = TimelineTransitBoundaryPresentation(
             occurrenceID: occurrence.id,
             side: .origin,
-            name: occurrence.origin,
-            location: occurrence.snapshot.originLocation,
+            name: movementOriginName(for: occurrence),
+            location: movementOriginLocation(for: occurrence),
             showsPseudoEntry: !originMatches
                 && !sharesOriginWithPreviousTransit,
             followingTransitStart: nil
@@ -409,8 +412,8 @@ nonisolated struct TimelineProjection: Sendable {
         let destination = TimelineTransitBoundaryPresentation(
             occurrenceID: occurrence.id,
             side: .destination,
-            name: occurrence.destination,
-            location: occurrence.snapshot.destinationLocation,
+            name: movementDestinationName(for: occurrence),
+            location: movementDestinationLocation(for: occurrence),
             showsPseudoEntry: sharesDestinationWithNextTransit
                 || !destinationMatches,
             followingTransitStart: followingTransitStart
@@ -441,17 +444,49 @@ nonisolated struct TimelineProjection: Sendable {
         _ previous: TimelineOccurrence,
         _ next: TimelineOccurrence
     ) -> Bool {
-        guard previous.kind == .transit,
-              next.kind == .transit,
+        guard previous.usesCompactMovementPresentation,
+              next.usesCompactMovementPresentation,
               let visibleEnd = previous.visibleEndTime,
               visibleEnd == previous.endTime,
               let visibleStart = next.visibleStartTime,
               visibleStart == next.startTime,
-              let destination = previous.snapshot.destinationLocation,
-              let origin = next.snapshot.originLocation else {
+              let destination = movementDestinationLocation(for: previous),
+              let origin = movementOriginLocation(for: next) else {
             return false
         }
         return TimelineBoundaryMatcher.locationsMatch(destination, origin)
+    }
+
+    nonisolated private static func movementOriginName(
+        for occurrence: TimelineOccurrence
+    ) -> String {
+        occurrence.kind == .workout
+            ? occurrence.snapshot.workoutOrigin
+            : occurrence.origin
+    }
+
+    nonisolated private static func movementDestinationName(
+        for occurrence: TimelineOccurrence
+    ) -> String {
+        occurrence.kind == .workout
+            ? occurrence.snapshot.workoutDestination
+            : occurrence.destination
+    }
+
+    nonisolated private static func movementOriginLocation(
+        for occurrence: TimelineOccurrence
+    ) -> TimelineLocationSnapshot? {
+        occurrence.kind == .workout
+            ? occurrence.snapshot.workoutOriginLocation
+            : occurrence.snapshot.originLocation
+    }
+
+    nonisolated private static func movementDestinationLocation(
+        for occurrence: TimelineOccurrence
+    ) -> TimelineLocationSnapshot? {
+        occurrence.kind == .workout
+            ? occurrence.snapshot.workoutDestinationLocation
+            : occurrence.snapshot.destinationLocation
     }
 
     nonisolated private static func boundaryStartLocation(

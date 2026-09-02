@@ -69,7 +69,8 @@ final class JournalRecordingCoordinator {
     private init() {}
 
     func toggle(
-        origin: JournalRecordingToggleOrigin
+        origin: JournalRecordingToggleOrigin,
+        mode: JournalRecordingMode = .singleEntry
     ) async throws -> JournalRecordingToggleResult {
         let context = ModelContext(JournalModelContainer.shared)
         let recording = try activeRecording(in: context)
@@ -83,7 +84,7 @@ final class JournalRecordingCoordinator {
             origin: origin
         ) {
         case .start:
-            return try await start(origin: origin, in: context)
+            return try await start(origin: origin, mode: mode, in: context)
         case .stop:
             if let recording {
                 return try await stop(recording, in: context)
@@ -148,12 +149,13 @@ final class JournalRecordingCoordinator {
 
     private func start(
         origin: JournalRecordingToggleOrigin,
+        mode: JournalRecordingMode,
         in context: ModelContext
     ) async throws -> JournalRecordingToggleResult {
         let path: JournalRecordingStartPath = origin == .backgroundIntent
             ? .backgroundIntent
             : .foregroundFallback
-        let recording = ActiveJournalRecording(startPath: path)
+        let recording = ActiveJournalRecording(startPath: path, mode: mode)
         context.insert(recording)
         try context.save()
         JournalRecordingLog.recording.info(
@@ -238,11 +240,11 @@ final class JournalRecordingCoordinator {
         backgroundActivitySession = nil
         await liveActivity.update(for: recording)
         let result = try await finalizer.finalize(recording, in: context)
-        let entry = try finalizedEntry(for: recording.id, in: context)
+        let entries = try finalizedEntries(for: recording.id, in: context)
         await liveActivity.complete(
             for: recording,
             finalization: result,
-            entry: entry
+            entries: entries
         )
         context.delete(recording)
         try context.save()
@@ -351,17 +353,23 @@ final class JournalRecordingCoordinator {
                     .minimumFastSampleInterval {
                 return
             }
-            let noiseFloor = min(
-                25,
-                max(previous.horizontalAccuracy, point.horizontalAccuracy) * 0.25
-            )
-            if separation >= noiseFloor {
-                recording.approximateDistanceMeters += separation
-            }
         }
         let previousMovement = recording.currentMovement
         recording.points.append(point)
-        recording.currentMovement = movementHint(for: point.speed)
+        let routeDistance = JournalRecordingClassifier.routeDistance(
+            recording.points
+        )
+        let dwellFraction = JournalRecordingClassifier.dominantDwellFraction(
+            recording.points
+        )
+        recording.approximateDistanceMeters = dwellFraction >= 0.9
+            ? 0
+            : routeDistance
+        let confirmedDistanceDelta = recording.approximateDistanceMeters
+            - previousDistance
+        recording.currentMovement = confirmedDistanceDelta > 5
+            ? movementHint(for: point.speed)
+            : .unknown
         recording.status = .recording
         recording.lastUpdatedAt = .now
         do {
@@ -421,16 +429,17 @@ final class JournalRecordingCoordinator {
         return try context.fetch(descriptor).first
     }
 
-    private func finalizedEntry(
+    private func finalizedEntries(
         for recordingID: UUID,
         in context: ModelContext
-    ) throws -> LogEntry? {
-        var descriptor = FetchDescriptor<LogEntry>(
-            predicate: #Predicate { entry in
-                entry.journalRecordingID == recordingID
-            }
+    ) throws -> [LogEntry] {
+        try context.fetch(
+            FetchDescriptor<LogEntry>(
+                predicate: #Predicate { entry in
+                    entry.journalRecordingID == recordingID
+                },
+                sortBy: [SortDescriptor(\.startTime)]
+            )
         )
-        descriptor.fetchLimit = 1
-        return try context.fetch(descriptor).first
     }
 }

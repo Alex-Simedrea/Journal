@@ -33,11 +33,33 @@ nonisolated struct SummaryMapSnapshotRequest: Hashable, Sendable {
     let slotID: String
     let content: SummaryMapSnapshotContent
     let variant: Variant
+    let slotHash: String
+    let contentHash: String
+    let variantHash: String
+    let cacheKey: String
 
-    var slotHash: String { Self.digest(slotID.data(using: .utf8) ?? Data()) }
-    var contentHash: String { Self.digest(Self.encoded(content)) }
-    var variantHash: String { Self.digest(Self.encoded(variant)) }
-    var cacheKey: String { "\(slotHash)/\(contentHash)/\(variantHash)" }
+    init(
+        slotID: String,
+        content: SummaryMapSnapshotContent,
+        variant: Variant
+    ) {
+        self.slotID = slotID
+        self.content = content
+        self.variant = variant
+        let computedSlotHash = Self.digest(
+            slotID.data(using: .utf8) ?? Data()
+        )
+        let computedContentHash = Self.digest(Self.encoded(content))
+        let computedVariantHash = Self.digest(Self.encoded(variant))
+        slotHash = computedSlotHash
+        contentHash = computedContentHash
+        variantHash = computedVariantHash
+        cacheKey = [
+            computedSlotHash,
+            computedContentHash,
+            computedVariantHash,
+        ].joined(separator: "/")
+    }
 
     private static func encoded<T: Encodable>(_ value: T) -> Data {
         let encoder = JSONEncoder()
@@ -79,6 +101,14 @@ nonisolated struct SummaryMapColor: Codable, Hashable, Sendable {
 
     var uiColor: UIColor {
         UIColor(red: red, green: green, blue: blue, alpha: alpha)
+    }
+
+    var cgColor: CGColor {
+        CGColor(red: red, green: green, blue: blue, alpha: alpha)
+    }
+
+    func withAlpha(_ alpha: Double) -> SummaryMapColor {
+        SummaryMapColor(red: red, green: green, blue: blue, alpha: alpha)
     }
 }
 
@@ -162,13 +192,19 @@ nonisolated enum SummaryMapOverviewCamera {
     private static func uniqueCoordinates(
         _ coordinates: [CLLocationCoordinate2D]
     ) -> [CLLocationCoordinate2D] {
-        var keys = Set<String>()
+        struct CoordinateKey: Hashable {
+            let latitude: Int64
+            let longitude: Int64
+
+            init(_ coordinate: CLLocationCoordinate2D) {
+                latitude = Int64((coordinate.latitude * 1_000_000).rounded())
+                longitude = Int64((coordinate.longitude * 1_000_000).rounded())
+            }
+        }
+
+        var keys = Set<CoordinateKey>()
         return coordinates.filter { coordinate in
-            keys.insert(String(
-                format: "%.6f,%.6f",
-                coordinate.latitude,
-                coordinate.longitude
-            )).inserted
+            keys.insert(CoordinateKey(coordinate)).inserted
         }
     }
 
@@ -205,10 +241,76 @@ nonisolated enum SummaryMapOverviewCamera {
     }
 }
 
-@MainActor
-enum SummaryMapSnapshotRequestFactory {
-    private static let overviewRenderVersion = 25
-    private static let placeRenderVersion = 26
+nonisolated enum SummaryMapVisibleRouteSelector {
+    // A route shorter than twice the rendered stroke width reads as a dot at
+    // this map scale and adds clutter without communicating a journey.
+    private static let minimumFootprintPoints = 6.0
+
+    static func paths(
+        from paths: [TimelineMapPath],
+        markers: [TimelineMapMarker],
+        size: CGSize
+    ) -> [TimelineMapPath] {
+        guard !paths.isEmpty else { return [] }
+        let framingCoordinates = markers.map(\.displayCoordinate)
+            + paths.flatMap(\.coordinates)
+        guard let region = SummaryMapOverviewCamera.region(
+            for: framingCoordinates,
+            size: size
+        ) else { return paths }
+
+        return paths.filter { path in
+            visualFootprint(
+                of: path.coordinates,
+                in: region,
+                size: size
+            ) >= minimumFootprintPoints
+        }
+    }
+
+    private static func visualFootprint(
+        of coordinates: [CLLocationCoordinate2D],
+        in region: MKCoordinateRegion,
+        size: CGSize
+    ) -> Double {
+        guard coordinates.count > 1 else { return 0 }
+        let latitudes = coordinates.map(\.latitude)
+        let latitudeSpan = (latitudes.max() ?? 0) - (latitudes.min() ?? 0)
+        let longitudeSpan = minimalLongitudeSpan(
+            coordinates.map(\.longitude)
+        )
+        let width = longitudeSpan
+            / max(region.span.longitudeDelta, .leastNonzeroMagnitude)
+            * Double(size.width)
+        let height = latitudeSpan
+            / max(region.span.latitudeDelta, .leastNonzeroMagnitude)
+            * Double(size.height)
+        return hypot(width, height)
+    }
+
+    private static func minimalLongitudeSpan(
+        _ longitudes: [CLLocationDegrees]
+    ) -> Double {
+        let sorted = longitudes.map { longitude in
+            let value = longitude.truncatingRemainder(dividingBy: 360)
+            return value < 0 ? value + 360 : value
+        }.sorted()
+        guard sorted.count > 1 else { return 0 }
+
+        var largestGap = 0.0
+        for index in sorted.indices {
+            let next = index == sorted.index(before: sorted.endIndex)
+                ? sorted[0] + 360
+                : sorted[index + 1]
+            largestGap = max(largestGap, next - sorted[index])
+        }
+        return max(0, 360 - largestGap)
+    }
+}
+
+nonisolated enum SummaryMapSnapshotRequestFactory {
+    private static let overviewRenderVersion = 35
+    private static let placeRenderVersion = 28
 
     static func overview(
         slotID: String,
@@ -238,10 +340,7 @@ enum SummaryMapSnapshotRequestFactory {
         guard location.hasCoordinate else { return nil }
         let marker = TimelineMapMarker(location: location)
         let center = location.radiusCenterCoordinate ?? location.coordinate
-        let diameter = PlaceMapCamera.visibleDiameter(
-            accuracyRadiusMeters: location.accuracyRadiusMeters,
-            minimum: 320
-        )
+        let diameter = max(320, max(location.accuracyRadiusMeters, 0) * 2.6)
         return request(
             slotID: slotID,
             data: TimelineOverviewData(markers: [marker]),
@@ -271,9 +370,6 @@ enum SummaryMapSnapshotRequestFactory {
         let pixelHeight = evenPixelCount(size.height * scale)
         guard pixelWidth > 1, pixelHeight > 1 else { return nil }
 
-        let traits = UITraitCollection(userInterfaceStyle: appearance == .dark
-            ? .dark
-            : .light)
         let markers = data.markers.map { marker in
             SummaryMapMarkerDescriptor(
                 id: marker.id,
@@ -283,9 +379,9 @@ enum SummaryMapSnapshotRequestFactory {
                     longitude: marker.longitude
                 ),
                 systemImageName: marker.systemImage.rawValue,
-                color: color(
-                    PlaceSymbols.symbol(for: marker.systemImage).primary,
-                    traits: traits
+                color: markerColor(
+                    for: marker.systemImage,
+                    appearance: appearance
                 ),
                 accuracyRadiusMeters: marker.accuracyRadiusMeters,
                 radiusCenter: marker.radiusCenterCoordinate.map {
@@ -296,18 +392,24 @@ enum SummaryMapSnapshotRequestFactory {
                 }
             )
         }
-        let paths = data.paths.map { path in
+        let visiblePaths: [TimelineMapPath]
+        switch data.pathDisplayMode {
+        case .all:
+            visiblePaths = data.paths
+        case .visibleAtMapScale:
+            visiblePaths = SummaryMapVisibleRouteSelector.paths(
+                from: data.paths,
+                markers: data.markers,
+                size: size
+            )
+        }
+        let paths = visiblePaths.map { path in
             let strokes: [SummaryMapPathDescriptor.Stroke]
             switch path.kind {
             case .transit(let transitType):
                 strokes = [
                     .init(
-                        color: color(
-                            TransitPresentationCatalog.presentation(
-                                for: transitType
-                            ).color.opacity(0.82),
-                            traits: traits
-                        ),
+                        color: transitColor(for: transitType),
                         lineWidth: 3
                     ),
                 ]
@@ -368,31 +470,79 @@ enum SummaryMapSnapshotRequestFactory {
         )
     }
 
-    private static func color(
-        _ color: Color,
-        traits: UITraitCollection
+    private static func markerColor(
+        for image: PlaceSystemImage,
+        appearance: SummaryMapSnapshotRequest.Appearance
     ) -> SummaryMapColor {
-        let resolved = UIColor(color).resolvedColor(with: traits)
-        var red: CGFloat = 0
-        var green: CGFloat = 0
-        var blue: CGFloat = 0
-        var alpha: CGFloat = 0
-        if !resolved.getRed(
-            &red,
-            green: &green,
-            blue: &blue,
-            alpha: &alpha
-        ) {
-            var white: CGFloat = 0
-            resolved.getWhite(&white, alpha: &alpha)
-            red = white
-            green = white
-            blue = white
+        let light: UInt32
+        let dark: UInt32
+        switch image {
+        case .mappin, .medical, .tram, .gasStation, .heart:
+            (light, dark) = (0xFF3B30, 0xFF453A)
+        case .house, .cart, .library, .computer, .airport, .car, .ferry,
+             .parking, .people:
+            (light, dark) = (0x007AFF, 0x0A84FF)
+        case .buildings, .hotel, .school, .camera, .gaming:
+            (light, dark) = (0x5856D6, 0x5E5CE6)
+        case .civicBuilding, .cafe, .work, .pets:
+            (light, dark) = (0xA2845E, 0xAC8E68)
+        case .storefront, .dining, .running, .basketball, .camping, .ticket:
+            (light, dark) = (0xFF9500, 0xFF9F0A)
+        case .bag, .cake, .pharmacy:
+            (light, dark) = (0xFF2D55, 0xFF375F)
+        case .bar, .music, .theater:
+            (light, dark) = (0xAF52DE, 0xBF5AF2)
+        case .stethoscope:
+            (light, dark) = (0x30B0C7, 0x40CBE0)
+        case .walking, .sports, .soccer, .nature, .park, .cycling, .bus:
+            (light, dark) = (0x34C759, 0x30D158)
+        case .gym, .mountain:
+            (light, dark) = (0x8E8E93, 0x8E8E93)
+        case .beach, .water:
+            (light, dark) = (0x32ADE6, 0x64D2FF)
+        case .star:
+            (light, dark) = (0xFFCC00, 0xFFD60A)
         }
-        return SummaryMapColor(
-            red: red,
-            green: green,
-            blue: blue,
+        return color(hex: appearance == .dark ? dark : light)
+    }
+
+    private static func transitColor(for name: String) -> SummaryMapColor {
+        let normalized = name
+            .folding(
+                options: [.caseInsensitive, .diacriticInsensitive],
+                locale: Locale(identifier: "en_US_POSIX")
+            )
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let hex: UInt32 = switch normalized {
+        case "walk": 0x34C759
+        case "bicycle": 0x00C7BE
+        case "scooter": 0x32ADE6
+        case "motorcycle": 0xFF9F0A
+        case "car": 0x0A84FF
+        case "taxi": 0xFFD60A
+        case "ride share": 0x5E5CE6
+        case "uber": 0x000000
+        case "bolt": 0x34BB78
+        case "lyft": 0xFF00BF
+        case "bus": 0x30D158
+        case "train": 0x2D59B3
+        case "metro": 0xFF453A
+        case "tram": 0xFF9F0A
+        case "ferry": 0x64D2FF
+        case "flight": 0x007AFF
+        default: 0x6B7280
+        }
+        return color(hex: hex, alpha: 0.82)
+    }
+
+    private static func color(
+        hex: UInt32,
+        alpha: Double = 1
+    ) -> SummaryMapColor {
+        SummaryMapColor(
+            red: Double((hex >> 16) & 0xff) / 255,
+            green: Double((hex >> 8) & 0xff) / 255,
+            blue: Double(hex & 0xff) / 255,
             alpha: alpha
         )
     }
@@ -403,11 +553,85 @@ enum SummaryMapSnapshotRequestFactory {
     }
 }
 
+nonisolated enum SummaryMapSnapshotRequestInput: Sendable {
+    case overview(
+        slotID: String,
+        data: TimelineOverviewData,
+        size: CGSize
+    )
+    case place(
+        slotID: String,
+        location: TimelineLocationSnapshot,
+        size: CGSize
+    )
+
+    func request(
+        displayScale: CGFloat,
+        appearance: SummaryMapSnapshotRequest.Appearance
+    ) -> SummaryMapSnapshotRequest? {
+        switch self {
+        case .overview(let slotID, let data, let size):
+            SummaryMapSnapshotRequestFactory.overview(
+                slotID: slotID,
+                data: data,
+                size: size,
+                displayScale: displayScale,
+                appearance: appearance
+            )
+        case .place(let slotID, let location, let size):
+            SummaryMapSnapshotRequestFactory.place(
+                slotID: slotID,
+                location: location,
+                size: size,
+                displayScale: displayScale,
+                appearance: appearance
+            )
+        }
+    }
+}
+
+nonisolated enum SummaryMapSnapshotRequestBuilder {
+    static func request(
+        for input: SummaryMapSnapshotRequestInput,
+        displayScale: CGFloat,
+        appearance: SummaryMapSnapshotRequest.Appearance
+    ) async -> SummaryMapSnapshotRequest? {
+        await Task.detached(priority: .utility) {
+            input.request(
+                displayScale: displayScale,
+                appearance: appearance
+            )
+        }.value
+    }
+
+    static func requests(
+        for inputs: [SummaryMapSnapshotRequestInput],
+        displayScale: CGFloat,
+        appearance: SummaryMapSnapshotRequest.Appearance
+    ) async -> [SummaryMapSnapshotRequest] {
+        await Task.detached(priority: .utility) {
+            inputs.compactMap {
+                $0.request(
+                    displayScale: displayScale,
+                    appearance: appearance
+                )
+            }
+        }.value
+    }
+}
+
 actor SummaryMapSnapshotStore {
     typealias Renderer = @Sendable (SummaryMapSnapshotRequest) async throws -> Data
 
     nonisolated static let shared = SummaryMapSnapshotStore()
-    nonisolated static let byteLimit = 100 * 1_024 * 1_024
+    nonisolated static let byteLimit = 200 * 1_024 * 1_024
+
+    private static let cacheDirectoryName = "SummaryMapSnapshots-v4"
+    private static let legacyCacheDirectoryNames = [
+        "SummaryMapSnapshots",
+        "SummaryMapSnapshots-v2",
+        "SummaryMapSnapshots-v3",
+    ]
 
     private struct InFlight {
         let id: UUID
@@ -417,6 +641,7 @@ actor SummaryMapSnapshotStore {
 
     private struct MemoryEntry {
         let data: Data
+        let appearance: SummaryMapSnapshotRequest.Appearance
         var access: UInt64
     }
 
@@ -440,8 +665,21 @@ actor SummaryMapSnapshotStore {
             for: .cachesDirectory,
             in: .userDomainMask
         ).first ?? FileManager.default.temporaryDirectory
-        self.directory = directory
-            ?? caches.appending(path: "SummaryMapSnapshots", directoryHint: .isDirectory)
+        if let directory {
+            self.directory = directory
+        } else {
+            self.directory = caches.appending(
+                path: Self.cacheDirectoryName,
+                directoryHint: .isDirectory
+            )
+            for legacyName in Self.legacyCacheDirectoryNames {
+                let legacyDirectory = caches.appending(
+                    path: legacyName,
+                    directoryHint: .isDirectory
+                )
+                try? FileManager.default.removeItem(at: legacyDirectory)
+            }
+        }
         self.maximumBytes = maximumBytes
         self.renderer = renderer
     }
@@ -502,8 +740,13 @@ actor SummaryMapSnapshotStore {
                     withIntermediateDirectories: true
                 )
                 try data.write(to: fileURL, options: .atomic)
-                remember(data, forKey: key)
+                remember(
+                    data,
+                    forKey: key,
+                    appearance: request.variant.appearance
+                )
                 inFlight[key] = nil
+                try trimContentRevisions(for: request)
                 try trimDiskIfNeeded()
             }
             return data
@@ -546,7 +789,11 @@ actor SummaryMapSnapshotStore {
             [.modificationDate: Date()],
             ofItemAtPath: fileURL.path
         )
-        remember(data, forKey: key)
+        remember(
+            data,
+            forKey: key,
+            appearance: request.variant.appearance
+        )
         return data
     }
 
@@ -597,14 +844,77 @@ actor SummaryMapSnapshotStore {
         directory
             .appending(path: request.slotHash, directoryHint: .isDirectory)
             .appending(path: request.contentHash, directoryHint: .isDirectory)
-            .appending(path: request.variantHash)
-            .appendingPathExtension("jpg")
+            .appending(
+                path: "\(request.variant.appearance.rawValue)-\(request.variantHash)"
+            )
+            .appendingPathExtension("heic")
     }
 
-    private func remember(_ data: Data, forKey key: String) {
+    private func trimContentRevisions(
+        for request: SummaryMapSnapshotRequest
+    ) throws {
+        let slotDirectory = directory.appending(
+            path: request.slotHash,
+            directoryHint: .isDirectory
+        )
+        let keys: Set<URLResourceKey> = [.isDirectoryKey]
+        let revisions = try FileManager.default.contentsOfDirectory(
+            at: slotDirectory,
+            includingPropertiesForKeys: Array(keys),
+            options: [.skipsHiddenFiles]
+        ).filter { url in
+            let values = try? url.resourceValues(forKeys: keys)
+            return values?.isDirectory == true
+        }
+        let appearancePrefix = "\(request.variant.appearance.rawValue)-"
+
+        for revision in revisions where
+            revision.lastPathComponent != request.contentHash {
+            let files = (try? FileManager.default.contentsOfDirectory(
+                at: revision,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            )) ?? []
+            for file in files where file.lastPathComponent.hasPrefix(
+                appearancePrefix
+            ) {
+                try? FileManager.default.removeItem(at: file)
+            }
+
+            let keyPrefix = "\(request.slotHash)/\(revision.lastPathComponent)/"
+            let obsoleteKeys = memory.filter { key, entry in
+                key.hasPrefix(keyPrefix)
+                    && entry.appearance == request.variant.appearance
+            }.map(\.key)
+            for key in obsoleteKeys {
+                if let entry = memory.removeValue(forKey: key) {
+                    memoryBytes -= entry.data.count
+                }
+            }
+
+            let remainingFiles = try? FileManager.default.contentsOfDirectory(
+                at: revision,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            )
+            if remainingFiles?.isEmpty == true {
+                try? FileManager.default.removeItem(at: revision)
+            }
+        }
+    }
+
+    private func remember(
+        _ data: Data,
+        forKey key: String,
+        appearance: SummaryMapSnapshotRequest.Appearance
+    ) {
         memoryClock &+= 1
         if let old = memory[key] { memoryBytes -= old.data.count }
-        memory[key] = MemoryEntry(data: data, access: memoryClock)
+        memory[key] = MemoryEntry(
+            data: data,
+            appearance: appearance,
+            access: memoryClock
+        )
         memoryBytes += data.count
         while memoryBytes > memoryLimit,
               let oldest = memory.min(by: { $0.value.access < $1.value.access }) {
@@ -692,7 +1002,10 @@ nonisolated enum SummaryMapDecodedImageCache {
 }
 
 private actor SummaryMapRenderLimiter {
-    static let shared = SummaryMapRenderLimiter(limit: 2)
+    // Every timeline snapshot now relies on MKMapView so MapKit owns marker
+    // collision, z-order, shadows, and globe projection. Keep only one native
+    // map render active to avoid compounding its unavoidable main-thread work.
+    static let shared = SummaryMapRenderLimiter(limit: 1)
 
     private var available: Int
     private var waiters: [CheckedContinuation<Void, Never>] = []
@@ -734,12 +1047,18 @@ private actor SummaryMapRenderLimiter {
 
 nonisolated enum SummaryMapSnapshotRenderer {
     static func render(_ request: SummaryMapSnapshotRequest) async throws -> Data {
-        let image = try await SummaryMapViewRenderer.render(request)
+        let image: CGImage
+        switch request.content.camera {
+        case .overview:
+            image = try await SummaryMapViewRenderer.render(request)
+        case .place:
+            image = try await SummaryMapViewRenderer.render(request)
+        }
         try Task.checkCancellation()
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(
             data,
-            UTType.jpeg.identifier as CFString,
+            UTType.heic.identifier as CFString,
             1,
             nil
         ) else {
@@ -748,13 +1067,186 @@ nonisolated enum SummaryMapSnapshotRenderer {
         CGImageDestinationAddImage(
             destination,
             image,
-            [kCGImageDestinationLossyCompressionQuality: 0.9] as CFDictionary
+            [kCGImageDestinationLossyCompressionQuality: 0.90] as CFDictionary
         )
         guard CGImageDestinationFinalize(destination) else {
             throw CocoaError(.fileWriteUnknown)
         }
         return data as Data
     }
+}
+
+nonisolated private enum SummaryMapSnapshotterRenderer {
+    static func requiresNativeProjection(
+        _ request: SummaryMapSnapshotRequest
+    ) -> Bool {
+        JournalMapDisplayStylePolicy.usesHybridStyle(
+            for: cameraCoordinates(in: request)
+        )
+    }
+
+    static func render(_ request: SummaryMapSnapshotRequest) async throws -> CGImage {
+        let options = MKMapSnapshotter.Options()
+        options.size = request.variant.pointSize
+        options.traitCollection = UITraitCollection { traits in
+            traits.displayScale = request.variant.scale
+            traits.userInterfaceStyle = request.variant.appearance == .dark
+                ? .dark
+                : .light
+        }
+        options.preferredConfiguration = MKStandardMapConfiguration(
+            elevationStyle: .flat
+        )
+        applyCamera(
+            to: options,
+            request: request,
+            usesHybridStyle: false
+        )
+
+        let snapshot = try await MKMapSnapshotter(options: options).start()
+        try Task.checkCancellation()
+        return try composite(snapshot: snapshot, request: request)
+    }
+
+    private static func cameraCoordinates(
+        in request: SummaryMapSnapshotRequest
+    ) -> [CLLocationCoordinate2D] {
+        request.content.paths.flatMap { path -> [CLLocationCoordinate2D] in
+            guard let first = path.coordinates.first?.mapCoordinate,
+                  let last = path.coordinates.last?.mapCoordinate else {
+                return []
+            }
+            return [first, last]
+        } + request.content.markers.map(\.displayCoordinate)
+    }
+
+    private static func allCoordinates(
+        in request: SummaryMapSnapshotRequest
+    ) -> [CLLocationCoordinate2D] {
+        request.content.paths.flatMap {
+            $0.coordinates.map(\.mapCoordinate)
+        } + request.content.markers.map(\.displayCoordinate)
+    }
+
+    private static func applyCamera(
+        to options: MKMapSnapshotter.Options,
+        request: SummaryMapSnapshotRequest,
+        usesHybridStyle: Bool
+    ) {
+        let coordinates = usesHybridStyle
+            ? cameraCoordinates(in: request)
+            : allCoordinates(in: request)
+        guard coordinates.count > 1 else {
+            if let coordinate = coordinates.first {
+                options.region = MKCoordinateRegion(
+                    center: coordinate,
+                    latitudinalMeters: 1_200,
+                    longitudinalMeters: 1_200
+                )
+            }
+            return
+        }
+
+        if usesHybridStyle,
+           var region = SummaryMapOverviewCamera.region(
+               for: coordinates,
+               size: request.variant.pointSize
+           ) {
+            region.span.latitudeDelta = min(
+                170,
+                region.span.latitudeDelta * 2.2
+            )
+            region.span.longitudeDelta = min(
+                350,
+                region.span.longitudeDelta * 2.2
+            )
+            options.region = region
+            return
+        }
+
+        var rect = MKMapRect.null
+        for coordinate in coordinates {
+            let point = MKMapPoint(coordinate)
+            rect = rect.union(MKMapRect(
+                origin: point,
+                size: MKMapSize(width: 1, height: 1)
+            ))
+        }
+        guard !rect.isNull else { return }
+        let size = request.variant.pointSize
+        let horizontalFraction = max(
+            0.1,
+            1 - 2 * max(18, size.width * 0.12) / max(size.width, 1)
+        )
+        let verticalFraction = max(
+            0.1,
+            1 - 2 * max(18, size.height * 0.12) / max(size.height, 1)
+        )
+        let targetWidth = max(rect.width, 1) / horizontalFraction
+        let targetHeight = max(rect.height, 1) / verticalFraction
+        options.mapRect = MKMapRect(
+            x: rect.midX - targetWidth / 2,
+            y: rect.midY - targetHeight / 2,
+            width: targetWidth,
+            height: targetHeight
+        )
+    }
+
+    private static func composite(
+        snapshot: MKMapSnapshotter.Snapshot,
+        request: SummaryMapSnapshotRequest
+    ) throws -> CGImage {
+        let format = UIGraphicsImageRendererFormat(for: snapshot.traitCollection)
+        format.scale = request.variant.scale
+        format.opaque = true
+        let image = UIGraphicsImageRenderer(
+            size: request.variant.pointSize,
+            format: format
+        ).image { context in
+            snapshot.image.draw(at: .zero)
+            drawPaths(
+                request.content.paths,
+                snapshot: snapshot,
+                in: context.cgContext
+            )
+        }
+        guard let result = image.cgImage else {
+            throw CocoaError(.coderInvalidValue)
+        }
+        return result
+    }
+
+    private static func drawPaths(
+        _ paths: [SummaryMapPathDescriptor],
+        snapshot: MKMapSnapshotter.Snapshot,
+        in context: CGContext
+    ) {
+        context.saveGState()
+        context.setAllowsAntialiasing(true)
+        context.setShouldAntialias(true)
+        for path in paths where path.coordinates.count > 1 {
+            let points = path.coordinates.map {
+                snapshot.point(for: $0.mapCoordinate)
+            }
+            guard let first = points.first,
+                  points.allSatisfy({ $0.x.isFinite && $0.y.isFinite }) else {
+                continue
+            }
+            let route = CGMutablePath()
+            route.move(to: first)
+            for point in points.dropFirst() { route.addLine(to: point) }
+            for stroke in path.strokes {
+                context.addPath(route)
+                context.setStrokeColor(stroke.color.cgColor)
+                context.setLineWidth(stroke.lineWidth)
+                context.setLineCap(.round)
+                context.setLineJoin(.round)
+                context.strokePath()
+            }
+        }
+        context.restoreGState()
+    }
+
 }
 
 @MainActor
@@ -766,6 +1258,8 @@ private enum SummaryMapViewRenderer {
 
 @MainActor
 private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
+    private static let markerReuseIdentifier = "summary-map-marker"
+
     private final class Annotation: MKPointAnnotation {
         let systemImageName: String
         let color: UIColor
@@ -787,6 +1281,7 @@ private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
     private let request: SummaryMapSnapshotRequest
     private let mapView: MKMapView
     private let usesHybridStyle: Bool
+    private var markerAnnotations: [Annotation] = []
     private var hostWindow: UIWindow?
     private var overlayStyles: [ObjectIdentifier: OverlayStyle] = [:]
     private var continuation: CheckedContinuation<CGImage, any Error>?
@@ -900,7 +1395,7 @@ private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
     ) -> MKAnnotationView? {
         guard let annotation = annotation as? Annotation else { return nil }
         guard let view = mapView.dequeueReusableAnnotationView(
-            withIdentifier: "summary-map-marker",
+            withIdentifier: Self.markerReuseIdentifier,
             for: annotation
         ) as? MKMarkerAnnotationView else { return nil }
         configure(view, for: annotation)
@@ -916,8 +1411,8 @@ private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
                 continue
             }
             // prepareForDisplay runs after viewFor and can restore MapKit's
-            // adaptive title policy. Reapply the same native marker settings
-            // once the prepared view is installed in either map size.
+            // adaptive marker policy. Reapply our settings once the prepared
+            // view is installed in either map size.
             configure(view, for: annotation)
         }
         scheduleFinishIfReady()
@@ -930,33 +1425,26 @@ private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
         view.animatesWhenAdded = false
         view.markerTintColor = annotation.color
         view.glyphTintColor = .white
+        view.glyphText = nil
         view.glyphImage = UIImage(systemName: annotation.systemImageName)
-        view.displayPriority = .required
+        view.displayPriority = .defaultLow
+        view.clusteringIdentifier = nil
         view.titleVisibility = switch request.content.camera {
         case .place: .visible
         case .overview: .hidden
         }
+        view.subtitleVisibility = .hidden
     }
 
     private func scheduleFinishIfReady() {
         guard mapIsFullyRendered,
               finishTask == nil,
-              request.content.markers.allSatisfy({ descriptor in
-                  mapView.annotations.contains { annotation in
-                      guard let annotation = annotation as? Annotation else {
-                          return false
-                      }
-                      let matches = annotation.coordinate.latitude
-                          == descriptor.displayCoordinate.latitude
-                          && annotation.coordinate.longitude
-                          == descriptor.displayCoordinate.longitude
-                      guard matches else { return false }
-                      if usesHybridStyle,
-                         !isProjectedOnScreen(annotation.coordinate) {
-                          return true
-                      }
-                      return mapView.view(for: annotation)?.window != nil
+              markerAnnotations.allSatisfy({ annotation in
+                  if usesHybridStyle,
+                     !isProjectedOnScreen(annotation.coordinate) {
+                      return true
                   }
+                  return mapView.view(for: annotation)?.window != nil
               }) else { return }
 
         // Overview titles are intentionally hidden, so the installed marker
@@ -990,10 +1478,9 @@ private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
     }
 
     private func prepareMarkerViewsForCapture() {
-        for annotation in mapView.annotations {
-            guard let annotation = annotation as? Annotation,
-                  let view = mapView.view(for: annotation)
-                    as? MKMarkerAnnotationView else { continue }
+        for annotation in markerAnnotations {
+            guard let view = mapView.view(for: annotation)
+                as? MKMarkerAnnotationView else { continue }
             configure(view, for: annotation)
             view.setNeedsLayout()
             view.setNeedsDisplay()
@@ -1116,11 +1603,10 @@ private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
         mapView.isZoomEnabled = false
         mapView.register(
             MKMarkerAnnotationView.self,
-            forAnnotationViewWithReuseIdentifier: "summary-map-marker"
+            forAnnotationViewWithReuseIdentifier: Self.markerReuseIdentifier
         )
-        mapView.addAnnotations(
-            request.content.markers.map(Annotation.init(marker:))
-        )
+        markerAnnotations = request.content.markers.map(Annotation.init(marker:))
+        mapView.addAnnotations(markerAnnotations)
         addOverlays()
         applyCamera()
         // Configure the complete map before attaching it to a window. An
@@ -1158,7 +1644,10 @@ private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
         for path in request.content.paths where path.coordinates.count > 1 {
             let coordinates = path.coordinates.map(\.mapCoordinate)
             for stroke in path.strokes {
-                let overlay = MKPolyline(coordinates: coordinates, count: coordinates.count)
+                let overlay = MKPolyline(
+                    coordinates: coordinates,
+                    count: coordinates.count
+                )
                 overlayStyles[ObjectIdentifier(overlay)] = .line(stroke)
                 mapView.addOverlay(overlay)
             }
@@ -1325,9 +1814,12 @@ extension HomeFeedModel {
         for row in newestFirst.prefix(retainedDayCount) {
             guard !Task.isCancelled else { return }
             await row.loadMapEnrichment()
-            let requests = daySnapshotRequests(
+            let inputs = daySnapshotRequestInputs(
                 for: row,
-                contentWidth: contentWidth,
+                contentWidth: contentWidth
+            )
+            let requests = await SummaryMapSnapshotRequestBuilder.requests(
+                for: inputs,
                 displayScale: displayScale,
                 appearance: appearance
             )
@@ -1349,9 +1841,12 @@ extension HomeFeedModel {
         for row in retainedPeriods.reversed() {
             guard !Task.isCancelled else { return }
             await row.loadEnrichment()
-            let requests = periodSnapshotRequests(
+            let inputs = periodSnapshotRequestInputs(
                 for: row,
-                contentWidth: contentWidth,
+                contentWidth: contentWidth
+            )
+            let requests = await SummaryMapSnapshotRequestBuilder.requests(
+                for: inputs,
                 displayScale: displayScale,
                 appearance: appearance
             )
@@ -1365,73 +1860,58 @@ extension HomeFeedModel {
         await periodPhotoPrewarm
     }
 
-    private func daySnapshotRequests(
+    private func daySnapshotRequestInputs(
         for row: DaySummaryRowModel,
-        contentWidth: CGFloat,
-        displayScale: CGFloat,
-        appearance: SummaryMapSnapshotRequest.Appearance
-    ) -> [SummaryMapSnapshotRequest] {
+        contentWidth: CGFloat
+    ) -> [SummaryMapSnapshotRequestInput] {
         let recipe = DaySummaryLayoutRecipe.make(for: row.summary)
-        var requests: [SummaryMapSnapshotRequest] = []
-        if let placement = recipe.placements.first(where: { $0.tile == .overview }),
-           let request = SummaryMapSnapshotRequestFactory.overview(
-               slotID: "day-\(row.id.id)-overview",
-               data: row.overviewData,
-               size: size(for: placement.frame, contentWidth: contentWidth),
-               displayScale: displayScale,
-               appearance: appearance
-           ) {
-            requests.append(request)
-        }
-        return requests
+        guard let placement = recipe.placements.first(where: {
+            $0.tile == .overview
+        }) else { return [] }
+        return [.overview(
+            slotID: "day-\(row.id.id)-overview",
+            data: row.overviewData,
+            size: size(for: placement.frame, contentWidth: contentWidth)
+        )]
     }
 
-    private func periodSnapshotRequests(
+    private func periodSnapshotRequestInputs(
         for row: PeriodSummaryRowModel,
-        contentWidth: CGFloat,
-        displayScale: CGFloat,
-        appearance: SummaryMapSnapshotRequest.Appearance
-    ) -> [SummaryMapSnapshotRequest] {
+        contentWidth: CGFloat
+    ) -> [SummaryMapSnapshotRequestInput] {
         let recipe = row.layoutRecipe
-        var requests: [SummaryMapSnapshotRequest] = []
+        var inputs: [SummaryMapSnapshotRequestInput] = []
 
-        if let placement = recipe.placements.first(where: { $0.tile == .overview }),
-           let request = SummaryMapSnapshotRequestFactory.overview(
-               slotID: "period-\(row.id.id)-overview",
-               data: row.overviewData,
-               size: size(for: placement.frame, contentWidth: contentWidth),
-               displayScale: displayScale,
-               appearance: appearance
-           ) {
-            requests.append(request)
+        if let placement = recipe.placements.first(where: {
+            $0.tile == .overview
+        }) {
+            inputs.append(.overview(
+                slotID: "period-\(row.id.id)-overview",
+                data: row.overviewData,
+                size: size(for: placement.frame, contentWidth: contentWidth)
+            ))
         }
         if let route = row.frequentRouteData,
            let placement = recipe.placements.first(where: {
                $0.tile == .frequentRoute
-           }),
-           let request = SummaryMapSnapshotRequestFactory.overview(
-               slotID: "period-\(row.id.id)-frequent-route",
-               data: route,
-               size: size(for: placement.frame, contentWidth: contentWidth),
-               displayScale: displayScale,
-               appearance: appearance
-           ) {
-            requests.append(request)
+           }) {
+            inputs.append(.overview(
+                slotID: "period-\(row.id.id)-frequent-route",
+                data: route,
+                size: size(for: placement.frame, contentWidth: contentWidth)
+            ))
         }
         if let journey = row.longestJourneyData,
            let placement = recipe.placements.first(where: {
                $0.tile == .longestJourney
-           }),
-           let request = SummaryMapSnapshotRequestFactory.overview(
-               slotID: "period-\(row.id.id)-longest-journey",
-               data: journey,
-               size: size(for: placement.frame, contentWidth: contentWidth),
-               displayScale: displayScale,
-               appearance: appearance
-           ) {
-            requests.append(request)
+           }) {
+            inputs.append(.overview(
+                slotID: "period-\(row.id.id)-longest-journey",
+                data: journey,
+                size: size(for: placement.frame, contentWidth: contentWidth)
+            ))
         }
-        return requests
+        return inputs
     }
 
     private func size(

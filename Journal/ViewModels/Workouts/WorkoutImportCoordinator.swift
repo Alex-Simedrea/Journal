@@ -64,31 +64,13 @@ final class WorkoutImportCoordinator {
         defer { isSyncing = false }
 
         do {
-            let existingReferences = try await persistence.references()
-            if existingReferences.isEmpty, WorkoutImportPreferences.anchor() != nil {
-                WorkoutImportPreferences.resetAnchor()
-            }
-
-            let cutoff = WorkoutImportPreferences.cutoff()
-            let changeSet = try await client.changes(
-                since: WorkoutImportPreferences.anchor(),
-                cutoff: cutoff
-            )
-            let wakeUps = try await client.wakeUps(cutoff: cutoff)
-            let retriedSnapshots = await retryableSnapshots(
-                from: existingReferences,
-                excluding: Set(changeSet.workouts.map(\.uuid))
-                    .union(changeSet.deletedWorkoutUUIDs)
-            )
-            let resolvedSnapshots = await resolvedSnapshots(
-                changeSet.workouts + retriedSnapshots
-            )
-            try await persistence.apply(
-                changeSet,
-                wakeUps: wakeUps,
-                resolvedSnapshots: resolvedSnapshots
-            )
-            try WorkoutImportPreferences.save(anchor: changeSet.newAnchor)
+            let client = client
+            try await Task.detached(priority: .utility) {
+                try await WorkoutImportPipeline.synchronize(
+                    client: client,
+                    persistence: persistence
+                )
+            }.value
             lastSyncDate = .now
             errorMessage = nil
         } catch {
@@ -109,14 +91,56 @@ final class WorkoutImportCoordinator {
         }
     }
 
-    private func retryableSnapshots(
+}
+
+nonisolated private enum WorkoutImportPipeline {
+    static func synchronize(
+        client: HealthKitWorkoutClient,
+        persistence: WorkoutImportPersistence
+    ) async throws {
+        let existingReferences = try await persistence.references()
+        if existingReferences.isEmpty, WorkoutImportPreferences.anchor() != nil {
+            WorkoutImportPreferences.resetAnchor()
+        }
+
+        let cutoff = WorkoutImportPreferences.cutoff()
+        async let wakeUps = client.wakeUps(cutoff: cutoff)
+        let changeSet = try await client.changes(
+            since: WorkoutImportPreferences.anchor(),
+            cutoff: cutoff
+        )
+        let retriedSnapshots = await retryableSnapshots(
+            client: client,
+            from: existingReferences,
+            excluding: Set(changeSet.workouts.map(\.uuid))
+                .union(changeSet.deletedWorkoutUUIDs)
+        )
+        let resolvedSnapshots = await resolvedSnapshots(
+            changeSet.workouts + retriedSnapshots
+        )
+        try await persistence.apply(
+            changeSet,
+            wakeUps: try await wakeUps,
+            resolvedSnapshots: resolvedSnapshots
+        )
+        try WorkoutImportPreferences.save(anchor: changeSet.newAnchor)
+    }
+
+    private static func retryableSnapshots(
+        client: HealthKitWorkoutClient,
         from references: [WorkoutEntryReference],
         excluding excludedUUIDs: Set<UUID>
     ) async -> [HealthKitWorkoutSnapshot] {
         var snapshots: [HealthKitWorkoutSnapshot] = []
         for reference in references {
-            guard reference.movementKind == .moving,
-                  reference.routeImportState != .available,
+            let currentMovementKind = WorkoutActivityCatalog.movementKind(
+                for: reference.activityTypeRawValue
+            )
+            let needsMovementMigration =
+                reference.movementKind != currentMovementKind
+            let needsRouteRetry = reference.movementKind == .moving
+                && reference.routeImportState != .available
+            guard needsMovementMigration || needsRouteRetry,
                   !excludedUUIDs.contains(reference.workoutUUID),
                   !WorkoutImportPreferences.isExcluded(reference.workoutUUID)
             else {
@@ -136,7 +160,7 @@ final class WorkoutImportCoordinator {
         return snapshots
     }
 
-    private func resolvedLocations(
+    private static func resolvedLocations(
         for snapshot: HealthKitWorkoutSnapshot
     ) async -> WorkoutResolvedLocations {
         if snapshot.movementKind == .moving {
@@ -154,7 +178,7 @@ final class WorkoutImportCoordinator {
         )
     }
 
-    private func resolvedSnapshots(
+    private static func resolvedSnapshots(
         _ snapshots: [HealthKitWorkoutSnapshot]
     ) async -> [ResolvedWorkoutImport] {
         var result: [ResolvedWorkoutImport] = []
@@ -170,11 +194,10 @@ final class WorkoutImportCoordinator {
         return result
     }
 
-    private func resolvedLocation(
+    private static func resolvedLocation(
         _ coordinate: WorkoutCoordinateSnapshot?
     ) async -> Location? {
         guard let coordinate else { return nil }
-        return await LocationService.shared.location(at: coordinate.coordinate)
+        return await LocationService.resolvedLocation(at: coordinate.coordinate)
     }
-
 }

@@ -13,9 +13,12 @@ enum UIKitHomeFeedAssetPrefetcher {
         )
         async let contacts: Void = prefetchContacts(row.summary.people)
 
-        let requests = mapRequests(
+        let inputs = mapRequestInputs(
             day: row,
-            contentWidth: contentWidth,
+            contentWidth: contentWidth
+        )
+        let requests = await SummaryMapSnapshotRequestBuilder.requests(
+            for: inputs,
             displayScale: displayScale,
             appearance: appearance
         )
@@ -40,9 +43,12 @@ enum UIKitHomeFeedAssetPrefetcher {
             row.summary.people.map(\.person)
         )
 
-        let requests = mapRequests(
+        let inputs = mapRequestInputs(
             period: row,
-            contentWidth: contentWidth,
+            contentWidth: contentWidth
+        )
+        let requests = await SummaryMapSnapshotRequestBuilder.requests(
+            for: inputs,
             displayScale: displayScale,
             appearance: appearance
         )
@@ -69,31 +75,25 @@ enum UIKitHomeFeedAssetPrefetcher {
         }
     }
 
-    private static func mapRequests(
+    private static func mapRequestInputs(
         day row: DaySummaryRowModel,
-        contentWidth: CGFloat,
-        displayScale: CGFloat,
-        appearance: SummaryMapSnapshotRequest.Appearance
-    ) -> [SummaryMapSnapshotRequest] {
+        contentWidth: CGFloat
+    ) -> [SummaryMapSnapshotRequestInput] {
         row.layoutRecipe.placements.compactMap { placement in
             let size = size(for: placement.frame, contentWidth: contentWidth)
             switch placement.tile {
             case .overview:
-                return SummaryMapSnapshotRequestFactory.overview(
+                return .overview(
                     slotID: "day-\(row.id.id)-overview",
                     data: row.overviewData,
-                    size: size,
-                    displayScale: displayScale,
-                    appearance: appearance
+                    size: size
                 )
             case .featuredPlace:
                 guard let place = row.summary.featuredPlace else { return nil }
-                return SummaryMapSnapshotRequestFactory.place(
+                return .place(
                     slotID: "day-\(row.id.id)-featured-place",
                     location: place.location,
-                    size: size,
-                    displayScale: displayScale,
-                    appearance: appearance
+                    size: size
                 )
             default:
                 return nil
@@ -101,49 +101,39 @@ enum UIKitHomeFeedAssetPrefetcher {
         }
     }
 
-    private static func mapRequests(
+    private static func mapRequestInputs(
         period row: PeriodSummaryRowModel,
-        contentWidth: CGFloat,
-        displayScale: CGFloat,
-        appearance: SummaryMapSnapshotRequest.Appearance
-    ) -> [SummaryMapSnapshotRequest] {
+        contentWidth: CGFloat
+    ) -> [SummaryMapSnapshotRequestInput] {
         row.layoutRecipe.placements.compactMap { placement in
             let size = size(for: placement.frame, contentWidth: contentWidth)
             switch placement.tile {
             case .overview:
-                return SummaryMapSnapshotRequestFactory.overview(
+                return .overview(
                     slotID: "period-\(row.id.id)-overview",
                     data: row.overviewData,
-                    size: size,
-                    displayScale: displayScale,
-                    appearance: appearance
+                    size: size
                 )
             case .frequentRoute:
                 guard let route = row.frequentRouteData else { return nil }
-                return SummaryMapSnapshotRequestFactory.overview(
+                return .overview(
                     slotID: "period-\(row.id.id)-frequent-route",
                     data: route,
-                    size: size,
-                    displayScale: displayScale,
-                    appearance: appearance
+                    size: size
                 )
             case .longestJourney:
                 guard let journey = row.longestJourneyData else { return nil }
-                return SummaryMapSnapshotRequestFactory.overview(
+                return .overview(
                     slotID: "period-\(row.id.id)-longest-journey",
                     data: journey,
-                    size: size,
-                    displayScale: displayScale,
-                    appearance: appearance
+                    size: size
                 )
             case .place:
                 guard let place = row.summary.mostVisitedPlace else { return nil }
-                return SummaryMapSnapshotRequestFactory.place(
+                return .place(
                     slotID: "period-\(row.id.id)-place",
                     location: place.location,
-                    size: size,
-                    displayScale: displayScale,
-                    appearance: appearance
+                    size: size
                 )
             default:
                 return nil
@@ -211,7 +201,7 @@ actor UIKitContactAvatarStore {
 
 @MainActor
 final class UIKitSummaryMapImageView: UIImageView {
-    private enum Source: Equatable {
+    private enum Source: Equatable, Sendable {
         case overview(TimelineOverviewData)
         case place(TimelineLocationSnapshot)
     }
@@ -221,6 +211,7 @@ final class UIKitSummaryMapImageView: UIImageView {
     private var loadsContent = false
     private var requestKey: String?
     private var loadTask: Task<Void, Never>?
+    private var generation = 0
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -283,6 +274,7 @@ final class UIKitSummaryMapImageView: UIImageView {
         self.loadsContent = loadsContent
         self.accessibilityLabel = accessibilityLabel
         guard changed else { return }
+        generation &+= 1
         requestKey = nil
         loadTask?.cancel()
         loadTask = nil
@@ -296,12 +288,14 @@ final class UIKitSummaryMapImageView: UIImageView {
     }
 
     func cancelLoading() {
+        generation &+= 1
         loadTask?.cancel()
         loadTask = nil
         requestKey = nil
     }
 
     private func invalidateTraitDependentImage() {
+        generation &+= 1
         requestKey = nil
         image = nil
         loadTask?.cancel()
@@ -311,39 +305,47 @@ final class UIKitSummaryMapImageView: UIImageView {
 
     private func loadIfNeeded() {
         guard bounds.width > 1, bounds.height > 1 else { return }
+        guard loadTask == nil else { return }
         let appearance: SummaryMapSnapshotRequest.Appearance =
             traitCollection.userInterfaceStyle == .dark ? .dark : .light
-        let request: SummaryMapSnapshotRequest? = switch source {
+        let input: SummaryMapSnapshotRequestInput = switch source {
         case .overview(let data):
-            SummaryMapSnapshotRequestFactory.overview(
+            .overview(
                 slotID: slotID,
                 data: data,
-                size: bounds.size,
-                displayScale: traitCollection.displayScale,
-                appearance: appearance
+                size: bounds.size
             )
         case .place(let location):
-            SummaryMapSnapshotRequestFactory.place(
+            .place(
                 slotID: slotID,
                 location: location,
-                size: bounds.size,
-                displayScale: traitCollection.displayScale,
-                appearance: appearance
+                size: bounds.size
             )
         }
-        guard let request else { return }
-        guard requestKey != request.cacheKey else { return }
-        requestKey = request.cacheKey
-        loadTask?.cancel()
-
-        if let cached = SummaryMapDecodedImageCache.cachedImage(for: request) {
-            image = cached
-            return
-        }
-
-        let expectedKey = request.cacheKey
+        let displayScale = traitCollection.displayScale
         let loadsContent = loadsContent
+        let expectedGeneration = generation
         loadTask = Task { [weak self] in
+            defer {
+                if self?.generation == expectedGeneration {
+                    self?.loadTask = nil
+                }
+            }
+            guard let request = await SummaryMapSnapshotRequestBuilder.request(
+                for: input,
+                displayScale: displayScale,
+                appearance: appearance
+            ), !Task.isCancelled,
+            self?.generation == expectedGeneration else { return }
+            guard self?.requestKey != request.cacheKey else { return }
+            self?.requestKey = request.cacheKey
+
+            if let cached = SummaryMapDecodedImageCache.cachedImage(for: request) {
+                self?.image = cached
+                return
+            }
+
+            let expectedKey = request.cacheKey
             let cachedData = await SummaryMapSnapshotStore.shared.cachedData(
                 for: request
             )

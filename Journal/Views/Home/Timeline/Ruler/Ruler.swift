@@ -138,7 +138,23 @@ private struct TimelineRulerRow: View {
                         onDismissCandidate: onDismissCandidate
                     )
                 }
-            case .placeVisit, .workout:
+            case .workout:
+                if let presentation = row.transitPresentation {
+                    TimelineTransitRulerContent(
+                        row: row,
+                        presentation: presentation,
+                        reviewCandidateID: nil,
+                        onSelect: onSelect,
+                        onAcceptCandidateEntry: onAcceptCandidateEntry,
+                        onDismissCandidate: onDismissCandidate
+                    )
+                } else {
+                    TimelineIntervalRulerContent(
+                        row: row,
+                        onSelect: onSelect
+                    )
+                }
+            case .placeVisit:
                 TimelineIntervalRulerContent(
                     row: row,
                     onSelect: onSelect
@@ -203,7 +219,7 @@ private struct TimelineTransitRulerContent: View {
                 )
             }
 
-            TimelineCompactTransitRulerRow(
+            TimelineCompactMovementRulerRow(
                 occurrence: row.occurrence,
                 showsReviewBadge: presentation.showsReviewBadge,
                 reviewCandidateID: presentation.showsReviewBadge
@@ -335,7 +351,7 @@ private struct TimelineTransitPseudoRulerRow: View {
     }
 }
 
-private struct TimelineCompactTransitRulerRow: View {
+private struct TimelineCompactMovementRulerRow: View {
     let occurrence: TimelineOccurrence
     let showsReviewBadge: Bool
     let reviewCandidateID: UUID?
@@ -350,13 +366,18 @@ private struct TimelineCompactTransitRulerRow: View {
             Color.clear
                 .frame(width: TimelineRulerMetrics.trackWidth)
 
-            TimelineCompactTransitRow(
-                transitType: occurrence.transitType,
-                organizationName: occurrence.snapshot
-                    .transitSourceOrganizationName,
-                serviceIdentifier: occurrence.snapshot
-                    .transitSourceServiceIdentifier,
-                distanceMeters: occurrence.snapshot.transitDistanceMeters,
+            TimelineCompactMovementRow(
+                title: title,
+                style: style,
+                organizationName: occurrence.kind == .transit
+                    ? occurrence.snapshot.transitSourceOrganizationName
+                    : nil,
+                serviceIdentifier: occurrence.kind == .transit
+                    ? occurrence.snapshot.transitSourceServiceIdentifier
+                    : nil,
+                distanceMeters: occurrence.kind == .workout
+                    ? occurrence.snapshot.workoutDistanceMeters
+                    : occurrence.snapshot.transitDistanceMeters,
                 startTime: occurrence.startTime,
                 endTime: occurrence.endTime,
                 people: occurrence.snapshot.people,
@@ -369,6 +390,23 @@ private struct TimelineCompactTransitRulerRow: View {
                 onTap: onTap
             )
         }
+    }
+
+    private var title: String {
+        occurrence.kind == .workout
+            ? occurrence.snapshot.workoutActivityName
+            : occurrence.transitType
+    }
+
+    private var style: TimelineCompactMovementStyle {
+        if occurrence.kind == .workout {
+            return .workout(
+                systemImageName: occurrence.snapshot.workoutSystemImageName
+            )
+        }
+        return .transit(
+            TransitPresentationCatalog.presentation(for: occurrence.transitType)
+        )
     }
 }
 

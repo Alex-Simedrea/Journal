@@ -159,6 +159,14 @@ nonisolated enum TransitDistanceService {
     private static func distance(
         for request: TransitDistanceRequest
     ) async -> Double {
+        await Task.detached(priority: .utility) {
+            await resolvedDistance(for: request)
+        }.value
+    }
+
+    private static func resolvedDistance(
+        for request: TransitDistanceRequest
+    ) async -> Double {
         let geodesicDistance = CLLocation(
             latitude: request.origin.latitude,
             longitude: request.origin.longitude

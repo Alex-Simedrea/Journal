@@ -3,6 +3,7 @@ import SwiftData
 
 nonisolated struct WorkoutEntryReference: Sendable {
     let workoutUUID: UUID
+    let activityTypeRawValue: Int
     let movementKind: WorkoutMovementKind
     let routeImportState: WorkoutRouteImportState
 }
@@ -19,6 +20,7 @@ actor WorkoutImportPersistence {
             guard let details = entry.workoutDetails else { return nil }
             return WorkoutEntryReference(
                 workoutUUID: details.healthKitWorkoutUUID,
+                activityTypeRawValue: details.activityTypeRawValue,
                 movementKind: details.movementKind,
                 routeImportState: details.routeImportState
             )
@@ -74,6 +76,9 @@ actor WorkoutImportPersistence {
             try WakeUpEntryStore.synchronize(
                 snapshots: wakeUps,
                 in: modelContext
+            )
+            _ = WorkoutTimelinePlaceReconciler.reconcile(
+                entries: try modelContext.fetch(FetchDescriptor<LogEntry>())
             )
             try modelContext.save()
             await TimelineDataChange.post(.structure)

@@ -86,6 +86,61 @@ struct SummaryMapSnapshotTests {
         #expect(abs(abs(region.center.longitude) - 180) < 1)
     }
 
+    @Test("Period routes are selected by their footprint at the map scale")
+    func periodRouteVisibilityAtGlobalScale() {
+        let local = TimelineMapPath(
+            id: UUID(),
+            kind: .transit("Walk"),
+            coordinates: [
+                CLLocationCoordinate2D(latitude: 44.4268, longitude: 26.1025),
+                CLLocationCoordinate2D(latitude: 44.4368, longitude: 26.1125),
+            ]
+        )
+        let intercity = TimelineMapPath(
+            id: UUID(),
+            kind: .transit("Plane"),
+            coordinates: [
+                CLLocationCoordinate2D(latitude: 44.4268, longitude: 26.1025),
+                CLLocationCoordinate2D(latitude: 48.8566, longitude: 2.3522),
+            ]
+        )
+        let markers = [
+            marker("Bucharest", latitude: 44.4268, longitude: 26.1025),
+            marker("Paris", latitude: 48.8566, longitude: 2.3522),
+        ]
+
+        let selected = SummaryMapVisibleRouteSelector.paths(
+            from: [local, intercity],
+            markers: markers,
+            size: CGSize(width: 440, height: 290)
+        )
+
+        #expect(selected.map(\.id) == [intercity.id])
+    }
+
+    @Test("The same local route remains visible at city scale")
+    func periodRouteVisibilityAtCityScale() {
+        let local = TimelineMapPath(
+            id: UUID(),
+            kind: .transit("Walk"),
+            coordinates: [
+                CLLocationCoordinate2D(latitude: 44.4268, longitude: 26.1025),
+                CLLocationCoordinate2D(latitude: 44.4768, longitude: 26.1525),
+            ]
+        )
+
+        let selected = SummaryMapVisibleRouteSelector.paths(
+            from: [local],
+            markers: [
+                marker("Home", latitude: 44.4268, longitude: 26.1025),
+                marker("Park", latitude: 44.4768, longitude: 26.1525),
+            ],
+            size: CGSize(width: 440, height: 290)
+        )
+
+        #expect(selected.map(\.id) == [local.id])
+    }
+
     @Test("A rendered snapshot survives a new store instance")
     func diskHitAcrossStores() async throws {
         let directory = temporaryDirectory()
@@ -117,8 +172,8 @@ struct SummaryMapSnapshotTests {
         #expect(renderCount == 1)
     }
 
-    @Test("A slot retains multiple content revisions for later reuse")
-    func contentRevisionReuse() async throws {
+    @Test("A slot discards a superseded content revision")
+    func supersededContentRevision() async throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let counter = InvocationCounter()
@@ -135,16 +190,6 @@ struct SummaryMapSnapshotTests {
         _ = try await store.data(for: oldRequest)
         _ = try await store.data(for: newRequest)
 
-        let reopened = SummaryMapSnapshotStore(
-            directory: directory,
-            renderer: { _ in
-                await counter.increment()
-                return Data("unexpected rerender".utf8)
-            }
-        )
-        _ = try await reopened.data(for: oldRequest)
-        _ = try await reopened.data(for: newRequest)
-
         let slot = directory.appending(
             path: newRequest.slotHash,
             directoryHint: .isDirectory
@@ -153,12 +198,117 @@ struct SummaryMapSnapshotTests {
             at: slot,
             includingPropertiesForKeys: nil
         )
-        #expect(Set(contentDirectories.map(\.lastPathComponent)) == Set([
-            oldRequest.contentHash,
+        #expect(contentDirectories.map(\.lastPathComponent) == [
             newRequest.contentHash,
-        ]))
+        ])
         let renderCount = await counter.value
         #expect(renderCount == 2)
+    }
+
+    @Test("A slot retains light and dark appearance variants")
+    func appearanceVariantReuse() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let counter = InvocationCounter()
+        let expected = Data("rendered map".utf8)
+        let light = request(
+            slot: "day-2026-8-5",
+            version: 1,
+            appearance: .light
+        )
+        let dark = request(
+            slot: "day-2026-8-5",
+            version: 1,
+            appearance: .dark
+        )
+        let first = SummaryMapSnapshotStore(
+            directory: directory,
+            renderer: { _ in
+                await counter.increment()
+                return expected
+            }
+        )
+        _ = try await first.data(for: light)
+        _ = try await first.data(for: dark)
+
+        let reopened = SummaryMapSnapshotStore(
+            directory: directory,
+            renderer: { _ in
+                await counter.increment()
+                return Data("unexpected rerender".utf8)
+            }
+        )
+        #expect(try await reopened.data(for: light) == expected)
+        #expect(try await reopened.data(for: dark) == expected)
+        #expect(await counter.value == 2)
+    }
+
+    @Test("Each appearance retains only its current content revision")
+    func contentRevisionLimit() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let counter = InvocationCounter()
+        let oldLight = request(
+            slot: "day-2026-8-5",
+            version: 1,
+            appearance: .light
+        )
+        let oldDark = request(
+            slot: "day-2026-8-5",
+            version: 101,
+            appearance: .dark
+        )
+        let newLight = request(
+            slot: "day-2026-8-5",
+            version: 2,
+            appearance: .light
+        )
+        let newDark = request(
+            slot: "day-2026-8-5",
+            version: 102,
+            appearance: .dark
+        )
+        let store = SummaryMapSnapshotStore(
+            directory: directory,
+            renderer: { request in
+                await counter.increment()
+                return Data(request.contentHash.utf8)
+            }
+        )
+        _ = try await store.data(for: oldLight)
+        _ = try await store.data(for: oldDark)
+        _ = try await store.data(for: newLight)
+
+        // Updating light mode must not evict the cached dark-mode image.
+        let oldLightAfterLightUpdate = await store.cachedData(for: oldLight)
+        let oldDarkAfterLightUpdate = await store.cachedData(for: oldDark)
+        let newLightAfterLightUpdate = await store.cachedData(for: newLight)
+        #expect(oldLightAfterLightUpdate == nil)
+        #expect(oldDarkAfterLightUpdate != nil)
+        #expect(newLightAfterLightUpdate != nil)
+
+        _ = try await store.data(for: newDark)
+
+        let slot = directory.appending(
+            path: newLight.slotHash,
+            directoryHint: .isDirectory
+        )
+        let retained = try FileManager.default.contentsOfDirectory(
+            at: slot,
+            includingPropertiesForKeys: [.isDirectoryKey]
+        ).filter {
+            (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?
+                .isDirectory == true
+        }
+        #expect(Set(retained.map(\.lastPathComponent)) == Set([
+            newLight.contentHash,
+            newDark.contentHash,
+        ]))
+        let oldDarkAfterDarkUpdate = await store.cachedData(for: oldDark)
+        let newDarkAfterDarkUpdate = await store.cachedData(for: newDark)
+        #expect(oldDarkAfterDarkUpdate == nil)
+        #expect(newDarkAfterDarkUpdate != nil)
+        #expect(await counter.value == 4)
     }
 
     @Test("Concurrent readers share one render task")
@@ -253,7 +403,8 @@ struct SummaryMapSnapshotTests {
 
     private func request(
         slot: String,
-        version: Int
+        version: Int,
+        appearance: SummaryMapSnapshotRequest.Appearance = .light
     ) -> SummaryMapSnapshotRequest {
         SummaryMapSnapshotRequest(
             slotID: slot,
@@ -270,8 +421,24 @@ struct SummaryMapSnapshotTests {
                 pixelWidth: 300,
                 pixelHeight: 300,
                 scale: 3,
-                appearance: .light
+                appearance: appearance
             )
+        )
+    }
+
+    private func marker(
+        _ name: String,
+        latitude: Double,
+        longitude: Double
+    ) -> TimelineMapMarker {
+        TimelineMapMarker(
+            id: name,
+            name: name,
+            coordinate: CLLocationCoordinate2D(
+                latitude: latitude,
+                longitude: longitude
+            ),
+            systemImage: .buildings
         )
     }
 

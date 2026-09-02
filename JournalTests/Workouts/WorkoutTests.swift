@@ -9,7 +9,7 @@ import Testing
 @Suite("HealthKit workouts")
 @MainActor
 struct WorkoutTests {
-    @Test("Only walking and running are moving workouts")
+    @Test("Walking, running, and cycling are moving workouts")
     func movementClassification() {
         #expect(
             WorkoutActivityCatalog.movementKind(
@@ -24,7 +24,7 @@ struct WorkoutTests {
         #expect(
             WorkoutActivityCatalog.movementKind(
                 for: Int(HKWorkoutActivityType.cycling.rawValue)
-            ) == .staticWorkout
+            ) == .moving
         )
         #expect(
             WorkoutActivityCatalog.movementKind(
@@ -129,18 +129,29 @@ struct WorkoutTests {
         }
     }
 
-    @Test("Matcher rejects similarly close saved places")
+    @Test("Matcher uses precise coordinates to distinguish nearby saved places")
     func ambiguousAndClearNearestMatching() {
         let nearest = place(name: "Nearest", latitude: 0.00005)
         let ambiguousRunnerUp = place(
             name: "Ambiguous",
             latitude: 0.00020
         )
+        #expect(
+            matchedPlace(
+                WorkoutPlaceMatcher.match(
+                    coordinate: coordinate(latitude: 0),
+                    places: [nearest, ambiguousRunnerUp]
+                )
+            )?.id == nearest.id
+        )
         guard case .ambiguous = WorkoutPlaceMatcher.match(
-            coordinate: coordinate(latitude: 0),
+            coordinate: coordinate(
+                latitude: 0,
+                horizontalAccuracyMeters: 50
+            ),
             places: [nearest, ambiguousRunnerUp]
         ) else {
-            Issue.record("Expected two similarly close places to remain unresolved")
+            Issue.record("Expected imprecise nearby places to remain unresolved")
             return
         }
 
@@ -394,6 +405,117 @@ struct WorkoutTests {
         #expect(request.date == start)
         #expect(request.latitude == 44.4)
         #expect(request.longitude == 26.1)
+    }
+
+    @Test("Adjacent timeline places reconcile precise workout endpoints")
+    func adjacentTimelinePlaceReconciliation() throws {
+        let home = place(name: "Home", latitude: 44.4300, longitude: 26.1000)
+        let office = place(
+            name: "Office",
+            latitude: 44.4400,
+            longitude: 26.1100
+        )
+        let base = Date(timeIntervalSince1970: 100_000)
+
+        let visit = LogEntry(
+            kind: .placeVisit,
+            startTime: base,
+            endTime: base.addingTimeInterval(60 * 60),
+            needsReview: false
+        )
+        visit.placeVisitDetails = PlaceVisitDetails(place: home)
+
+        let workout = LogEntry(
+            kind: .workout,
+            startTime: base.addingTimeInterval(64 * 60),
+            endTime: base.addingTimeInterval(94 * 60),
+            needsReview: true
+        )
+        workout.workoutDetails = WorkoutDetails(
+            healthKitWorkoutUUID: UUID(),
+            activityTypeRawValue: WorkoutActivityCatalog.runningRawValue,
+            activityName: "Running",
+            movementKind: .moving,
+            originLocation: location(
+                latitude: 44.4308,
+                longitude: 26.1000
+            ),
+            destinationLocation: location(
+                latitude: 44.4408,
+                longitude: 26.1100
+            ),
+            fieldReviews: [
+                WorkoutFieldReview(field: .origin, reason: "Review"),
+                WorkoutFieldReview(field: .destination, reason: "Review"),
+            ]
+        )
+
+        let transit = LogEntry(
+            kind: .transit,
+            startTime: base.addingTimeInterval(98 * 60),
+            endTime: base.addingTimeInterval(120 * 60),
+            needsReview: false
+        )
+        transit.transitDetails = TransitDetails(
+            type: "Train",
+            originPlace: office,
+            destinationLocation: location(latitude: 45, longitude: 27)
+        )
+
+        #expect(
+            WorkoutTimelinePlaceReconciler.reconcile(
+                entries: [transit, workout, visit]
+            )
+        )
+        #expect(workout.workoutDetails?.originPlace?.id == home.id)
+        #expect(workout.workoutDetails?.destinationPlace?.id == office.id)
+        #expect(workout.workoutDetails?.fieldReviews.isEmpty == true)
+        #expect(!workout.needsReview)
+    }
+
+    @Test("Timeline place reconciliation respects time and manual choices")
+    func timelinePlaceReconciliationLimits() {
+        let home = place(name: "Home", latitude: 44.4300, longitude: 26.1000)
+        let manual = place(
+            name: "Manual",
+            latitude: 44.4310,
+            longitude: 26.1000
+        )
+        let base = Date(timeIntervalSince1970: 200_000)
+        let visit = LogEntry(
+            kind: .placeVisit,
+            startTime: base,
+            endTime: base.addingTimeInterval(60 * 60),
+            needsReview: false
+        )
+        visit.placeVisitDetails = PlaceVisitDetails(place: home)
+
+        let workout = LogEntry(
+            kind: .workout,
+            startTime: base.addingTimeInterval(66 * 60),
+            endTime: base.addingTimeInterval(96 * 60),
+            needsReview: false
+        )
+        workout.workoutDetails = WorkoutDetails(
+            healthKitWorkoutUUID: UUID(),
+            activityTypeRawValue: WorkoutActivityCatalog.walkingRawValue,
+            activityName: "Walking",
+            movementKind: .moving,
+            originLocation: location(
+                latitude: 44.4301,
+                longitude: 26.1000
+            ),
+            destinationLocation: location(latitude: 45, longitude: 27),
+            originPlace: manual,
+            originResolutionSource: .manual
+        )
+
+        #expect(
+            !WorkoutTimelinePlaceReconciler.reconcile(
+                entries: [visit, workout]
+            )
+        )
+        #expect(workout.workoutDetails?.originPlace?.id == manual.id)
     }
 
     @Test("Locally deleted workouts receive an exclusion tombstone")

@@ -44,6 +44,363 @@ struct JournalRecordingClassifierTests {
         }
     }
 
+    @Test("An hour of stationary drift does not accumulate route distance")
+    func stationaryDistanceIsStable() {
+        let points = (0...60).map { minute in
+            let angle = Double(minute) * 2.399
+            return point(
+                north: cos(angle) * 24,
+                east: sin(angle) * 24,
+                minute: Double(minute),
+                accuracy: 8,
+                speed: 0
+            )
+        }
+
+        let distance = JournalRecordingClassifier.routeDistance(points)
+
+        #expect(distance < 100)
+    }
+
+    @Test("Walking inside a saved venue remains a place visit")
+    func savedVenueContainsInternalWalking() throws {
+        let venueID = UUID()
+        let points = [
+            point(north: -70, east: -50, minute: 0, speed: 1.2),
+            point(north: -70, east: 50, minute: 5, speed: 1.2),
+            point(north: 70, east: 50, minute: 10, speed: 1.2),
+            point(north: 70, east: -50, minute: 15, speed: 1.2),
+            point(north: -70, east: -50, minute: 20, speed: 1.2),
+        ]
+        let motion = [
+            RecordedMotionObservation(
+                startTime: start,
+                endTime: start.addingTimeInterval(20 * 60),
+                kind: .walking,
+                confidenceRawValue: 2
+            )
+        ]
+        let venue = JournalRecordingPlaceRegion(
+            id: venueID,
+            name: "Shopping Centre",
+            latitude: baseLatitude,
+            longitude: baseLongitude,
+            radiusMeters: 180,
+            isHome: false
+        )
+
+        let result = try #require(
+            JournalRecordingClassifier.classify(
+                points: points,
+                motion: motion,
+                placeRegions: [venue]
+            )
+        )
+
+        guard case .visit = result else {
+            Issue.record("Expected the saved venue to contain the walk")
+            return
+        }
+    }
+
+    @Test("Continuous recording emits journeys and omits short Home boundaries")
+    func continuousHomeBoundaries() {
+        let homeID = UUID()
+        let cafeID = UUID()
+        var points: [TrackedLocationPoint] = (0...5).map {
+            point(north: Double($0 % 2) * 3, east: 0, minute: Double($0))
+        }
+        points += [
+            point(north: 300, east: 0, minute: 6, speed: 12),
+            point(north: 1_000, east: 0, minute: 8, speed: 14),
+            point(north: 2_000, east: 0, minute: 10, speed: 14),
+            point(north: 3_000, east: 0, minute: 12, speed: 10),
+        ]
+        points += stride(from: 13.0, through: 43.0, by: 5).map {
+            point(north: 3_000, east: $0.truncatingRemainder(dividingBy: 2) * 2, minute: $0)
+        }
+        points += [
+            point(north: 2_400, east: 0, minute: 44, speed: 12),
+            point(north: 1_500, east: 0, minute: 46, speed: 14),
+            point(north: 500, east: 0, minute: 49, speed: 12),
+        ]
+        points += (51...56).map {
+            point(north: Double($0 % 2) * 3, east: 0, minute: Double($0))
+        }
+        let motion = [
+            RecordedMotionObservation(
+                startTime: start.addingTimeInterval(5 * 60),
+                endTime: start.addingTimeInterval(13 * 60),
+                kind: .automotive,
+                confidenceRawValue: 2
+            ),
+            RecordedMotionObservation(
+                startTime: start.addingTimeInterval(43 * 60),
+                endTime: start.addingTimeInterval(51 * 60),
+                kind: .automotive,
+                confidenceRawValue: 2
+            ),
+        ]
+        let places = [
+            region(id: homeID, name: "Home", north: 0, radius: 50, isHome: true),
+            region(id: cafeID, name: "Cafe", north: 3_000, radius: 60),
+        ]
+
+        let segments = JournalRecordingSegmenter.segments(
+            points: points,
+            motion: motion,
+            places: places
+        )
+
+        #expect(segments.count == 3)
+        guard segments.count == 3 else { return }
+        guard case .transit(let outbound) = segments[0],
+              case .visit(let visit) = segments[1],
+              case .transit(let inbound) = segments[2] else {
+            Issue.record("Expected transit, visit, transit")
+            return
+        }
+        #expect(outbound.originPlaceID == homeID)
+        #expect(outbound.destinationPlaceID == cafeID)
+        #expect(visit.placeID == cafeID)
+        #expect(inbound.originPlaceID == cafeID)
+        #expect(inbound.destinationPlaceID == homeID)
+        #expect(outbound.mode == .automotive)
+        #expect(inbound.mode == .automotive)
+    }
+
+    @Test("Precise points select the nearest of overlapping saved places")
+    func preciseNearbyPlaces() {
+        let firstID = UUID()
+        let secondID = UUID()
+        let points = (0...6).map { index in
+            point(
+                north: 1,
+                east: 2 + Double(index % 2),
+                minute: Double(index) * 2,
+                accuracy: 5
+            )
+        }
+        let places = [
+            region(id: firstID, name: "First", north: 0, east: 0, radius: 50),
+            region(id: secondID, name: "Second", north: 0, east: 24, radius: 50),
+        ]
+
+        let segments = JournalRecordingSegmenter.segments(
+            points: points,
+            motion: [],
+            places: places
+        )
+
+        guard case .visit(let visit)? = segments.first else {
+            Issue.record("Expected a saved-place visit")
+            return
+        }
+        #expect(visit.placeID == firstID)
+    }
+
+    @Test("Nearby saved places remain distinct with a continuous short transit")
+    func nearbyPlacesRemainContinuous() {
+        let firstID = UUID()
+        let secondID = UUID()
+        var points = stride(from: 0.0, through: 10.0, by: 2).map {
+            point(north: 0, east: 1, minute: $0, accuracy: 5)
+        }
+        points.append(
+            point(north: 0, east: 15, minute: 11, accuracy: 5, speed: 1.2)
+        )
+        points += stride(from: 12.0, through: 22.0, by: 2).map {
+            point(north: 0, east: 29, minute: $0, accuracy: 5)
+        }
+        let places = [
+            region(id: firstID, name: "First", north: 0, east: 0, radius: 50),
+            region(id: secondID, name: "Second", north: 0, east: 30, radius: 50),
+        ]
+        let motion = [
+            RecordedMotionObservation(
+                startTime: start.addingTimeInterval(10 * 60),
+                endTime: start.addingTimeInterval(13 * 60),
+                kind: .walking,
+                confidenceRawValue: 2
+            )
+        ]
+
+        let segments = JournalRecordingSegmenter.segments(
+            points: points,
+            motion: motion,
+            places: places
+        )
+
+        #expect(segments.count == 3)
+        guard segments.count == 3,
+              case .visit(let first) = segments[0],
+              case .transit(let transit) = segments[1],
+              case .visit(let second) = segments[2] else { return }
+        #expect(first.placeID == firstID)
+        #expect(transit.originPlaceID == firstID)
+        #expect(transit.destinationPlaceID == secondID)
+        #expect(second.placeID == secondID)
+    }
+
+    @Test("Motion history splits consecutive transit modes")
+    func motionSplitsMultimodalTransit() {
+        let points = stride(from: 0.0, through: 42.0, by: 2).map { minute in
+            let north: Double
+            if minute <= 8 {
+                north = minute * 35
+            } else if minute <= 30 {
+                north = 280 + (minute - 8) * 140
+            } else {
+                north = 3_360 + (minute - 30) * 35
+            }
+            return point(north: north, east: 0, minute: minute, accuracy: 7)
+        }
+        let motion = [
+            RecordedMotionObservation(
+                startTime: start,
+                endTime: start.addingTimeInterval(8 * 60),
+                kind: .walking,
+                confidenceRawValue: 2
+            ),
+            RecordedMotionObservation(
+                startTime: start.addingTimeInterval(8 * 60),
+                endTime: start.addingTimeInterval(30 * 60),
+                kind: .automotive,
+                confidenceRawValue: 2
+            ),
+            RecordedMotionObservation(
+                startTime: start.addingTimeInterval(30 * 60),
+                endTime: start.addingTimeInterval(42 * 60),
+                kind: .walking,
+                confidenceRawValue: 2
+            ),
+        ]
+
+        let segments = JournalRecordingSegmenter.segments(
+            points: points,
+            motion: motion,
+            places: []
+        )
+
+        #expect(segments.count == 3)
+        guard segments.count == 3,
+              case .transit(let first) = segments[0],
+              case .transit(let second) = segments[1],
+              case .transit(let third) = segments[2] else { return }
+        #expect([first.mode, second.mode, third.mode]
+            == [.walking, .automotive, .walking])
+        #expect(first.endTime == second.startTime)
+        #expect(second.endTime == third.startTime)
+        #expect(first.destination.latitude == second.origin.latitude)
+        #expect(second.destination.latitude == third.origin.latitude)
+    }
+
+    @Test("Motion walking inside a saved venue does not create transit")
+    func segmenterContainsWalkingInsideVenue() {
+        let venueID = UUID()
+        let points = [
+            point(north: -70, east: -50, minute: 0, speed: 1.2),
+            point(north: -70, east: 50, minute: 5, speed: 1.2),
+            point(north: 70, east: 50, minute: 10, speed: 1.2),
+            point(north: 70, east: -50, minute: 15, speed: 1.2),
+            point(north: -70, east: -50, minute: 20, speed: 1.2),
+        ]
+        let motion = [
+            RecordedMotionObservation(
+                startTime: start,
+                endTime: start.addingTimeInterval(20 * 60),
+                kind: .walking,
+                confidenceRawValue: 2
+            )
+        ]
+        let venue = region(
+            id: venueID,
+            name: "Shopping Centre",
+            north: 0,
+            radius: 180
+        )
+
+        let segments = JournalRecordingSegmenter.segments(
+            points: points,
+            motion: motion,
+            places: [venue]
+        )
+
+        #expect(segments.count == 1)
+        guard case .visit(let visit)? = segments.first else {
+            Issue.record("Expected one venue visit")
+            return
+        }
+        #expect(visit.placeID == venueID)
+    }
+
+    @Test("CLVisit evidence can confirm a noisy stationary area")
+    func visitEvidenceEnrichesNoisyDwell() {
+        let points = (0...10).map { index in
+            point(
+                north: index.isMultiple(of: 2) ? -85 : 85,
+                east: 0,
+                minute: Double(index) * 2,
+                accuracy: 40
+            )
+        }
+        let evidence = JournalRecordingVisitEvidence(
+            startTime: start,
+            endTime: start.addingTimeInterval(20 * 60),
+            latitude: baseLatitude,
+            longitude: baseLongitude,
+            horizontalAccuracyMeters: 40,
+            placeID: nil
+        )
+
+        let segments = JournalRecordingSegmenter.segments(
+            points: points,
+            motion: [],
+            places: [],
+            visitEvidence: [evidence]
+        )
+
+        #expect(segments.count == 1)
+        guard case .visit = segments.first else {
+            Issue.record("Expected CLVisit plus GPS dwell to produce a visit")
+            return
+        }
+    }
+
+    @Test("A brief pass-through rejects false-positive CLVisit evidence")
+    func visitEvidenceRejectsPassThrough() {
+        let points = (0...10).map { index in
+            point(
+                north: Double(index) * 100,
+                east: 0,
+                minute: Double(index) * 2,
+                accuracy: 8,
+                speed: 4
+            )
+        }
+        let evidence = JournalRecordingVisitEvidence(
+            startTime: start,
+            endTime: start.addingTimeInterval(20 * 60),
+            latitude: latitude(north: 500),
+            longitude: baseLongitude,
+            horizontalAccuracyMeters: 40,
+            placeID: nil
+        )
+
+        let segments = JournalRecordingSegmenter.segments(
+            points: points,
+            motion: [],
+            places: [],
+            visitEvidence: [evidence]
+        )
+
+        #expect(segments.count == 1)
+        guard case .transit = segments.first else {
+            Issue.record("Expected GPS movement to reject the visit evidence")
+            return
+        }
+    }
+
     @Test("A route uses endpoint clusters and preserves automotive motion")
     func transitEndpointClusters() throws {
         let points = [
@@ -295,6 +652,25 @@ struct JournalRecordingClassifierTests {
             altitude: nil,
             speed: speed,
             course: nil
+        )
+    }
+
+    private func region(
+        id: UUID,
+        name: String,
+        north: Double,
+        east: Double = 0,
+        radius: Double,
+        isHome: Bool = false
+    ) -> JournalRecordingPlaceRegion {
+        let longitudeScale = 111_320 * cos(baseLatitude * .pi / 180)
+        return JournalRecordingPlaceRegion(
+            id: id,
+            name: name,
+            latitude: latitude(north: north),
+            longitude: baseLongitude + east / longitudeScale,
+            radiusMeters: radius,
+            isHome: isHome
         )
     }
 }

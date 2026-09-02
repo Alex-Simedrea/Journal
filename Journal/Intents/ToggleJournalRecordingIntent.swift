@@ -45,6 +45,37 @@ struct ToggleJournalRecordingInAppIntent: LiveActivityIntent {
     }
 }
 
+struct ToggleContinuousJournalRecordingIntent: LiveActivityIntent {
+    static let title: LocalizedStringResource =
+        "Toggle Continuous Journal Recording"
+    static let description = IntentDescription(
+        "Starts continuous location recording, or stops it and creates all detected visits and transits."
+    )
+    static let supportedModes: IntentModes = [
+        .background,
+        .foreground(.dynamic),
+    ]
+
+    func perform() async throws -> some IntentResult {
+        JournalRecordingLog.recording.info(
+            "[Recording] continuous intent invoked"
+        )
+        let isBackground = systemContext.currentMode == .background
+        let result = try await JournalRecordingCoordinator.shared.toggle(
+            origin: isBackground ? .backgroundIntent : .foregroundIntent,
+            mode: .continuous
+        )
+        if result == .needsForeground, isBackground {
+            try await continueInForeground(alwaysConfirm: false)
+            _ = try await JournalRecordingCoordinator.shared.toggle(
+                origin: .foregroundIntent,
+                mode: .continuous
+            )
+        }
+        return .result()
+    }
+}
+
 struct JournalAppShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
@@ -63,6 +94,15 @@ struct JournalAppShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Toggle in App",
             systemImageName: "location.circle"
+        )
+        AppShortcut(
+            intent: ToggleContinuousJournalRecordingIntent(),
+            phrases: [
+                "Toggle continuous recording in \(.applicationName)",
+                "Start or stop continuous \(.applicationName) recording",
+            ],
+            shortTitle: "Continuous Recording",
+            systemImageName: "location.fill.viewfinder"
         )
     }
 }

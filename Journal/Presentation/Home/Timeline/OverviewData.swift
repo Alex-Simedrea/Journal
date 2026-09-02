@@ -57,11 +57,22 @@ nonisolated struct TimelineMapMarker: Hashable, Identifiable, Sendable {
             longitude: radiusCenterLongitude
         )
     }
+
+    var displayCoordinate: CLLocationCoordinate2D {
+        accuracyRadiusMeters > 0
+            ? radiusCenterCoordinate ?? coordinate
+            : coordinate
+    }
 }
 
 nonisolated enum TimelineMapPathKind: Hashable, Sendable {
     case transit(String)
     case workout
+}
+
+nonisolated enum TimelineMapPathDisplayMode: Equatable, Sendable {
+    case all
+    case visibleAtMapScale
 }
 
 nonisolated struct TimelineMapPath: Hashable, Identifiable, Sendable {
@@ -89,8 +100,19 @@ nonisolated struct TimelineMapPath: Hashable, Identifiable, Sendable {
 }
 
 nonisolated struct TimelineOverviewData: Equatable, Sendable {
-    var markers: [TimelineMapMarker] = []
-    var paths: [TimelineMapPath] = []
+    var markers: [TimelineMapMarker]
+    var paths: [TimelineMapPath]
+    var pathDisplayMode: TimelineMapPathDisplayMode
+
+    init(
+        markers: [TimelineMapMarker] = [],
+        paths: [TimelineMapPath] = [],
+        pathDisplayMode: TimelineMapPathDisplayMode = .all
+    ) {
+        self.markers = Self.deduplicated(markers)
+        self.paths = paths
+        self.pathDisplayMode = pathDisplayMode
+    }
 
     var hasContent: Bool { !markers.isEmpty || !paths.isEmpty }
 
@@ -98,80 +120,136 @@ nonisolated struct TimelineOverviewData: Equatable, Sendable {
         occurrences: [TimelineOccurrence],
         workoutRoutes: [UUID: [WorkoutCoordinateSnapshot]] = [:]
     ) -> TimelineOverviewData {
+        TimelineOverviewData(
+            markers: markers(
+                for: occurrences,
+                workoutRoutes: workoutRoutes
+            ),
+            paths: paths(
+                for: occurrences,
+                workoutRoutes: workoutRoutes
+            )
+        )
+    }
+
+    static func makePeriod(
+        occurrences: [TimelineOccurrence]
+    ) -> TimelineOverviewData {
+        let candidates = markerCandidates(for: occurrences)
+        let cityKeys = Set(candidates.compactMap(\.cityKey))
+        let selectedMarkers = cityKeys.count > 1
+            ? cityMarkers(from: candidates)
+            : markers(from: candidates)
+        return TimelineOverviewData(
+            markers: selectedMarkers,
+            paths: paths(for: occurrences, workoutRoutes: [:]),
+            pathDisplayMode: .visibleAtMapScale
+        )
+    }
+
+    private struct MarkerCandidate {
+        let marker: TimelineMapMarker
+        let cityName: String?
+        let countryName: String?
+        let countryCode: String?
+
+        init(
+            marker: TimelineMapMarker,
+            location: TimelineLocationSnapshot?
+        ) {
+            self.marker = marker
+            cityName = location?.cityName
+            countryName = location?.countryName
+            countryCode = location?.countryCode
+        }
+
+        var cityKey: String? {
+            guard let cityName else { return nil }
+            let city = normalized(cityName)
+            guard !city.isEmpty else { return nil }
+            let country = normalized(countryCode ?? countryName ?? "")
+            return "\(city)|\(country)"
+        }
+
+        private func normalized(_ value: String) -> String {
+            value.trimmingCharacters(in: .whitespacesAndNewlines).folding(
+                options: [.caseInsensitive, .diacriticInsensitive],
+                locale: Locale(identifier: "en_US_POSIX")
+            ).lowercased(with: Locale(identifier: "en_US_POSIX"))
+        }
+    }
+
+    private static func markers(
+        for occurrences: [TimelineOccurrence],
+        workoutRoutes: [UUID: [WorkoutCoordinateSnapshot]]
+    ) -> [TimelineMapMarker] {
+        markers(from: markerCandidates(
+            for: occurrences,
+            workoutRoutes: workoutRoutes
+        ))
+    }
+
+    private static func markers(
+        from candidates: [MarkerCandidate]
+    ) -> [TimelineMapMarker] {
         var markersByID: [String: TimelineMapMarker] = [:]
-        var paths: [TimelineMapPath] = []
+        for candidate in candidates {
+            markersByID[candidate.marker.id] = candidate.marker
+        }
+        return markersByID.values.sorted { $0.id < $1.id }
+    }
+
+    private static func markerCandidates(
+        for occurrences: [TimelineOccurrence],
+        workoutRoutes: [UUID: [WorkoutCoordinateSnapshot]] = [:]
+    ) -> [MarkerCandidate] {
+        var candidates: [MarkerCandidate] = []
 
         for occurrence in occurrences {
             switch occurrence.kind {
             case .placeVisit:
                 if let location = occurrence.snapshot.visitLocation,
                    location.hasCoordinate {
-                    markersByID[location.id] = TimelineMapMarker(location: location)
+                    candidates.append(MarkerCandidate(
+                        marker: TimelineMapMarker(location: location),
+                        location: location
+                    ))
                 }
             case .transit:
                 let origin = occurrence.snapshot.originLocation
                 let destination = occurrence.snapshot.destinationLocation
                 if let origin, origin.hasCoordinate {
-                    markersByID[origin.id] = TimelineMapMarker(location: origin)
+                    candidates.append(MarkerCandidate(
+                        marker: TimelineMapMarker(location: origin),
+                        location: origin
+                    ))
                 }
                 if let destination, destination.hasCoordinate {
-                    markersByID[destination.id] = TimelineMapMarker(location: destination)
-                }
-                let route = TransitRouteGeometry.coordinates(
-                    recordedRoute: occurrence.snapshot.transitRecordedRoute,
-                    origin: origin?.hasCoordinate == true
-                        ? origin?.coordinate
-                        : nil,
-                    destination: destination?.hasCoordinate == true
-                        ? destination?.coordinate
-                        : nil,
-                    bendPositive: occurrence.entryID.uuid.0 % 2 == 0
-                )
-                if route.count > 1 {
-                    paths.append(
-                        TimelineMapPath(
-                            id: occurrence.entryID,
-                            kind: .transit(occurrence.transitType),
-                            coordinates: route
-                        )
-                    )
+                    candidates.append(MarkerCandidate(
+                        marker: TimelineMapMarker(location: destination),
+                        location: destination
+                    ))
                 }
             case .workout:
-                appendWorkout(
+                appendWorkoutMarkers(
                     occurrence,
                     route: workoutRoutes[occurrence.entryID] ?? [],
-                    markersByID: &markersByID,
-                    paths: &paths
+                    to: &candidates
                 )
             case .wakeUp:
                 break
             }
         }
-
-        return TimelineOverviewData(
-            markers: markersByID.values.sorted { $0.id < $1.id },
-            paths: paths
-        )
+        return candidates
     }
 
-    private static func appendWorkout(
+    private static func appendWorkoutMarkers(
         _ occurrence: TimelineOccurrence,
         route: [WorkoutCoordinateSnapshot],
-        markersByID: inout [String: TimelineMapMarker],
-        paths: inout [TimelineMapPath]
+        to candidates: inout [MarkerCandidate]
     ) {
         let snapshot = occurrence.snapshot
         if snapshot.workoutMovementKind == .moving {
-            if route.count > 1 {
-                paths.append(
-                    TimelineMapPath(
-                        id: occurrence.entryID,
-                        kind: .workout,
-                        coordinates: route.map(\.coordinate)
-                    )
-                )
-            }
-
             let start = route.first ?? snapshot.workoutRouteStart
             let end = route.last ?? snapshot.workoutRouteEnd
             if let start {
@@ -186,7 +264,10 @@ nonisolated struct TimelineOverviewData: Equatable, Sendable {
                     radiusCenterCoordinate: snapshot.workoutOriginLocation?
                         .radiusCenterCoordinate
                 )
-                markersByID[marker.id] = marker
+                candidates.append(MarkerCandidate(
+                    marker: marker,
+                    location: snapshot.workoutOriginLocation
+                ))
             }
             if let end {
                 let marker = TimelineMapMarker(
@@ -200,7 +281,10 @@ nonisolated struct TimelineOverviewData: Equatable, Sendable {
                     radiusCenterCoordinate: snapshot.workoutDestinationLocation?
                         .radiusCenterCoordinate
                 )
-                markersByID[marker.id] = marker
+                candidates.append(MarkerCandidate(
+                    marker: marker,
+                    location: snapshot.workoutDestinationLocation
+                ))
             }
         } else if let coordinate = snapshot.workoutRouteStart?.coordinate
             ?? snapshot.workoutPlaceLocation?.coordinate {
@@ -215,7 +299,117 @@ nonisolated struct TimelineOverviewData: Equatable, Sendable {
                 radiusCenterCoordinate: snapshot.workoutPlaceLocation?
                     .radiusCenterCoordinate
             )
-            markersByID[marker.id] = marker
+            candidates.append(MarkerCandidate(
+                marker: marker,
+                location: snapshot.workoutPlaceLocation
+            ))
+        }
+    }
+
+    private static func paths(
+        for occurrences: [TimelineOccurrence],
+        workoutRoutes: [UUID: [WorkoutCoordinateSnapshot]]
+    ) -> [TimelineMapPath] {
+        var paths: [TimelineMapPath] = []
+        for occurrence in occurrences {
+            switch occurrence.kind {
+            case .transit:
+                let origin = occurrence.snapshot.originLocation
+                let destination = occurrence.snapshot.destinationLocation
+                let route = TransitRouteGeometry.coordinates(
+                    recordedRoute: occurrence.snapshot.transitRecordedRoute,
+                    origin: origin?.hasCoordinate == true
+                        ? origin?.coordinate
+                        : nil,
+                    destination: destination?.hasCoordinate == true
+                        ? destination?.coordinate
+                        : nil,
+                    bendPositive: occurrence.entryID.uuid.0 % 2 == 0
+                )
+                if route.count > 1 {
+                    paths.append(TimelineMapPath(
+                        id: occurrence.entryID,
+                        kind: .transit(occurrence.transitType),
+                        coordinates: route
+                    ))
+                }
+            case .workout:
+                let route = workoutRoutes[occurrence.entryID] ?? []
+                if occurrence.snapshot.workoutMovementKind == .moving,
+                   route.count > 1 {
+                    paths.append(TimelineMapPath(
+                        id: occurrence.entryID,
+                        kind: .workout,
+                        coordinates: route.map(\.coordinate)
+                    ))
+                }
+            case .placeVisit, .wakeUp:
+                break
+            }
+        }
+        return paths
+    }
+
+    private static func cityMarkers(
+        from candidates: [MarkerCandidate]
+    ) -> [TimelineMapMarker] {
+        let grouped = Dictionary(grouping: candidates) {
+            $0.cityKey
+        }
+        return grouped.compactMap { key, values in
+            guard let key,
+                  let cityName = values.compactMap(\.cityName).first,
+                  let representative = cityRepresentative(in: values) else {
+                return nil
+            }
+            return TimelineMapMarker(
+                id: "city-\(key)",
+                name: cityName.trimmingCharacters(in: .whitespacesAndNewlines),
+                coordinate: representative.marker.displayCoordinate,
+                systemImage: .buildings
+            )
+        }.sorted { $0.id < $1.id }
+    }
+
+    private static func cityRepresentative(
+        in candidates: [MarkerCandidate]
+    ) -> MarkerCandidate? {
+        guard !candidates.isEmpty else { return nil }
+        let latitude = candidates.reduce(0) {
+            $0 + $1.marker.displayCoordinate.latitude
+        } / Double(candidates.count)
+        let longitude = candidates.reduce(0) {
+            $0 + $1.marker.displayCoordinate.longitude
+        } / Double(candidates.count)
+        func distanceSquared(_ coordinate: CLLocationCoordinate2D) -> Double {
+            let latitudeDelta = coordinate.latitude - latitude
+            let longitudeDelta = (coordinate.longitude - longitude)
+                * cos(latitude * .pi / 180)
+            return latitudeDelta * latitudeDelta
+                + longitudeDelta * longitudeDelta
+        }
+        return candidates.min { lhs, rhs in
+            distanceSquared(lhs.marker.displayCoordinate)
+                < distanceSquared(rhs.marker.displayCoordinate)
+        }
+    }
+
+    private struct MarkerCoordinateKey: Hashable {
+        let latitude: Int
+        let longitude: Int
+    }
+
+    private static func deduplicated(
+        _ markers: [TimelineMapMarker]
+    ) -> [TimelineMapMarker] {
+        var coordinates = Set<MarkerCoordinateKey>()
+        return markers.filter { marker in
+            let coordinate = marker.displayCoordinate
+            let key = MarkerCoordinateKey(
+                latitude: Int((coordinate.latitude * 100_000).rounded()),
+                longitude: Int((coordinate.longitude * 100_000).rounded())
+            )
+            return coordinates.insert(key).inserted
         }
     }
 

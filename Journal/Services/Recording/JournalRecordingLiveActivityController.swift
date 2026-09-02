@@ -37,13 +37,13 @@ final class JournalRecordingLiveActivityController {
     func complete(
         for recording: ActiveJournalRecording,
         finalization: JournalRecordingFinalization,
-        entry: LogEntry?
+        entries: [LogEntry]
     ) async {
         let content = ActivityContent(
             state: completedState(
                 for: recording,
                 finalization: finalization,
-                entry: entry
+                entries: entries
             ),
             staleDate: nil
         )
@@ -87,28 +87,33 @@ final class JournalRecordingLiveActivityController {
     private func completedState(
         for recording: ActiveJournalRecording,
         finalization: JournalRecordingFinalization,
-        entry: LogEntry?
+        entries: [LogEntry]
     ) -> JournalRecordingActivityAttributes.ContentState {
-        let summary = summary(finalization: finalization, entry: entry)
+        let summary = summary(finalization: finalization, entries: entries)
+        let transitDistance = entries.reduce(0.0) { result, entry in
+            result + (entry.transitDetails?.distanceMeters ?? 0)
+        }
         return JournalRecordingActivityAttributes.ContentState(
             phase: .completed,
-            distanceMeters: entry?.transitDetails?.distanceMeters
-                ?? recording.approximateDistanceMeters,
+            distanceMeters: transitDistance > 0
+                ? transitDistance
+                : recording.approximateDistanceMeters,
             movementDescription: recording.currentMovement.activityDescription,
             needsForegroundLaunch: false,
             endedAt: recording.endedAt ?? .now,
             summaryTitle: summary.title,
             summaryDetail: summary.detail,
-            showsDistance: entry?.kind == .transit
+            showsDistance: entries.contains { $0.kind == .transit }
         )
     }
 
     private func summary(
         finalization: JournalRecordingFinalization,
-        entry: LogEntry?
+        entries: [LogEntry]
     ) -> (title: String, detail: String?) {
         switch finalization {
         case .visit:
+            let entry = entries.first
             let details = entry?.placeVisitDetails
             let placeName = details?.place?.name
                 ?? details?.location?.timelineName
@@ -117,6 +122,7 @@ final class JournalRecordingLiveActivityController {
                 placeName ?? String(localized: "Saved to Journal")
             )
         case .transit(let mode):
+            let entry = entries.first
             let details = entry?.transitDetails
             let origin = details?.originPlace?.name
                 ?? details?.originLocation?.timelineName
@@ -128,6 +134,20 @@ final class JournalRecordingLiveActivityController {
                 String(localized: "Saved to Journal")
             }
             return (mode.transitTypeName, route)
+        case .batch(let entryCount, let visitCount, let transitCount):
+            let title = entryCount == 1
+                ? String(localized: "1 Journal Entry Saved")
+                : String(localized: "\(entryCount) Journal Entries Saved")
+            let visits = visitCount == 1
+                ? String(localized: "1 visit")
+                : String(localized: "\(visitCount) visits")
+            let transits = transitCount == 1
+                ? String(localized: "1 transit")
+                : String(localized: "\(transitCount) transits")
+            return (
+                title,
+                String(localized: "\(visits) • \(transits)")
+            )
         case .noUsableLocation:
             return (
                 String(localized: "Recording Finished"),
