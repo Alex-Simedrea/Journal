@@ -80,6 +80,7 @@ actor WorkoutImportPersistence {
             _ = WorkoutTimelinePlaceReconciler.reconcile(
                 entries: try modelContext.fetch(FetchDescriptor<LogEntry>())
             )
+            guard modelContext.hasChanges else { return }
             try modelContext.save()
             await TimelineDataChange.post(.structure)
         } catch {
@@ -97,17 +98,23 @@ actor WorkoutImportPersistence {
     private func clearResolvedLocationReviews(in entries: [LogEntry]) {
         for entry in entries {
             guard let details = entry.workoutDetails else { continue }
-            details.fieldReviews.removeAll { review in
+            let filteredReviews = details.fieldReviews.filter { review in
                 switch review.field {
                 case .place:
-                    details.sourceLocation != nil
+                    details.sourceLocation == nil
                 case .origin:
-                    details.originLocation != nil
+                    details.originLocation == nil
                 case .destination:
-                    details.destinationLocation != nil
+                    details.destinationLocation == nil
                 }
             }
-            entry.needsReview = !details.fieldReviews.isEmpty
+            if filteredReviews != details.fieldReviews {
+                details.fieldReviews = filteredReviews
+            }
+            let needsReview = !filteredReviews.isEmpty
+            if entry.needsReview != needsReview {
+                entry.needsReview = needsReview
+            }
         }
     }
 }

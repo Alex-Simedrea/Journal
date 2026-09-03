@@ -1147,6 +1147,11 @@ final class GuidedEntryComposerModel {
         let zone = activeTimeZone(for: role)
         let now = Date.now
         var values: [ComposerSuggestion] = []
+        values += timelineBoundaryTimeSuggestions(
+            role: role,
+            query: query,
+            fallbackZone: zone
+        )
         if let mapKitSuggestion = mapKitTimeSuggestion(
             role: role,
             query: query,
@@ -1309,6 +1314,64 @@ final class GuidedEntryComposerModel {
             }
         }
         return values
+    }
+
+    private func timelineBoundaryTimeSuggestions(
+        role: ComposerTimeRole,
+        query: String,
+        fallbackZone: TimeZone
+    ) -> [ComposerSuggestion] {
+        let oppositeRole: ComposerTimeRole = role == .start ? .end : .start
+        guard draft.time(oppositeRole) == nil else { return [] }
+        let endpoint = role == .start
+            ? draft.location(.origin)
+            : draft.location(.destination)
+        guard let endpoint else { return [] }
+
+        return GuidedComposerTimelineInference.boundaryTimes(
+            for: role,
+            location: endpoint,
+            in: timelineContext
+        ).enumerated().compactMap { index, boundary in
+            let zone = boundary.timeZoneIdentifier.flatMap {
+                TimeZone(identifier: $0)
+            }
+                ?? fallbackZone
+            let display = GuidedComposerTimeParser.displayTime(
+                boundary.date,
+                timeZone: zone
+            )
+            guard let queryScore = GuidedComposerRanking.textScore(
+                query: query,
+                candidates: [display]
+            ) else {
+                return nil
+            }
+            return ComposerSuggestion(
+                id:
+                    "time-timeline-\(role.rawValue)-\(boundary.date.timeIntervalSince1970)",
+                title: display,
+                subtitle: boundary.label,
+                systemImage: "clock.arrow.circlepath",
+                kind: .value(
+                    tokens: [
+                        ComposerToken(
+                            displayText: display,
+                            value: .time(
+                                ComposerTimeValue(
+                                    date: boundary.date,
+                                    timeZoneIdentifier: zone.identifier,
+                                    source: .history
+                                ),
+                                role
+                            )
+                        ),
+                    ],
+                    nextSlot: .connector
+                ),
+                score: 13_000 + queryScore - index
+            )
+        }
     }
 
     private func mapKitTimeSuggestion(

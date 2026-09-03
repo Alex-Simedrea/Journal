@@ -36,13 +36,32 @@ nonisolated enum WorkoutEntryStore {
             timeConfidence: .explicit,
             needsReview: false
         )
+        let previousStartWeatherRequest = existingEntry.flatMap {
+            EntryWeatherService.request(for: $0, endpoint: .start)
+        }
+        let previousEndWeatherRequest = existingEntry.flatMap {
+            EntryWeatherService.request(for: $0, endpoint: .end)
+        }
 
-        details.activityTypeRawValue = snapshot.activityTypeRawValue
-        details.activityName = snapshot.activityName
-        details.movementKind = snapshot.movementKind
-        details.distanceMeters = snapshot.distanceMeters
-        details.activeEnergyKilocalories = snapshot.activeEnergyKilocalories
-        details.routeImportState = snapshot.routeState
+        if details.activityTypeRawValue != snapshot.activityTypeRawValue {
+            details.activityTypeRawValue = snapshot.activityTypeRawValue
+        }
+        if details.activityName != snapshot.activityName {
+            details.activityName = snapshot.activityName
+        }
+        if details.movementKind != snapshot.movementKind {
+            details.movementKind = snapshot.movementKind
+        }
+        if details.distanceMeters != snapshot.distanceMeters {
+            details.distanceMeters = snapshot.distanceMeters
+        }
+        if details.activeEnergyKilocalories
+            != snapshot.activeEnergyKilocalories {
+            details.activeEnergyKilocalories = snapshot.activeEnergyKilocalories
+        }
+        if details.routeImportState != snapshot.routeState {
+            details.routeImportState = snapshot.routeState
+        }
 
         if snapshot.movementKind == .moving {
             updateMovingDetails(
@@ -60,25 +79,53 @@ nonisolated enum WorkoutEntryStore {
             )
         }
 
-        entry.kind = .workout
-        entry.startTime = snapshot.startTime
-        entry.endTime = snapshot.endTime
-        entry.timeConfidence = .explicit
-        entry.entryKindReviewReason = nil
-        entry.needsReview = !details.fieldReviews.isEmpty
-        entry.startTimeZoneIdentifier = startTimeZoneIdentifier(
+        if entry.kind != .workout { entry.kind = .workout }
+        if entry.startTime != snapshot.startTime {
+            entry.startTime = snapshot.startTime
+        }
+        if entry.endTime != snapshot.endTime {
+            entry.endTime = snapshot.endTime
+        }
+        if entry.timeConfidence != .explicit {
+            entry.timeConfidence = .explicit
+        }
+        if entry.entryKindReviewReason != nil {
+            entry.entryKindReviewReason = nil
+        }
+        let needsReview = !details.fieldReviews.isEmpty
+        if entry.needsReview != needsReview {
+            entry.needsReview = needsReview
+        }
+        let startZone = startTimeZoneIdentifier(
             details: details,
             metadataIdentifier: snapshot.metadataTimeZoneIdentifier,
             fallbackIdentifier: creationTimeZoneIdentifier
         )
-        entry.endTimeZoneIdentifier = endTimeZoneIdentifier(
+        if entry.startTimeZoneIdentifier != startZone {
+            entry.startTimeZoneIdentifier = startZone
+        }
+        let endZone = endTimeZoneIdentifier(
             details: details,
             metadataIdentifier: snapshot.metadataTimeZoneIdentifier,
             fallbackIdentifier: creationTimeZoneIdentifier
         )
-        entry.weather = nil
-        entry.endWeather = nil
-        entry.workoutDetails = details
+        if entry.endTimeZoneIdentifier != endZone {
+            entry.endTimeZoneIdentifier = endZone
+        }
+        if entry.workoutDetails == nil { entry.workoutDetails = details }
+
+        if existingEntry != nil,
+           previousStartWeatherRequest
+            != EntryWeatherService.request(for: entry, endpoint: .start),
+           entry.weather != nil {
+            entry.weather = nil
+        }
+        if existingEntry != nil,
+           previousEndWeatherRequest
+            != EntryWeatherService.request(for: entry, endpoint: .end),
+           entry.endWeather != nil {
+            entry.endWeather = nil
+        }
 
         if existingEntry == nil {
             modelContext.insert(entry)
@@ -92,38 +139,46 @@ nonisolated enum WorkoutEntryStore {
         locations: WorkoutResolvedLocations,
         places: [Place]
     ) {
-        details.sourceLocation = nil
-        details.place = nil
-        details.originLocation = locations.origin
-        details.destinationLocation = locations.destination
-        details.fieldReviews.removeAll { $0.field == .place }
+        if details.sourceLocation != nil { details.sourceLocation = nil }
+        if details.place != nil { details.place = nil }
+        if details.originLocation != locations.origin {
+            details.originLocation = locations.origin
+        }
+        if details.destinationLocation != locations.destination {
+            details.destinationLocation = locations.destination
+        }
+        removeReviews([.place], from: details)
 
         if details.originResolutionSource == .automatic {
-            details.fieldReviews.removeAll { $0.field == .origin }
+            removeReviews([.origin], from: details)
             let resolution = resolve(
                 coordinate: snapshot.routeStart,
                 routeState: snapshot.routeState,
                 field: .origin,
                 places: places
             )
-            details.originPlace = resolution.place
+            if details.originPlace?.id != resolution.place?.id {
+                details.originPlace = resolution.place
+            }
             replaceReview(resolution.review, in: details)
         } else {
-            details.fieldReviews.removeAll { $0.field == .origin }
+            removeReviews([.origin], from: details)
         }
 
         if details.destinationResolutionSource == .automatic {
-            details.fieldReviews.removeAll { $0.field == .destination }
+            removeReviews([.destination], from: details)
             let resolution = resolve(
                 coordinate: snapshot.routeEnd,
                 routeState: snapshot.routeState,
                 field: .destination,
                 places: places
             )
-            details.destinationPlace = resolution.place
+            if details.destinationPlace?.id != resolution.place?.id {
+                details.destinationPlace = resolution.place
+            }
             replaceReview(resolution.review, in: details)
         } else {
-            details.fieldReviews.removeAll { $0.field == .destination }
+            removeReviews([.destination], from: details)
         }
     }
 
@@ -133,27 +188,31 @@ nonisolated enum WorkoutEntryStore {
         locations: WorkoutResolvedLocations,
         places: [Place]
     ) {
-        details.originLocation = nil
-        details.destinationLocation = nil
-        details.originPlace = nil
-        details.destinationPlace = nil
-        details.sourceLocation = locations.source
-        details.fieldReviews.removeAll {
-            $0.field == .origin || $0.field == .destination
+        if details.originLocation != nil { details.originLocation = nil }
+        if details.destinationLocation != nil {
+            details.destinationLocation = nil
         }
+        if details.originPlace != nil { details.originPlace = nil }
+        if details.destinationPlace != nil { details.destinationPlace = nil }
+        if details.sourceLocation != locations.source {
+            details.sourceLocation = locations.source
+        }
+        removeReviews([.origin, .destination], from: details)
 
         if details.placeResolutionSource == .automatic {
-            details.fieldReviews.removeAll { $0.field == .place }
+            removeReviews([.place], from: details)
             let resolution = resolve(
                 coordinate: snapshot.routeStart,
                 routeState: snapshot.routeState,
                 field: .place,
                 places: places
             )
-            details.place = resolution.place
+            if details.place?.id != resolution.place?.id {
+                details.place = resolution.place
+            }
             replaceReview(resolution.review, in: details)
         } else {
-            details.fieldReviews.removeAll { $0.field == .place }
+            removeReviews([.place], from: details)
         }
     }
 
@@ -183,8 +242,20 @@ nonisolated enum WorkoutEntryStore {
         in details: WorkoutDetails
     ) {
         guard let review else { return }
-        details.fieldReviews.removeAll { $0.field == review.field }
-        details.fieldReviews.append(review)
+        var reviews = details.fieldReviews.filter { $0.field != review.field }
+        reviews.append(review)
+        if details.fieldReviews != reviews {
+            details.fieldReviews = reviews
+        }
+    }
+
+    private static func removeReviews(
+        _ fields: Set<WorkoutReviewField>,
+        from details: WorkoutDetails
+    ) {
+        let reviews = details.fieldReviews
+        let filtered = reviews.filter { !fields.contains($0.field) }
+        if filtered != reviews { details.fieldReviews = filtered }
     }
 
     private static func startTimeZoneIdentifier(

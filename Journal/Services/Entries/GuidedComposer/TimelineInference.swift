@@ -24,6 +24,12 @@ struct ComposerTimelineGap: Equatable, Identifiable, Sendable {
     var destination: ComposerLocationCandidate { next.startLocation }
 }
 
+struct ComposerTimelineBoundaryTime: Equatable, Sendable {
+    let date: Date
+    let timeZoneIdentifier: String?
+    let label: String
+}
+
 struct ComposerTimelineContext: Equatable, Sendable {
     let intervals: [ComposerTimelineInterval]
     let gaps: [ComposerTimelineGap]
@@ -473,6 +479,56 @@ enum GuidedComposerTimelineInference {
         return context.intervals[index + 1].startTime.timeIntervalSince(
             interval.endTime
         ) >= minimumInferenceGap
+    }
+
+    /// Returns free timeline boundaries attached to the route endpoint that is
+    /// already selected. This remains useful when the other endpoint differs
+    /// from the destination of a full gap suggestion.
+    static func boundaryTimes(
+        for role: ComposerTimeRole,
+        location: ComposerLocationCandidate,
+        in context: ComposerTimelineContext
+    ) -> [ComposerTimelineBoundaryTime] {
+        var seenDates = Set<Date>()
+        return context.intervals.enumerated().compactMap { index, interval in
+            let boundary: ComposerTimelineBoundaryTime?
+            switch role {
+            case .start:
+                guard hasInferenceWindow(after: index, in: context),
+                      context.containsSelectedDayBoundary(interval.endTime),
+                      GuidedComposerLocationMatcher.sameLocation(
+                          interval.endLocation,
+                          location
+                      ) else {
+                    return nil
+                }
+                boundary = ComposerTimelineBoundaryTime(
+                    date: interval.endTime,
+                    timeZoneIdentifier:
+                        interval.endLocation.location.timeZoneIdentifier,
+                    label: String(localized: "After \(interval.label)")
+                )
+            case .end:
+                guard hasInferenceWindow(before: index, in: context),
+                      context.containsSelectedDayBoundary(interval.startTime),
+                      GuidedComposerLocationMatcher.sameLocation(
+                          interval.startLocation,
+                          location
+                      ) else {
+                    return nil
+                }
+                boundary = ComposerTimelineBoundaryTime(
+                    date: interval.startTime,
+                    timeZoneIdentifier:
+                        interval.startLocation.location.timeZoneIdentifier,
+                    label: String(localized: "Before \(interval.label)")
+                )
+            }
+            guard let boundary, seenDates.insert(boundary.date).inserted else {
+                return nil
+            }
+            return boundary
+        }
     }
 
     static func projectedVisitSuggestions(

@@ -1034,6 +1034,55 @@ struct GuidedComposerTests {
         #expect(trailheadRequests.isEmpty)
     }
 
+    @Test("A route can reuse a free departure boundary with a new destination")
+    func routeReusesFreeOriginBoundary() throws {
+        let originPlace = Place(
+            name: "Place A",
+            location: Location(
+                latitude: 45.65,
+                longitude: 25.59,
+                timeZoneIdentifier: zone.identifier
+            )
+        )
+        let nextPlace = Place(
+            name: "Place B",
+            location: Location(
+                latitude: 45.70,
+                longitude: 25.65,
+                timeZoneIdentifier: zone.identifier
+            )
+        )
+        let first = visit(
+            place: originPlace,
+            start: "2026-07-18T09:00:00+03:00",
+            end: "2026-07-18T10:00:00+03:00"
+        )
+        let second = visit(
+            place: nextPlace,
+            start: "2026-07-18T12:00:00+03:00",
+            end: "2026-07-18T13:00:00+03:00"
+        )
+        let context = GuidedComposerTimelineInference.makeContext(
+            entries: [first, second]
+        )
+        let selectedOrigin = try #require(
+            context.intervals.first?.endLocation
+        )
+
+        let suggestions = GuidedComposerTimelineInference.boundaryTimes(
+            for: .start,
+            location: selectedOrigin,
+            in: context
+        )
+
+        #expect(suggestions.count == 1)
+        #expect(
+            suggestions.first?.date
+                == date("2026-07-18T10:00:00+03:00")
+        )
+        #expect(suggestions.first?.timeZoneIdentifier == zone.identifier)
+    }
+
     @Test("New endpoints can project into every available boundary")
     func newEndpointUsesAllAvailableBoundaries() {
         let firstPlace = Place(
@@ -3647,6 +3696,78 @@ struct GuidedComposerTests {
         #expect(!model.suggestions.contains {
             $0.id.contains("route-gap-")
                 || $0.id.contains("route-gps-")
+        })
+    }
+
+    @Test("A custom route suggests its origin visit's free end time")
+    func customRouteSuggestsOriginBoundaryTime() throws {
+        let context = try makeContext()
+        let placeA = Place(
+            name: "Place A",
+            location: Location(
+                latitude: 45.65,
+                longitude: 25.59,
+                timeZoneIdentifier: zone.identifier
+            )
+        )
+        let placeB = Place(
+            name: "Place B",
+            location: Location(
+                latitude: 45.70,
+                longitude: 25.65,
+                timeZoneIdentifier: zone.identifier
+            )
+        )
+        let placeC = Place(
+            name: "Place C",
+            location: Location(
+                latitude: 45.75,
+                longitude: 25.70,
+                timeZoneIdentifier: zone.identifier
+            )
+        )
+        for place in [placeA, placeB, placeC] { context.insert(place) }
+        context.insert(visit(
+            place: placeA,
+            start: "2026-07-18T09:00:00+03:00",
+            end: "2026-07-18T10:00:00+03:00"
+        ))
+        context.insert(visit(
+            place: placeB,
+            start: "2026-07-18T12:00:00+03:00",
+            end: "2026-07-18T13:00:00+03:00"
+        ))
+        try context.save()
+
+        let model = GuidedEntryComposerModel()
+        model.prepare(
+            selectedDay: TimelineDayKey(year: 2026, month: 7, day: 18),
+            places: [placeA, placeB, placeC],
+            people: [],
+            transitTypes: [
+                TransitType(canonicalName: "Walk", aliases: ["walk"]),
+            ],
+            modelContext: context
+        )
+        model.editorText = AttributedString(
+            "Walk from Place A to Place C from "
+        )
+        model.editorTextDidChange()
+
+        #expect(model.activeSlot == .time(.start))
+        #expect(model.suggestions.contains { suggestion in
+            guard suggestion.id.hasPrefix("time-timeline-start-"),
+                  case .value(let tokens, _) = suggestion.kind else {
+                return false
+            }
+            return tokens.contains {
+                guard case .time(let value, .start) = $0.value else {
+                    return false
+                }
+                return value.date
+                    == date("2026-07-18T10:00:00+03:00")
+                    && value.source == .history
+            }
         })
     }
 

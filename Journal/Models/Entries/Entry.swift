@@ -40,10 +40,49 @@ final class LogEntry {
     var journalRecordingID: UUID?
     var needsReview: Bool
     var entryKindReviewReason: String?
-    var photoReferences: [PhotoReference] = []
-    var weather: EntryWeather?
-    var endWeather: EntryWeather?
-    var dayWeatherRecords: [PersistedDayWeather] = []
+    // SwiftData expands Codable structs into traversable schema key paths.
+    // Observation can then try to materialize paths such as
+    // `weather.condition`, which traps when the path crosses an optional
+    // Codable value. Store these values as opaque JSON blobs and expose the
+    // same typed API through computed properties instead.
+    @Attribute(originalName: "photoReferences")
+    private var photoReferencesData: Data?
+    @Attribute(originalName: "weather")
+    private var weatherData: Data?
+    @Attribute(originalName: "endWeather")
+    private var endWeatherData: Data?
+    @Attribute(originalName: "dayWeatherRecords")
+    private var dayWeatherRecordsData: Data?
+
+    var photoReferences: [PhotoReference] {
+        get {
+            PersistedJSON.decode(
+                [PhotoReference].self,
+                from: photoReferencesData
+            ) ?? []
+        }
+        set { photoReferencesData = PersistedJSON.encode(newValue) }
+    }
+
+    var weather: EntryWeather? {
+        get { PersistedJSON.decode(EntryWeather.self, from: weatherData) }
+        set { weatherData = newValue.flatMap(PersistedJSON.encode) }
+    }
+
+    var endWeather: EntryWeather? {
+        get { PersistedJSON.decode(EntryWeather.self, from: endWeatherData) }
+        set { endWeatherData = newValue.flatMap(PersistedJSON.encode) }
+    }
+
+    var dayWeatherRecords: [PersistedDayWeather] {
+        get {
+            PersistedJSON.decode(
+                [PersistedDayWeather].self,
+                from: dayWeatherRecordsData
+            ) ?? []
+        }
+        set { dayWeatherRecordsData = PersistedJSON.encode(newValue) }
+    }
     var wakeUpSourceSampleUUID: UUID?
     var sleepDurationSeconds: Double?
 
@@ -89,10 +128,10 @@ final class LogEntry {
         self.rawInputString = rawInputString
         self.automationCandidateID = automationCandidateID
         self.journalRecordingID = journalRecordingID
-        self.photoReferences = photoReferences
-        self.weather = weather
-        self.endWeather = endWeather
-        self.dayWeatherRecords = dayWeatherRecords
+        self.photoReferencesData = PersistedJSON.encode(photoReferences)
+        self.weatherData = weather.flatMap(PersistedJSON.encode)
+        self.endWeatherData = endWeather.flatMap(PersistedJSON.encode)
+        self.dayWeatherRecordsData = PersistedJSON.encode(dayWeatherRecords)
         self.wakeUpSourceSampleUUID = wakeUpSourceSampleUUID
         self.sleepDurationSeconds = sleepDurationSeconds
         self.entryKindReviewReason = entryKindReviewReason

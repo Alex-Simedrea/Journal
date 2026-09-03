@@ -73,6 +73,7 @@ struct WakeUpTests {
             snapshots: [first],
             in: context
         )
+        #expect(!context.hasChanges)
         try context.save()
 
         var entries = try context.fetch(FetchDescriptor<LogEntry>())

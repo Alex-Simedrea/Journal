@@ -6,6 +6,37 @@ import Testing
 
 @Suite("Summary map snapshot cache")
 struct SummaryMapSnapshotTests {
+    @Test("HEIC encoder input is normalized to tagged sRGB")
+    func heicInputUsesSRGB() throws {
+        let sourceSpace = try #require(
+            CGColorSpace(name: CGColorSpace.displayP3)
+        )
+        let context = try #require(CGContext(
+            data: nil,
+            width: 4,
+            height: 4,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: sourceSpace,
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+                | CGBitmapInfo.byteOrder32Big.rawValue
+        ))
+        let red = try #require(
+            CGColor(
+                colorSpace: sourceSpace,
+                components: [1, 0, 0, 1]
+            )
+        )
+        context.setFillColor(red)
+        context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        let source = try #require(context.makeImage())
+
+        let normalized = try SummaryMapSnapshotRenderer
+            .sRGBImageForEncoding(source)
+
+        #expect(normalized.colorSpace?.name == CGColorSpace.sRGB)
+    }
+
     @Test("Workout route geometry survives a new client instance")
     func workoutRouteDiskCache() async throws {
         let directory = temporaryDirectory()

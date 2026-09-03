@@ -195,6 +195,15 @@ struct WorkoutTests {
             existingEntry: nil,
             in: context
         )
+        try context.save()
+        first.weather = EntryWeather(
+            condition: "clear",
+            symbolName: "sun.max.fill",
+            temperatureCelsius: 22,
+            humidity: 0.5,
+            date: snapshot.startTime
+        )
+        try context.save()
         let second = WorkoutEntryStore.upsert(
             snapshot: snapshot,
             locations: resolved,
@@ -202,6 +211,7 @@ struct WorkoutTests {
             existingEntry: first,
             in: context
         )
+        #expect(!context.hasChanges)
         try context.save()
 
         #expect(first.id == second.id)
@@ -215,6 +225,7 @@ struct WorkoutTests {
         #expect(second.workoutDetails?.place?.id == gym.id)
         #expect(second.workoutDetails?.activeEnergyKilocalories == 245)
         #expect(second.needsReview == false)
+        #expect(second.weather?.condition == "clear")
     }
 
     @Test("Locationless static workouts require only place review")

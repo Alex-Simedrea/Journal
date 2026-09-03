@@ -42,6 +42,8 @@ final class HomePresentationModel {
     private var overviewOccurrences: [TimelineOccurrence] = []
     @ObservationIgnored
     private var overviewDay: TimelineDayKey?
+    @ObservationIgnored
+    private var workoutRoutes: [UUID: [WorkoutCoordinateSnapshot]] = [:]
 
     init(workoutClient: HealthKitWorkoutClient = .shared) {
         self.workoutClient = workoutClient
@@ -138,8 +140,13 @@ final class HomePresentationModel {
             timelineItems = projection.listItems
             timelineRows = projection.rows
             reviewOccurrences = projection.reviewOccurrences
+            let visibleEntryIDs = Set(projection.occurrences.map(\.entryID))
+            workoutRoutes = workoutRoutes.filter {
+                visibleEntryIDs.contains($0.key)
+            }
             overviewData = TimelineOverviewData.make(
-                occurrences: projection.occurrences
+                occurrences: projection.occurrences,
+                workoutRoutes: workoutRoutes
             )
             overviewOccurrences = projection.occurrences
             overviewDay = selectedDay
@@ -156,6 +163,7 @@ final class HomePresentationModel {
             overviewData = TimelineOverviewData()
             overviewOccurrences = []
             overviewDay = nil
+            workoutRoutes = [:]
             timelineErrorMessage = error.localizedDescription
             timelineRevision &+= 1
         }
@@ -172,9 +180,13 @@ final class HomePresentationModel {
         }
         guard !requests.isEmpty else { return }
 
-        var routes: [UUID: [WorkoutCoordinateSnapshot]] = [:]
+        let requestedEntryIDs = Set(requests.map(\.0))
+        var routes = workoutRoutes.filter {
+            requestedEntryIDs.contains($0.key)
+        }
         for (entryID, workoutUUID) in requests {
             guard !Task.isCancelled else { return }
+            if routes[entryID]?.count ?? 0 > 1 { continue }
             do {
                 let points = try await workoutClient.exactRoute(
                     for: workoutUUID
@@ -194,10 +206,14 @@ final class HomePresentationModel {
               overviewOccurrences.map(\.id) == occurrences.map(\.id) else {
             return
         }
-        overviewData = TimelineOverviewData.make(
+        workoutRoutes = routes
+        let updatedOverview = TimelineOverviewData.make(
             occurrences: occurrences,
             workoutRoutes: routes
         )
+        if overviewData != updatedOverview {
+            overviewData = updatedOverview
+        }
     }
 
     func reloadTimeline(in modelContext: ModelContext) {

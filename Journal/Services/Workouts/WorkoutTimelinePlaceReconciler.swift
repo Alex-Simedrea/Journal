@@ -158,9 +158,13 @@ nonisolated enum WorkoutTimelinePlaceReconciler {
             return false
         }
 
-        let previousReviewCount = details.fieldReviews.count
-        details.fieldReviews.removeAll { $0.field == field }
-        return changed || details.fieldReviews.count != previousReviewCount
+        let reviews = details.fieldReviews
+        let filteredReviews = reviews.filter { $0.field != field }
+        if filteredReviews != reviews {
+            details.fieldReviews = filteredReviews
+            changed = true
+        }
+        return changed
     }
 
     private struct Candidate {

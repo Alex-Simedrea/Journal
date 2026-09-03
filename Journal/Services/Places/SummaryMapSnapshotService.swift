@@ -309,8 +309,10 @@ nonisolated enum SummaryMapVisibleRouteSelector {
 }
 
 nonisolated enum SummaryMapSnapshotRequestFactory {
-    private static let overviewRenderVersion = 35
-    private static let placeRenderVersion = 28
+    // Bump both versions whenever encoding changes so existing disk snapshots
+    // are replaced instead of retaining the previous color interpretation.
+    private static let overviewRenderVersion = 36
+    private static let placeRenderVersion = 29
 
     static func overview(
         slotID: String,
@@ -1047,14 +1049,15 @@ private actor SummaryMapRenderLimiter {
 
 nonisolated enum SummaryMapSnapshotRenderer {
     static func render(_ request: SummaryMapSnapshotRequest) async throws -> Data {
-        let image: CGImage
+        let renderedImage: CGImage
         switch request.content.camera {
         case .overview:
-            image = try await SummaryMapViewRenderer.render(request)
+            renderedImage = try await SummaryMapViewRenderer.render(request)
         case .place:
-            image = try await SummaryMapViewRenderer.render(request)
+            renderedImage = try await SummaryMapViewRenderer.render(request)
         }
         try Task.checkCancellation()
+        let image = try sRGBImageForEncoding(renderedImage)
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(
             data,
@@ -1073,6 +1076,34 @@ nonisolated enum SummaryMapSnapshotRenderer {
             throw CocoaError(.fileWriteUnknown)
         }
         return data as Data
+    }
+
+    /// HEIC does not consistently preserve UIKit's extended rendering color
+    /// space. Converting once to tagged, standard-range sRGB keeps MapKit and
+    /// marker colors visually aligned with their live-map equivalents.
+    static func sRGBImageForEncoding(_ image: CGImage) throws -> CGImage {
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                  data: nil,
+                  width: image.width,
+                  height: image.height,
+                  bitsPerComponent: 8,
+                  bytesPerRow: 0,
+                  space: colorSpace,
+                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+                      | CGBitmapInfo.byteOrder32Big.rawValue
+              ) else {
+            throw CocoaError(.coderInvalidValue)
+        }
+        context.interpolationQuality = .high
+        context.draw(
+            image,
+            in: CGRect(x: 0, y: 0, width: image.width, height: image.height)
+        )
+        guard let converted = context.makeImage() else {
+            throw CocoaError(.coderInvalidValue)
+        }
+        return converted
     }
 }
 
