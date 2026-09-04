@@ -57,6 +57,10 @@ struct JournalDataArchive: Codable {
         let journalRecordingID: UUID?
         let needsReview: Bool
         let entryKindReviewReason: String?
+        let linkedPreviousEntryID: UUID?
+        let linkedNextEntryID: UUID?
+        let suppressedPreviousEntryID: UUID?
+        let suppressedNextEntryID: UUID?
         let photoReferences: [PhotoReference]
         let weather: EntryWeather?
         let endWeather: EntryWeather?
@@ -205,6 +209,7 @@ enum JournalDataArchiveService {
             for details in imported.orphanWorkoutDetails {
                 modelContext.insert(details)
             }
+            _ = try EntryLinkingService.reconcile(in: modelContext)
             try modelContext.save()
             NotificationCenter.default.post(
                 name: .automationCandidatesDidChange,
@@ -331,6 +336,10 @@ enum JournalDataArchiveService {
             journalRecordingID: entry.journalRecordingID,
             needsReview: entry.needsReview,
             entryKindReviewReason: entry.entryKindReviewReason,
+            linkedPreviousEntryID: entry.linkedPreviousEntryID,
+            linkedNextEntryID: entry.linkedNextEntryID,
+            suppressedPreviousEntryID: entry.suppressedPreviousEntryID,
+            suppressedNextEntryID: entry.suppressedNextEntryID,
             photoReferences: entry.photoReferences,
             weather: entry.weather,
             endWeather: entry.endWeather,
@@ -518,6 +527,10 @@ enum JournalDataArchiveService {
                 wakeUpSourceSampleUUID: record.wakeUpSourceSampleUUID,
                 sleepDurationSeconds: record.sleepDurationSeconds,
                 entryKindReviewReason: record.entryKindReviewReason,
+                linkedPreviousEntryID: record.linkedPreviousEntryID,
+                linkedNextEntryID: record.linkedNextEntryID,
+                suppressedPreviousEntryID: record.suppressedPreviousEntryID,
+                suppressedNextEntryID: record.suppressedNextEntryID,
                 needsReview: record.needsReview
             )
             entry.people = try record.personIDs.map { id in

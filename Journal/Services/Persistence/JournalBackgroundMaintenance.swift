@@ -91,6 +91,11 @@ actor JournalBackgroundMaintenance {
     }
 
     func populateEntryEnrichment() async {
+        do {
+            try EntryLinkingService.reconcileAndSave(in: modelContext)
+        } catch {
+            print("Entry link reconciliation failed: \(error)")
+        }
         await EntryWeatherService.populateMissing(in: modelContext)
         await TransitDistanceService.populateMissing(in: modelContext)
         await LocationGeographyService.populateMissing(in: modelContext)

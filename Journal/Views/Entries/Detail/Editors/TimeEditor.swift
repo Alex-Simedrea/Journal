@@ -31,10 +31,17 @@ struct EntryDetailTimeEditor: View {
     @Bindable var session: EntryDetailEditSession
     let mapKitRequest: TimeEditorRouteRequest?
     let showsMapKitPreset: Bool
+    let linkedCount: Int
+    let onEditLinks: () -> Void
     let onSelectTimeZone: (EntryTimeZoneEndpoint) -> Void
 
     var body: some View {
         VStack(spacing: 18) {
+            EntryLinkDisclosureRow(
+                linkedCount: linkedCount,
+                onSelect: onEditLinks
+            )
+
             TimeEditorSection(
                 title: "Start",
                 date: $session.startTime,
@@ -447,6 +454,8 @@ private struct EntryDetailTimeEditorPreview: View {
                 session: session,
                 mapKitRequest: nil,
                 showsMapKitPreset: true,
+                linkedCount: 0,
+                onEditLinks: {},
                 onSelectTimeZone: { _ in }
             )
             .padding()

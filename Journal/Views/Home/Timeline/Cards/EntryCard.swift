@@ -16,9 +16,26 @@ enum TimelineEntryCardReviewPresentation {
     }
 }
 
+enum TimelineEntryCardLinkPresentation {
+    static func showsBlueInnerShadow(isTemporarilyHighlighted: Bool) -> Bool {
+        isTemporarilyHighlighted
+    }
+}
+
 struct TimelineEntryCard: View {
     let occurrence: TimelineOccurrence
     let onTap: () -> Void
+    let temporaryLinkHighlight: Bool
+
+    init(
+        occurrence: TimelineOccurrence,
+        onTap: @escaping () -> Void,
+        temporaryLinkHighlight: Bool = false
+    ) {
+        self.occurrence = occurrence
+        self.onTap = onTap
+        self.temporaryLinkHighlight = temporaryLinkHighlight
+    }
 
     var body: some View {
         if occurrence.kind == .wakeUp {
@@ -26,7 +43,8 @@ struct TimelineEntryCard: View {
         } else {
             TimelineInteractiveEntryCard(
                 occurrence: occurrence,
-                onTap: onTap
+                onTap: onTap,
+                temporaryLinkHighlight: temporaryLinkHighlight
             )
         }
     }
@@ -35,6 +53,7 @@ struct TimelineEntryCard: View {
 struct TimelineInteractiveEntryCard: View {
     let occurrence: TimelineOccurrence
     let onTap: () -> Void
+    let temporaryLinkHighlight: Bool
 
     var body: some View {
         Button(action: onTap) {
@@ -64,6 +83,19 @@ struct TimelineInteractiveEntryCard: View {
                                             .showsOrangeInnerShadow(
                                                 kind: occurrence.kind,
                                                 needsReview: occurrence.needsReview
+                                            ) && !temporaryLinkHighlight
+                                            ? 1 : 0
+                                    ),
+                                    radius: 3
+                                )
+                            )
+                            .shadow(
+                                .inner(
+                                    color: Color.blue.opacity(
+                                        TimelineEntryCardLinkPresentation
+                                            .showsBlueInnerShadow(
+                                                isTemporarilyHighlighted:
+                                                    temporaryLinkHighlight
                                             ) ? 1 : 0
                                     ),
                                     radius: 3

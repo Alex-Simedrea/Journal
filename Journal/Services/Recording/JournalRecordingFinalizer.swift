@@ -135,6 +135,7 @@ final class JournalRecordingFinalizer {
             result = .transit(mode)
         }
         modelContext.insert(entry)
+        _ = try EntryLinkingService.reconcile(in: modelContext)
         try modelContext.save()
         return result
     }
@@ -209,6 +210,7 @@ final class JournalRecordingFinalizer {
         for entry in entries {
             modelContext.insert(entry)
         }
+        _ = try EntryLinkingService.reconcile(in: modelContext)
         try modelContext.save()
         do {
             // The passive timeline automation may have materialized review

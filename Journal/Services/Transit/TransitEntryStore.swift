@@ -83,6 +83,7 @@ nonisolated enum TransitEntryStore {
         in modelContext: ModelContext
     ) throws {
         modelContext.insert(entry)
+        _ = try EntryLinkingService.reconcile(in: modelContext)
         try modelContext.save()
         if refreshDistance {
             TransitDistanceService.refreshInBackground(entry, in: modelContext)

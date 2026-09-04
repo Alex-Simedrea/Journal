@@ -38,6 +38,8 @@ struct EntryDetailSheet: View {
     @State private var timeZoneSearchText = ""
     @State private var timeZoneDraft = TimeZone.current.identifier
     @State private var isPhotoPickerPresented = false
+    @State private var linkTimeSource: EntryLinkValueSource = .current
+    @State private var linkPlaceSource: EntryLinkValueSource = .current
 
     init(
         entry: LogEntry,
@@ -234,6 +236,14 @@ struct EntryDetailSheet: View {
         .onDisappear {
             addPlaceModel?.stop()
         }
+        .task {
+            guard entry.modelContext != nil else { return }
+            do {
+                try EntryLinkingService.reconcileAndSave(in: modelContext)
+            } catch {
+                coordinator.errorMessage = error.localizedDescription
+            }
+        }
     }
 
     private var sheetSizing: DynamicSheetSizing {
@@ -288,8 +298,36 @@ struct EntryDetailSheet: View {
                     session: coordinator.session,
                     mapKitRequest: mapKitRouteRequest,
                     showsMapKitPreset: entry.kind == .transit,
+                    linkedCount: linkedCount,
+                    onEditLinks: { coordinator.present(.links) },
                     onSelectTimeZone: presentTimeZone
                 )
+            }
+        case .links:
+            EntryLinkEditor(
+                entry: entry,
+                entries: linkEditorEntries,
+                onSelect: selectLinkCandidate
+            )
+            .padding(.top, chromeHeight)
+        case .linkResolution(let entryID):
+            EntryDetailEditorViewport(
+                topContentInset: chromeHeight,
+                isScrolled: $contentIsScrolled
+            ) {
+                if let neighbor = allEntries.first(where: { $0.id == entryID }) {
+                    EntryLinkResolutionEditor(
+                        entry: entry,
+                        neighbor: neighbor,
+                        timeSource: $linkTimeSource,
+                        placeSource: $linkPlaceSource
+                    )
+                } else {
+                    ContentUnavailableView(
+                        "Entry Unavailable",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                }
             }
         case .timeZone(let endpoint):
             TimeZoneEditor(
@@ -344,6 +382,8 @@ struct EntryDetailSheet: View {
                 model: locationPickerModel,
                 topContentInset: chromeHeight,
                 isScrolled: $contentIsScrolled,
+                linkedCount: linkedCount,
+                onEditLinks: { coordinator.present(.links) },
                 onSaveAsPlace: {
                     let selection = coordinator.session.selection(for: role)
                     let name = selection?.title ?? ""
@@ -488,6 +528,95 @@ private struct EntryDetailEditorViewport<Content: View>: View {
 }
 
 private extension EntryDetailSheet {
+    private var linkedCount: Int {
+        (entry.linkedPreviousEntryID == nil ? 0 : 1)
+            + (entry.linkedNextEntryID == nil ? 0 : 1)
+    }
+
+    private var linkEditorEntries: [LogEntry] {
+        guard draftPresentation != nil else { return allEntries }
+        // Review drafts are not in SwiftData yet. Exact boundary matches can be
+        // declared safely and are finalized atomically when the draft is
+        // accepted; non-matching edits must wait until the entry exists.
+        return allEntries.filter { candidate in
+            let pair = EntryLinkingService.ordered([entry, candidate])
+            return pair.count == 2 && EntryLinkingService.boundariesMatch(
+                previous: pair[0],
+                next: pair[1]
+            )
+        }
+    }
+
+    private func selectLinkCandidate(_ neighbor: LogEntry) {
+        do {
+            let pair = EntryLinkingService.ordered([entry, neighbor])
+            if draftPresentation != nil {
+                toggleDraftLink(to: neighbor)
+            } else if EntryLinkingService.isLinked(entry, to: neighbor) {
+                try EntryLinkingService.unlink(
+                    entry,
+                    from: neighbor,
+                    in: modelContext
+                )
+            } else if pair.count == 2
+                && EntryLinkingService.boundariesMatch(
+                    previous: pair[0],
+                    next: pair[1]
+                ) {
+                try EntryLinkingService.link(
+                    entry,
+                    to: neighbor,
+                    in: modelContext
+                )
+            } else {
+                linkTimeSource = neighbor.kind == .workout ? .neighbor : .current
+                linkPlaceSource = neighbor.kind == .workout ? .neighbor : .current
+                coordinator.present(.linkResolution(neighbor.id))
+            }
+            coordinator.session.reload(from: entry)
+        } catch {
+            coordinator.errorMessage = error.localizedDescription
+        }
+    }
+
+    private func toggleDraftLink(to neighbor: LogEntry) {
+        let sides = EntryLinkingService.boundarySides(for: entry, and: neighbor)
+        switch sides.entry {
+        case .start:
+            if entry.linkedPreviousEntryID == neighbor.id {
+                entry.linkedPreviousEntryID = nil
+                entry.suppressedPreviousEntryID = neighbor.id
+            } else {
+                entry.linkedPreviousEntryID = neighbor.id
+                entry.suppressedPreviousEntryID = nil
+            }
+        case .end:
+            if entry.linkedNextEntryID == neighbor.id {
+                entry.linkedNextEntryID = nil
+                entry.suppressedNextEntryID = neighbor.id
+            } else {
+                entry.linkedNextEntryID = neighbor.id
+                entry.suppressedNextEntryID = nil
+            }
+        }
+    }
+
+    private func saveLinkResolution(entryID: UUID) throws {
+        guard let neighbor = allEntries.first(where: { $0.id == entryID }) else {
+            throw EntryLinkingError.missingBoundary
+        }
+        try EntryLinkingService.link(
+            entry,
+            to: neighbor,
+            alignment: EntryLinkAlignment(
+                timeSource: linkTimeSource,
+                placeSource: linkPlaceSource
+            ),
+            in: modelContext
+        )
+        coordinator.session.reload(from: entry)
+    }
+
     private func close() {
         if let draftPresentation {
             draftPresentation.onCancel()
@@ -546,6 +675,9 @@ private extension EntryDetailSheet {
                     persist: persist
                 )
                 coordinator.returnToDetails(entry: entry)
+            case .linkResolution(let entryID):
+                try saveLinkResolution(entryID: entryID)
+                coordinator.goBack(discardingChanges: false)
             case .timeZone(let endpoint):
                 setTimeZoneDraft(for: endpoint)
                 coordinator.goBack(discardingChanges: false)
@@ -604,7 +736,7 @@ private extension EntryDetailSheet {
                 try addPerson()
             case .addPlace(let role):
                 addPlace(for: role)
-            case .details, .locations, .placeSymbol,
+            case .details, .links, .locations, .placeSymbol,
                  .destructiveConfirmation:
                 break
             }

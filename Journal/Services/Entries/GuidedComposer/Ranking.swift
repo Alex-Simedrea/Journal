@@ -64,7 +64,7 @@ enum GuidedComposerRanking {
     }
 }
 
-enum GuidedComposerLocationMatcher {
+nonisolated enum GuidedComposerLocationMatcher {
     static func sameLocation(
         _ lhs: ComposerLocationCandidate,
         _ rhs: ComposerLocationCandidate

@@ -91,6 +91,19 @@ final class TransitEditModel {
             return false
         }
 
+        do {
+            _ = try EntryLinkingService.reconcile(in: modelContext)
+            try EntryLinkingService.validateTimeEdit(
+                entry: entry,
+                startTime: startTime,
+                endTime: endTime,
+                in: modelContext
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+
         let originalState = TransitEditOriginalState(
             entry: entry,
             details: details
@@ -126,6 +139,20 @@ final class TransitEditModel {
         entry.endWeather = nil
 
         do {
+            try EntryLinkingService.propagateTimeEdit(
+                from: entry,
+                in: modelContext
+            )
+            try EntryLinkingService.propagateLocationEdit(
+                from: entry,
+                role: .origin,
+                in: modelContext
+            )
+            try EntryLinkingService.propagateLocationEdit(
+                from: entry,
+                role: .destination,
+                in: modelContext
+            )
             try modelContext.save()
             EntryWeatherService.refreshInBackground(
                 entry,

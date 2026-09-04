@@ -12,10 +12,53 @@ struct TimelineRulerSequence: View {
     let onAcceptCandidateEntry: (UUID, UUID) -> Void
     let onDismissCandidate: (UUID) -> Void
     let onAddTransit: (TimelineTransitGapID) -> Void
+    let expandsMovementCards: Bool
+    let dimmedEntryIDs: Set<UUID>
+    let showsTransitGapActions: Bool
+    let linkHighlightedEntryIDs: Set<UUID>
+    let linkedEndBoundaryEntryIDs: Set<UUID>
+    let showsEndCaps: Bool
+    let endCapHeight: CGFloat
+    let fixedSeparatedEntryGap: CGFloat?
+
+    init(
+        rows: [TimelineRow],
+        pendingAutomationCandidateIDsByEntryID: [UUID: UUID],
+        onSelect: @escaping (UUID) -> Void,
+        onAcceptCandidateEntry: @escaping (UUID, UUID) -> Void,
+        onDismissCandidate: @escaping (UUID) -> Void,
+        onAddTransit: @escaping (TimelineTransitGapID) -> Void,
+        expandsMovementCards: Bool = false,
+        dimmedEntryIDs: Set<UUID> = [],
+        showsTransitGapActions: Bool = true,
+        linkHighlightedEntryIDs: Set<UUID> = [],
+        linkedEndBoundaryEntryIDs: Set<UUID> = [],
+        showsEndCaps: Bool = true,
+        endCapHeight: CGFloat = TimelineRulerMetrics.endCapHeight,
+        fixedSeparatedEntryGap: CGFloat? = nil
+    ) {
+        self.rows = rows
+        self.pendingAutomationCandidateIDsByEntryID =
+            pendingAutomationCandidateIDsByEntryID
+        self.onSelect = onSelect
+        self.onAcceptCandidateEntry = onAcceptCandidateEntry
+        self.onDismissCandidate = onDismissCandidate
+        self.onAddTransit = onAddTransit
+        self.expandsMovementCards = expandsMovementCards
+        self.dimmedEntryIDs = dimmedEntryIDs
+        self.showsTransitGapActions = showsTransitGapActions
+        self.linkHighlightedEntryIDs = linkHighlightedEntryIDs
+        self.linkedEndBoundaryEntryIDs = linkedEndBoundaryEntryIDs
+        self.showsEndCaps = showsEndCaps
+        self.endCapHeight = endCapHeight
+        self.fixedSeparatedEntryGap = fixedSeparatedEntryGap
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            TimelineRulerEndCap()
+            if showsEndCaps {
+                TimelineRulerEndCap(height: endCapHeight)
+            }
 
             ForEach(rows) { row in
                 TimelineRulerRow(
@@ -27,11 +70,19 @@ struct TimelineRulerSequence: View {
                     onSelect: onSelect,
                     onAcceptCandidateEntry: onAcceptCandidateEntry,
                     onDismissCandidate: onDismissCandidate,
-                    onAddTransit: onAddTransit
+                    onAddTransit: onAddTransit,
+                    expandsMovementCards: expandsMovementCards,
+                    dimmedEntryIDs: dimmedEntryIDs,
+                    showsTransitGapActions: showsTransitGapActions,
+                    linkHighlightedEntryIDs: linkHighlightedEntryIDs,
+                    linkedEndBoundaryEntryIDs: linkedEndBoundaryEntryIDs,
+                    fixedSeparatedEntryGap: fixedSeparatedEntryGap
                 )
             }
 
-            TimelineRulerEndCap()
+            if showsEndCaps {
+                TimelineRulerEndCap(height: endCapHeight)
+            }
         }
         .overlayPreferenceValue(TimelineCardBoundsKey.self) { anchors in
             TimelineRulerOverlay(cardBounds: anchors)
@@ -41,8 +92,10 @@ struct TimelineRulerSequence: View {
 }
 
 private struct TimelineRulerEndCap: View {
+    let height: CGFloat
+
     var body: some View {
-        Color.clear.frame(height: TimelineRulerMetrics.endCapHeight)
+        Color.clear.frame(height: height)
     }
 }
 
@@ -111,16 +164,23 @@ private struct TimelineRulerRow: View {
     let onAcceptCandidateEntry: (UUID, UUID) -> Void
     let onDismissCandidate: (UUID) -> Void
     let onAddTransit: (TimelineTransitGapID) -> Void
+    let expandsMovementCards: Bool
+    let dimmedEntryIDs: Set<UUID>
+    let showsTransitGapActions: Bool
+    let linkHighlightedEntryIDs: Set<UUID>
+    let linkedEndBoundaryEntryIDs: Set<UUID>
+    let fixedSeparatedEntryGap: CGFloat?
 
     var body: some View {
         VStack(spacing: 0) {
             if !row.startBoundaryRenderedByPrevious {
                 TimelineRulerGap(
                     relationship: row.relationshipToPrevious,
-                    transitGap: row.transitGap,
+                    transitGap: showsTransitGapActions ? row.transitGap : nil,
                     separatesDistinctContiguousBoundary:
                         row.presentsDistinctContiguousTransitStart,
-                    onAddTransit: onAddTransit
+                    onAddTransit: onAddTransit,
+                    fixedSeparatedEntryGap: fixedSeparatedEntryGap
                 )
             }
 
@@ -128,7 +188,18 @@ private struct TimelineRulerRow: View {
             case .wakeUp:
                 TimelineWakeUpRulerContent(occurrence: row.occurrence)
             case .transit:
-                if let presentation = row.transitPresentation {
+                if expandsMovementCards {
+                    TimelineIntervalRulerContent(
+                        row: row,
+                        onSelect: onSelect,
+                        isDimmed: dimmedEntryIDs.contains(row.occurrence.entryID),
+                        isLinkHighlighted: linkHighlightedEntryIDs.contains(
+                            row.occurrence.entryID
+                        ),
+                        showsLinkedEndBoundary: linkedEndBoundaryEntryIDs
+                            .contains(row.occurrence.entryID)
+                    )
+                } else if let presentation = row.transitPresentation {
                     TimelineTransitRulerContent(
                         row: row,
                         presentation: presentation,
@@ -139,7 +210,18 @@ private struct TimelineRulerRow: View {
                     )
                 }
             case .workout:
-                if let presentation = row.transitPresentation {
+                if expandsMovementCards {
+                    TimelineIntervalRulerContent(
+                        row: row,
+                        onSelect: onSelect,
+                        isDimmed: dimmedEntryIDs.contains(row.occurrence.entryID),
+                        isLinkHighlighted: linkHighlightedEntryIDs.contains(
+                            row.occurrence.entryID
+                        ),
+                        showsLinkedEndBoundary: linkedEndBoundaryEntryIDs
+                            .contains(row.occurrence.entryID)
+                    )
+                } else if let presentation = row.transitPresentation {
                     TimelineTransitRulerContent(
                         row: row,
                         presentation: presentation,
@@ -151,13 +233,25 @@ private struct TimelineRulerRow: View {
                 } else {
                     TimelineIntervalRulerContent(
                         row: row,
-                        onSelect: onSelect
+                        onSelect: onSelect,
+                        isDimmed: dimmedEntryIDs.contains(row.occurrence.entryID),
+                        isLinkHighlighted: linkHighlightedEntryIDs.contains(
+                            row.occurrence.entryID
+                        ),
+                        showsLinkedEndBoundary: linkedEndBoundaryEntryIDs
+                            .contains(row.occurrence.entryID)
                     )
                 }
             case .placeVisit:
                 TimelineIntervalRulerContent(
                     row: row,
-                    onSelect: onSelect
+                    onSelect: onSelect,
+                    isDimmed: dimmedEntryIDs.contains(row.occurrence.entryID),
+                    isLinkHighlighted: linkHighlightedEntryIDs.contains(
+                        row.occurrence.entryID
+                    ),
+                    showsLinkedEndBoundary: linkedEndBoundaryEntryIDs
+                        .contains(row.occurrence.entryID)
                 )
             }
         }
@@ -413,6 +507,9 @@ private struct TimelineCompactMovementRulerRow: View {
 private struct TimelineIntervalRulerContent: View {
     let row: TimelineRow
     let onSelect: (UUID) -> Void
+    let isDimmed: Bool
+    let isLinkHighlighted: Bool
+    let showsLinkedEndBoundary: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -436,8 +533,10 @@ private struct TimelineIntervalRulerContent: View {
 
                 TimelineEntryCard(
                     occurrence: row.occurrence,
-                    onTap: { onSelect(row.occurrence.entryID) }
+                    onTap: { onSelect(row.occurrence.entryID) },
+                    temporaryLinkHighlight: isLinkHighlighted
                 )
+                .disabled(isDimmed)
                 .anchorPreference(
                     key: TimelineCardBoundsKey.self,
                     value: .bounds,
@@ -463,7 +562,8 @@ private struct TimelineIntervalRulerContent: View {
                         : row.occurrence.timeZoneIdentifier,
                     showsTimeZoneChange: row.occurrence.changesTimeZone,
                     needsReview: showsBoundaryReviewBadges
-                        && row.endBoundaryNeedsReview
+                        && row.endBoundaryNeedsReview,
+                    showsLinkIndicator: showsLinkedEndBoundary
                 )
             }
         }
@@ -517,6 +617,7 @@ private struct TimelineRulerGap: View {
     let transitGap: TimelineTransitGap?
     let separatesDistinctContiguousBoundary: Bool
     let onAddTransit: (TimelineTransitGapID) -> Void
+    let fixedSeparatedEntryGap: CGFloat?
 
     var body: some View {
         HStack(spacing: TimelineRulerMetrics.cardSpacing) {
@@ -553,9 +654,11 @@ private struct TimelineRulerGap: View {
             separatesDistinctContiguousBoundary
                 ? TimelineRulerMetrics.distinctContiguousBoundaryGap
                 : 0
-        case .overlap: 16
+        case .overlap:
+            fixedSeparatedEntryGap ?? 16
         case .gap(let duration):
-            TimelineRulerMetrics.separateEntryGap(duration: duration)
+            (fixedSeparatedEntryGap
+                ?? TimelineRulerMetrics.separateEntryGap(duration: duration))
                 + (transitGap == nil
                     ? 0
                     : TimelineRulerMetrics.addTransitGapExpansion)
@@ -570,6 +673,7 @@ private struct TimelineBoundaryLabel: View {
     let timeZoneIdentifier: String
     let showsTimeZoneChange: Bool
     let needsReview: Bool
+    var showsLinkIndicator = false
 
     var body: some View {
         HStack(spacing: TimelineRulerMetrics.timestampSpacing) {
@@ -594,6 +698,15 @@ private struct TimelineBoundaryLabel: View {
 
             if needsReview {
                 ReviewBadge(size: 17)
+            }
+
+            if showsLinkIndicator {
+                HStack(spacing: 3) {
+                    Image(systemName: "link")
+                    Text("Linked")
+                }
+                .foregroundStyle(.blue)
+                .bold()
             }
 
             Spacer()

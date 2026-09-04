@@ -24,6 +24,10 @@ final class AutomationCandidateReviewModel {
         draft.weather = materializedEntry.weather
         draft.endWeather = materializedEntry.endWeather
         draft.dayWeatherRecords = materializedEntry.dayWeatherRecords
+        draft.linkedPreviousEntryID = materializedEntry.linkedPreviousEntryID
+        draft.linkedNextEntryID = materializedEntry.linkedNextEntryID
+        draft.suppressedPreviousEntryID = materializedEntry.suppressedPreviousEntryID
+        draft.suppressedNextEntryID = materializedEntry.suppressedNextEntryID
         draft.transitDetails?.distanceMeters = materializedEntry
             .transitDetails?.distanceMeters
         return draft
@@ -68,6 +72,11 @@ final class AutomationCandidateReviewModel {
                 candidate,
                 entryID: acceptedEntry.id
             )
+            try EntryLinkingService.finalizeDeclaredLinks(
+                for: acceptedEntry,
+                in: modelContext
+            )
+            _ = try EntryLinkingService.reconcile(in: modelContext)
             try modelContext.save()
             guard performEnrichment else { return true }
             let acceptedEntryID = acceptedEntry.id
@@ -136,6 +145,10 @@ final class AutomationCandidateReviewModel {
         entry.automationCandidateID = draft.automationCandidateID
         entry.needsReview = draft.needsReview
         entry.entryKindReviewReason = draft.entryKindReviewReason
+        entry.linkedPreviousEntryID = draft.linkedPreviousEntryID
+        entry.linkedNextEntryID = draft.linkedNextEntryID
+        entry.suppressedPreviousEntryID = draft.suppressedPreviousEntryID
+        entry.suppressedNextEntryID = draft.suppressedNextEntryID
         entry.photoReferences = draft.photoReferences
         entry.weather = draft.weather
         entry.endWeather = draft.endWeather

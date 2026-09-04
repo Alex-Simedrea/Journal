@@ -485,8 +485,8 @@ private struct GuidedComposerSuggestionButton: View {
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
 
-                    if let subtitle {
-                        Text(subtitle)
+                    if subtitle != nil || suggestion.referencesTimelineBoundary {
+                        detailText(subtitle: subtitle)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -501,7 +501,10 @@ private struct GuidedComposerSuggestionButton: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 10)
-            .padding(.vertical, subtitle == nil ? 9 : 7)
+            .padding(
+                .vertical,
+                subtitle == nil && !suggestion.referencesTimelineBoundary ? 9 : 7
+            )
             .contentShape(.rect)
             .background {
                 if isActive {
@@ -538,6 +541,18 @@ private struct GuidedComposerSuggestionButton: View {
                 }
             }
         }
+    }
+
+    private func detailText(subtitle: String?) -> Text {
+        if suggestion.referencesTimelineBoundary, let subtitle {
+            return Text(
+                "\(subtitle)  •  \(Image(systemName: "link.badge.plus")) Link"
+            )
+        }
+        if suggestion.referencesTimelineBoundary {
+            return Text("\(Image(systemName: "link.badge.plus")) Link")
+        }
+        return Text(subtitle ?? "")
     }
 
     private var unsavedLocationCandidate: ComposerLocationCandidate? {

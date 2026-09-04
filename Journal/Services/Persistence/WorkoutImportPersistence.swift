@@ -70,6 +70,24 @@ actor WorkoutImportPersistence {
                     existingEntry: entriesByWorkoutUUID[snapshot.uuid],
                     in: modelContext
                 )
+                if snapshot.movementKind == .moving {
+                    try EntryLinkingService.propagateLocationEdit(
+                        from: entry,
+                        role: .origin,
+                        in: modelContext
+                    )
+                    try EntryLinkingService.propagateLocationEdit(
+                        from: entry,
+                        role: .destination,
+                        in: modelContext
+                    )
+                } else {
+                    try EntryLinkingService.propagateLocationEdit(
+                        from: entry,
+                        role: .place,
+                        in: modelContext
+                    )
+                }
                 entriesByWorkoutUUID[snapshot.uuid] = entry
             }
 
@@ -80,6 +98,7 @@ actor WorkoutImportPersistence {
             _ = WorkoutTimelinePlaceReconciler.reconcile(
                 entries: try modelContext.fetch(FetchDescriptor<LogEntry>())
             )
+            _ = try EntryLinkingService.reconcile(in: modelContext)
             guard modelContext.hasChanges else { return }
             try modelContext.save()
             await TimelineDataChange.post(.structure)

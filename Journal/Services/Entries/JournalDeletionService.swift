@@ -29,6 +29,20 @@ enum JournalDeletionService {
         }
 
         do {
+            for other in try modelContext.fetch(FetchDescriptor<LogEntry>()) {
+                if other.linkedPreviousEntryID == entry.id {
+                    other.linkedPreviousEntryID = nil
+                }
+                if other.linkedNextEntryID == entry.id {
+                    other.linkedNextEntryID = nil
+                }
+                if other.suppressedPreviousEntryID == entry.id {
+                    other.suppressedPreviousEntryID = nil
+                }
+                if other.suppressedNextEntryID == entry.id {
+                    other.suppressedNextEntryID = nil
+                }
+            }
             try deleteModel(entry, in: modelContext)
         } catch {
             if let workoutUUID {

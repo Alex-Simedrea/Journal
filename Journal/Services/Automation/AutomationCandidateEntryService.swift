@@ -284,6 +284,31 @@ nonisolated enum AutomationCandidateEntryService {
                 ) {
                     updatedTimelineEntry = true
                 }
+                try EntryLinkingService.propagateTimeEdit(
+                    from: entry,
+                    in: modelContext
+                )
+                switch entry.kind {
+                case .transit:
+                    try EntryLinkingService.propagateLocationEdit(
+                        from: entry,
+                        role: .origin,
+                        in: modelContext
+                    )
+                    try EntryLinkingService.propagateLocationEdit(
+                        from: entry,
+                        role: .destination,
+                        in: modelContext
+                    )
+                case .placeVisit:
+                    try EntryLinkingService.propagateLocationEdit(
+                        from: entry,
+                        role: .place,
+                        in: modelContext
+                    )
+                case .workout, .wakeUp:
+                    break
+                }
                 continue
             }
             guard let entry = AutomationCandidateEntryFactory.makeEntry(
@@ -301,9 +326,11 @@ nonisolated enum AutomationCandidateEntryService {
             modelContext.delete(entry)
         }
 
+        let linksChanged = try EntryLinkingService.reconcile(in: modelContext)
+
         if insertedCount > 0 || removedCount > 0 || updatedProvenance
             || updatedTimelineEntry || !snappedCandidateIDs.isEmpty
-            || !canonicalizedCandidateIDs.isEmpty {
+            || !canonicalizedCandidateIDs.isEmpty || linksChanged {
             try modelContext.save()
             NotificationCenter.default.post(
                 name: .automationCandidatesDidChange,

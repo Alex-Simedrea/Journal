@@ -20,6 +20,8 @@ struct EntryDetailLocationEditor: View {
     let model: EntryLocationPickerModel
     let topContentInset: CGFloat
     @Binding var isScrolled: Bool
+    let linkedCount: Int
+    let onEditLinks: () -> Void
     let onSaveAsPlace: () -> Void
 
     var body: some View {
@@ -34,6 +36,8 @@ struct EntryDetailLocationEditor: View {
                     places,
                     query: model.searchText
                 ),
+                linkedCount: linkedCount,
+                onEditLinks: onEditLinks,
                 onSaveAsPlace: onSaveAsPlace
             )
             .padding(.horizontal, 16)
@@ -56,6 +60,8 @@ struct EntryDetailLocationEditor: View {
 private struct LocationPickerContent: View {
     let model: EntryLocationPickerModel
     let places: [Place]
+    let linkedCount: Int
+    let onEditLinks: () -> Void
     let onSaveAsPlace: () -> Void
 
     var body: some View {
@@ -65,6 +71,8 @@ private struct LocationPickerContent: View {
             LocationSelectionContent(
                 model: model,
                 places: places,
+                linkedCount: linkedCount,
+                onEditLinks: onEditLinks,
                 onSaveAsPlace: onSaveAsPlace
             )
         } else {
@@ -79,11 +87,18 @@ private struct LocationPickerContent: View {
 private struct LocationSelectionContent: View {
     let model: EntryLocationPickerModel
     let places: [Place]
+    let linkedCount: Int
+    let onEditLinks: () -> Void
     let onSaveAsPlace: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             LocationMapCard(model: model)
+
+            EntryLinkDisclosureRow(
+                linkedCount: linkedCount,
+                onSelect: onEditLinks
+            )
 
             if let selection = model.selection, selection.placeID == nil {
                 SavePlaceButton(action: onSaveAsPlace)

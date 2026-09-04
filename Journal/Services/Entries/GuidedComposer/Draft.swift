@@ -161,4 +161,27 @@ struct ComposerSuggestion: Equatable, Identifiable, Sendable {
     let systemImage: String
     let kind: ComposerSuggestionKind
     let score: Int
+
+    /// Timeline-derived endpoints are linked automatically when the completed
+    /// entry lands on that boundary. The badge is informational; accepting the
+    /// suggestion is not what creates the link.
+    var referencesTimelineBoundary: Bool {
+        suggestionTokens.contains { token in
+            guard case .location(let candidate, _) = token.value else {
+                return false
+            }
+            return candidate.source == .timeline
+        }
+    }
+
+    private var suggestionTokens: [ComposerToken] {
+        switch kind {
+        case .value(let tokens, _), .macro(let tokens, _):
+            tokens
+        case .semanticSplit(let bindings, _):
+            bindings.map(\.token)
+        case .addPerson:
+            []
+        }
+    }
 }

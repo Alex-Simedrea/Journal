@@ -60,6 +60,13 @@ final class WorkoutPlaceReviewModel {
     ) -> Bool {
         guard let details = entry.workoutDetails else { return false }
 
+        do {
+            _ = try EntryLinkingService.reconcile(in: modelContext)
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+
         if details.movementKind == .moving {
             apply(
                 placeID: selectedOriginPlaceID,
@@ -88,6 +95,24 @@ final class WorkoutPlaceReviewModel {
         entry.endWeather = nil
 
         do {
+            if details.movementKind == .moving {
+                try EntryLinkingService.propagateLocationEdit(
+                    from: entry,
+                    role: .origin,
+                    in: modelContext
+                )
+                try EntryLinkingService.propagateLocationEdit(
+                    from: entry,
+                    role: .destination,
+                    in: modelContext
+                )
+            } else {
+                try EntryLinkingService.propagateLocationEdit(
+                    from: entry,
+                    role: .place,
+                    in: modelContext
+                )
+            }
             try modelContext.save()
             EntryWeatherService.refreshInBackground(entry, in: modelContext)
             return true

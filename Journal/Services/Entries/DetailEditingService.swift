@@ -53,6 +53,16 @@ enum EntryDetailEditingService {
             throw EntryDetailEditingError.invalidTimeRange
         }
 
+        if persist {
+            _ = try EntryLinkingService.reconcile(in: modelContext)
+            try EntryLinkingService.validateTimeEdit(
+                entry: entry,
+                startTime: session.startTime,
+                endTime: session.endTime,
+                in: modelContext
+            )
+        }
+
         entry.startTime = session.startTime
         entry.endTime = session.endTime
         entry.startTimeZoneIdentifier = session.startTimeZoneIdentifier
@@ -64,6 +74,10 @@ enum EntryDetailEditingService {
         entry.endWeather = nil
         updateNeedsReview(entry)
         if persist {
+            try EntryLinkingService.propagateTimeEdit(
+                from: entry,
+                in: modelContext
+            )
             try save(modelContext)
             EntryWeatherService.refreshInBackground(entry, in: modelContext)
         }
@@ -142,6 +156,9 @@ enum EntryDetailEditingService {
         guard let selection = session.selection(for: role) else {
             throw EntryDetailEditingError.missingLocation
         }
+        if persist {
+            _ = try EntryLinkingService.reconcile(in: modelContext)
+        }
         let place = try associatedPlace(
             with: selection.placeID,
             places: places,
@@ -198,7 +215,14 @@ enum EntryDetailEditingService {
         }
 
         updateNeedsReview(entry)
-        if persist { try save(modelContext) }
+        if persist {
+            try EntryLinkingService.propagateLocationEdit(
+                from: entry,
+                role: role,
+                in: modelContext
+            )
+            try save(modelContext)
+        }
 
         if persist, entry.kind == .transit {
             TransitDistanceService.refreshInBackground(entry, in: modelContext)

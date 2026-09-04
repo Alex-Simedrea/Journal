@@ -40,6 +40,14 @@ final class LogEntry {
     var journalRecordingID: UUID?
     var needsReview: Bool
     var entryKindReviewReason: String?
+    /// Boundary links intentionally use stable identifiers instead of SwiftData
+    /// relationships. A link is stored on both entries, while the suppression
+    /// identifiers remember an explicit unlink so launch-time reconciliation
+    /// does not immediately recreate it.
+    var linkedPreviousEntryID: UUID?
+    var linkedNextEntryID: UUID?
+    var suppressedPreviousEntryID: UUID?
+    var suppressedNextEntryID: UUID?
     // SwiftData expands Codable structs into traversable schema key paths.
     // Observation can then try to materialize paths such as
     // `weather.condition`, which traps when the path crosses an optional
@@ -112,6 +120,10 @@ final class LogEntry {
         wakeUpSourceSampleUUID: UUID? = nil,
         sleepDurationSeconds: Double? = nil,
         entryKindReviewReason: String? = nil,
+        linkedPreviousEntryID: UUID? = nil,
+        linkedNextEntryID: UUID? = nil,
+        suppressedPreviousEntryID: UUID? = nil,
+        suppressedNextEntryID: UUID? = nil,
         needsReview: Bool
     ) {
         self.id = id
@@ -135,6 +147,10 @@ final class LogEntry {
         self.wakeUpSourceSampleUUID = wakeUpSourceSampleUUID
         self.sleepDurationSeconds = sleepDurationSeconds
         self.entryKindReviewReason = entryKindReviewReason
+        self.linkedPreviousEntryID = linkedPreviousEntryID
+        self.linkedNextEntryID = linkedNextEntryID
+        self.suppressedPreviousEntryID = suppressedPreviousEntryID
+        self.suppressedNextEntryID = suppressedNextEntryID
         self.needsReview = needsReview
     }
 
@@ -156,6 +172,10 @@ final class LogEntry {
         wakeUpSourceSampleUUID: UUID? = nil,
         sleepDurationSeconds: Double? = nil,
         entryKindReviewReason: String? = nil,
+        linkedPreviousEntryID: UUID? = nil,
+        linkedNextEntryID: UUID? = nil,
+        suppressedPreviousEntryID: UUID? = nil,
+        suppressedNextEntryID: UUID? = nil,
         needsReview: Bool
     ) {
         self.init(
@@ -178,6 +198,10 @@ final class LogEntry {
             wakeUpSourceSampleUUID: wakeUpSourceSampleUUID,
             sleepDurationSeconds: sleepDurationSeconds,
             entryKindReviewReason: entryKindReviewReason,
+            linkedPreviousEntryID: linkedPreviousEntryID,
+            linkedNextEntryID: linkedNextEntryID,
+            suppressedPreviousEntryID: suppressedPreviousEntryID,
+            suppressedNextEntryID: suppressedNextEntryID,
             needsReview: needsReview
         )
     }

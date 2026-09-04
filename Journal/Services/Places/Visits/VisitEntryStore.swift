@@ -60,6 +60,7 @@ nonisolated enum PlaceVisitEntryStore {
 
     static func insert(_ entry: LogEntry, in modelContext: ModelContext) throws {
         modelContext.insert(entry)
+        _ = try EntryLinkingService.reconcile(in: modelContext)
         try modelContext.save()
     }
 }

@@ -93,6 +93,8 @@ enum EntryDetailLocationRouting {
 enum EntryDetailRoute: Hashable, Identifiable, Sendable {
     case details
     case time
+    case links
+    case linkResolution(UUID)
     case timeZone(EntryTimeZoneEndpoint)
     case people
     case photos
@@ -109,6 +111,8 @@ enum EntryDetailRoute: Hashable, Identifiable, Sendable {
         switch self {
         case .details: "details"
         case .time: "time"
+        case .links: "links"
+        case .linkResolution(let entryID): "link-resolution-\(entryID.uuidString)"
         case .timeZone(let endpoint): "time-zone-\(endpoint.rawValue)"
         case .people: "people"
         case .photos: "photos"
@@ -128,6 +132,8 @@ enum EntryDetailRoute: Hashable, Identifiable, Sendable {
         switch self {
         case .details: "Details"
         case .time: "Time"
+        case .links: "Linked Entries"
+        case .linkResolution: "Match Boundary"
         case .timeZone(let endpoint): endpoint.title
         case .people: "People"
         case .photos: "Photos"
@@ -144,10 +150,11 @@ enum EntryDetailRoute: Hashable, Identifiable, Sendable {
 
     var hasConfirmationAction: Bool {
         switch self {
-        case .time, .timeZone, .people, .photos, .transitMetadata, .location,
+        case .time, .linkResolution, .timeZone, .people, .photos,
+             .transitMetadata, .location,
              .entryKind, .addPerson, .addPlace:
             true
-        case .details, .locations, .placeSymbol,
+        case .details, .links, .locations, .placeSymbol,
              .destructiveConfirmation:
             false
         }
@@ -275,7 +282,7 @@ final class EntryDetailEditSession {
         case .addPlace:
             newPlaceName = ""
             newPlaceSystemImage = .mappin
-        case .details, .timeZone, .locations, .placeSymbol,
+        case .details, .links, .linkResolution, .timeZone, .locations, .placeSymbol,
              .destructiveConfirmation:
             break
         }
@@ -308,7 +315,7 @@ final class EntryDetailEditSession {
             !newPlaceName.trimmingCharacters(
                 in: .whitespacesAndNewlines
             ).isEmpty || newPlaceSystemImage != .mappin
-        case .details, .timeZone, .locations, .placeSymbol,
+        case .details, .links, .linkResolution, .timeZone, .locations, .placeSymbol,
              .destructiveConfirmation:
             false
         }
