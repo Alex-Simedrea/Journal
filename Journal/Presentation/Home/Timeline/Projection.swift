@@ -100,6 +100,7 @@ nonisolated struct TimelineTransitBoundaryPresentation: Hashable, Identifiable, 
     let location: TimelineLocationSnapshot?
     let showsPseudoEntry: Bool
     let followingTransitStart: TimelineTransitSharedStartPresentation?
+    var placeVisitGapID: TimelinePlaceVisitGapID? = nil
 
     var id: TimelineTransitBoundaryID {
         TimelineTransitBoundaryID(
@@ -263,7 +264,7 @@ nonisolated struct TimelineProjection: Sendable {
             let sharesOriginWithPreviousTransit: Bool
             if let previousOccurrence {
                 sharesOriginWithPreviousTransit =
-                    transitBoundaryLocationsMatch(
+                    sharesTransitBoundary(
                         previousOccurrence,
                         occurrence
                     )
@@ -273,7 +274,7 @@ nonisolated struct TimelineProjection: Sendable {
             let sharesDestinationWithNextTransit: Bool
             if let nextOccurrence {
                 sharesDestinationWithNextTransit =
-                    transitBoundaryLocationsMatch(
+                    sharesTransitBoundary(
                         occurrence,
                         nextOccurrence
                     )
@@ -296,7 +297,8 @@ nonisolated struct TimelineProjection: Sendable {
                     sharesOriginWithPreviousTransit:
                         sharesOriginWithPreviousTransit,
                     sharesDestinationWithNextTransit:
-                        sharesDestinationWithNextTransit
+                        sharesDestinationWithNextTransit,
+                    allEntries: entries
                 ),
                 endBoundaryNeedsReview: occurrence.reviewsTime,
                 startBoundaryRenderedByPrevious:
@@ -377,7 +379,8 @@ nonisolated struct TimelineProjection: Sendable {
         previous: TimelineOccurrence?,
         next: TimelineOccurrence?,
         sharesOriginWithPreviousTransit: Bool,
-        sharesDestinationWithNextTransit: Bool
+        sharesDestinationWithNextTransit: Bool,
+        allEntries: [TimelineEntrySnapshot]
     ) -> TimelineTransitRowPresentation? {
         guard occurrence.usesCompactMovementPresentation else { return nil }
 
@@ -416,7 +419,17 @@ nonisolated struct TimelineProjection: Sendable {
             location: movementDestinationLocation(for: occurrence),
             showsPseudoEntry: sharesDestinationWithNextTransit
                 || !destinationMatches,
-            followingTransitStart: followingTransitStart
+            followingTransitStart: followingTransitStart,
+            placeVisitGapID: next.flatMap { next in
+                guard transitBoundaryLocationsMatch(occurrence, next) else {
+                    return nil
+                }
+                return TimelinePlaceVisitGapInference.gapID(
+                    after: occurrence.snapshot,
+                    before: next.snapshot,
+                    entries: allEntries
+                )
+            }
         )
 
         return TimelineTransitRowPresentation(
@@ -437,6 +450,18 @@ nonisolated struct TimelineProjection: Sendable {
         return TimelineTransitSharedStartPresentation(
             date: nextStart,
             timeZoneIdentifier: next.timeZoneIdentifier
+        )
+    }
+
+    private static func sharesTransitBoundary(
+        _ previous: TimelineOccurrence,
+        _ next: TimelineOccurrence
+    ) -> Bool {
+        guard transitBoundaryLocationsMatch(previous, next),
+              let end = previous.endTime,
+              let start = next.startTime else { return false }
+        return !TimelineGapLayout.separatesSharedMovementBoundary(
+            duration: start.timeIntervalSince(end)
         )
     }
 

@@ -14,6 +14,7 @@ struct HomeTimeline: View {
     let onAcceptCandidateEntry: (UUID, UUID) -> Void
     let onDismissCandidate: (UUID) -> Void
     let onAddTransit: (TimelineTransitGapID) -> Void
+    let onAddPlaceVisit: (TimelinePlaceVisitGapID) -> Void
 
     var body: some View {
         ScrollView {
@@ -39,7 +40,8 @@ struct HomeTimeline: View {
                             onSelect: onSelect,
                             onAcceptCandidateEntry: onAcceptCandidateEntry,
                             onDismissCandidate: onDismissCandidate,
-                            onAddTransit: onAddTransit
+                            onAddTransit: onAddTransit,
+                            onAddPlaceVisit: onAddPlaceVisit
                         )
                     }
 

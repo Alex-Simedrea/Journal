@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import HealthKit
 import Observation
 import SwiftData
 
@@ -40,7 +41,7 @@ final class WorkoutImportCoordinator {
             await synchronize(using: persistence)
             await startObserving(using: persistence)
         } catch {
-            errorMessage = error.localizedDescription
+            handleImportError(error)
             print("HealthKit authorization failed: \(error)")
         }
     }
@@ -74,8 +75,20 @@ final class WorkoutImportCoordinator {
             lastSyncDate = .now
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            handleImportError(error)
             print("HealthKit synchronization failed: \(error)")
+        }
+    }
+
+    func handleImportError(_ error: Error) {
+        let healthError = error as NSError
+        // Device locking can interrupt automatic sync. Let the next sync
+        // retry without leaving an alert queued for the next foreground.
+        if healthError.domain == HKErrorDomain,
+           healthError.code == HKError.Code.errorDatabaseInaccessible.rawValue {
+            errorMessage = nil
+        } else {
+            errorMessage = error.localizedDescription
         }
     }
 

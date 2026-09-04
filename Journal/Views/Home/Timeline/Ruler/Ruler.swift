@@ -12,6 +12,7 @@ struct TimelineRulerSequence: View {
     let onAcceptCandidateEntry: (UUID, UUID) -> Void
     let onDismissCandidate: (UUID) -> Void
     let onAddTransit: (TimelineTransitGapID) -> Void
+    let onAddPlaceVisit: (TimelinePlaceVisitGapID) -> Void
     let expandsMovementCards: Bool
     let dimmedEntryIDs: Set<UUID>
     let showsTransitGapActions: Bool
@@ -28,6 +29,7 @@ struct TimelineRulerSequence: View {
         onAcceptCandidateEntry: @escaping (UUID, UUID) -> Void,
         onDismissCandidate: @escaping (UUID) -> Void,
         onAddTransit: @escaping (TimelineTransitGapID) -> Void,
+        onAddPlaceVisit: @escaping (TimelinePlaceVisitGapID) -> Void = { _ in },
         expandsMovementCards: Bool = false,
         dimmedEntryIDs: Set<UUID> = [],
         showsTransitGapActions: Bool = true,
@@ -44,6 +46,7 @@ struct TimelineRulerSequence: View {
         self.onAcceptCandidateEntry = onAcceptCandidateEntry
         self.onDismissCandidate = onDismissCandidate
         self.onAddTransit = onAddTransit
+        self.onAddPlaceVisit = onAddPlaceVisit
         self.expandsMovementCards = expandsMovementCards
         self.dimmedEntryIDs = dimmedEntryIDs
         self.showsTransitGapActions = showsTransitGapActions
@@ -71,6 +74,7 @@ struct TimelineRulerSequence: View {
                     onAcceptCandidateEntry: onAcceptCandidateEntry,
                     onDismissCandidate: onDismissCandidate,
                     onAddTransit: onAddTransit,
+                    onAddPlaceVisit: onAddPlaceVisit,
                     expandsMovementCards: expandsMovementCards,
                     dimmedEntryIDs: dimmedEntryIDs,
                     showsTransitGapActions: showsTransitGapActions,
@@ -106,10 +110,9 @@ private struct TimelineRulerActiveBounds {
 
 private enum TimelineRulerActiveRangeStyle {
     case interval(expansion: CGFloat)
+    case placeVisit
     case moment(radius: CGFloat)
-    case boundaryConnection
-    case sharedBoundaryConnection
-    case previousBoundaryConnection
+    case compactMovement
 }
 
 private struct TimelineCardBoundsKey: PreferenceKey {
@@ -128,24 +131,35 @@ private struct TimelineRulerOverlay: View {
 
     var body: some View {
         GeometryReader { proxy in
+            let resolvedBounds = cardBounds.map {
+                (bounds: proxy[$0.anchor], style: $0.rangeStyle)
+            }
             TimelineRulerTrack(
-                activeRanges: cardBounds.map { activeBounds in
-                    let bounds = proxy[activeBounds.anchor]
-                    return switch activeBounds.rangeStyle {
+                activeRanges: resolvedBounds.enumerated().map { index, item in
+                    let bounds = item.bounds
+                    switch item.style {
                     case .interval(let expansion):
-                        (bounds.minY - expansion)...(bounds.maxY + expansion)
+                        return (bounds.minY - expansion)...(bounds.maxY + expansion)
+                    case .placeVisit:
+                        var previousMovement: CGRect?
+                        var nextMovement: CGRect?
+                        if index > 0,
+                           case .compactMovement = resolvedBounds[index - 1].style {
+                            previousMovement = resolvedBounds[index - 1].bounds
+                        }
+                        if index + 1 < resolvedBounds.count,
+                           case .compactMovement = resolvedBounds[index + 1].style {
+                            nextMovement = resolvedBounds[index + 1].bounds
+                        }
+                        return TimelineRulerMetrics.placeVisitRange(
+                            in: bounds,
+                            previousMovement: previousMovement,
+                            nextMovement: nextMovement
+                        )
                     case .moment(let radius):
-                        (bounds.midY - radius)...(bounds.midY + radius)
-                    case .boundaryConnection:
-                        TimelineRulerMetrics.boundaryConnectionRange(in: bounds)
-                    case .sharedBoundaryConnection:
-                        TimelineRulerMetrics.sharedBoundaryConnectionRange(
-                            in: bounds
-                        )
-                    case .previousBoundaryConnection:
-                        TimelineRulerMetrics.previousBoundaryConnectionRange(
-                            in: bounds
-                        )
+                        return (bounds.midY - radius)...(bounds.midY + radius)
+                    case .compactMovement:
+                        return TimelineRulerMetrics.compactMovementRange(in: bounds)
                     }
                 }
             )
@@ -164,6 +178,7 @@ private struct TimelineRulerRow: View {
     let onAcceptCandidateEntry: (UUID, UUID) -> Void
     let onDismissCandidate: (UUID) -> Void
     let onAddTransit: (TimelineTransitGapID) -> Void
+    let onAddPlaceVisit: (TimelinePlaceVisitGapID) -> Void
     let expandsMovementCards: Bool
     let dimmedEntryIDs: Set<UUID>
     let showsTransitGapActions: Bool
@@ -206,7 +221,8 @@ private struct TimelineRulerRow: View {
                         reviewCandidateID: reviewCandidateID,
                         onSelect: onSelect,
                         onAcceptCandidateEntry: onAcceptCandidateEntry,
-                        onDismissCandidate: onDismissCandidate
+                        onDismissCandidate: onDismissCandidate,
+                        onAddPlaceVisit: showsTransitGapActions ? onAddPlaceVisit : nil
                     )
                 }
             case .workout:
@@ -228,7 +244,8 @@ private struct TimelineRulerRow: View {
                         reviewCandidateID: nil,
                         onSelect: onSelect,
                         onAcceptCandidateEntry: onAcceptCandidateEntry,
-                        onDismissCandidate: onDismissCandidate
+                        onDismissCandidate: onDismissCandidate,
+                        onAddPlaceVisit: showsTransitGapActions ? onAddPlaceVisit : nil
                     )
                 } else {
                     TimelineIntervalRulerContent(
@@ -265,6 +282,7 @@ private struct TimelineTransitRulerContent: View {
     let onSelect: (UUID) -> Void
     let onAcceptCandidateEntry: (UUID, UUID) -> Void
     let onDismissCandidate: (UUID) -> Void
+    let onAddPlaceVisit: ((TimelinePlaceVisitGapID) -> Void)?
 
     private var showsStartLabel: Bool {
         !row.startBoundaryRenderedByPrevious
@@ -286,21 +304,6 @@ private struct TimelineTransitRulerContent: View {
                 } else {
                     TimelineTransitPseudoRulerRow(
                         boundary: presentation.origin
-                    )
-                    .anchorPreference(
-                        key: TimelineCardBoundsKey.self,
-                        value: .bounds,
-                        transform: {
-                            [
-                                TimelineRulerActiveBounds(
-                                    anchor: $0,
-                                    rangeStyle: row.relationshipToPrevious
-                                        == .contiguous
-                                        ? .previousBoundaryConnection
-                                        : .interval(expansion: 0)
-                                )
-                            ]
-                        }
                     )
                 }
             } else if showsStartLabel,
@@ -332,7 +335,8 @@ private struct TimelineTransitRulerContent: View {
                         timeZoneIdentifier: row.occurrence.changesTimeZone
                             ? row.occurrence.endTimeZoneIdentifier
                             : row.occurrence.timeZoneIdentifier,
-                        showsTimeZoneChange: row.occurrence.changesTimeZone
+                        showsTimeZoneChange: row.occurrence.changesTimeZone,
+                        onAddPlaceVisit: onAddPlaceVisit
                     )
                 } else {
                     TimelineBoundaryLabel(
@@ -368,18 +372,6 @@ private struct TimelineTransitOriginBoundaryBlock: View {
                 needsReview: false
             )
         }
-        .anchorPreference(
-            key: TimelineCardBoundsKey.self,
-            value: .bounds,
-            transform: {
-                [
-                    TimelineRulerActiveBounds(
-                        anchor: $0,
-                        rangeStyle: .boundaryConnection
-                    )
-                ]
-            }
-        )
     }
 }
 
@@ -388,6 +380,7 @@ private struct TimelineTransitDestinationBoundaryBlock: View {
     let date: Date
     let timeZoneIdentifier: String
     let showsTimeZoneChange: Bool
+    let onAddPlaceVisit: ((TimelinePlaceVisitGapID) -> Void)?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -399,7 +392,10 @@ private struct TimelineTransitDestinationBoundaryBlock: View {
             )
 
             if let followingStart = boundary.followingTransitStart {
-                TimelineTransitPseudoRulerRow(boundary: boundary)
+                TimelineTransitPseudoRulerRow(
+                    boundary: boundary,
+                    onAddPlaceVisit: onAddPlaceVisit
+                )
                 TimelineBoundaryLabel(
                     date: followingStart.date,
                     timeZoneIdentifier: followingStart.timeZoneIdentifier,
@@ -407,28 +403,18 @@ private struct TimelineTransitDestinationBoundaryBlock: View {
                     needsReview: false
                 )
             } else {
-                TimelineTransitPseudoRulerRow(boundary: boundary)
+                TimelineTransitPseudoRulerRow(
+                    boundary: boundary,
+                    onAddPlaceVisit: onAddPlaceVisit
+                )
             }
         }
-        .anchorPreference(
-            key: TimelineCardBoundsKey.self,
-            value: .bounds,
-            transform: {
-                [
-                    TimelineRulerActiveBounds(
-                        anchor: $0,
-                        rangeStyle: boundary.followingTransitStart == nil
-                            ? .boundaryConnection
-                            : .sharedBoundaryConnection
-                    )
-                ]
-            }
-        )
     }
 }
 
 private struct TimelineTransitPseudoRulerRow: View {
     let boundary: TimelineTransitBoundaryPresentation
+    var onAddPlaceVisit: ((TimelinePlaceVisitGapID) -> Void)? = nil
 
     var body: some View {
         HStack(
@@ -439,9 +425,17 @@ private struct TimelineTransitPseudoRulerRow: View {
 
             TimelineTransitPseudoPlaceRow(
                 name: boundary.name,
-                systemImage: boundary.systemImage
+                systemImage: boundary.systemImage,
+                onAddPlaceVisit: addPlaceVisitAction
             )
         }
+    }
+
+    private var addPlaceVisitAction: (() -> Void)? {
+        guard let gapID = boundary.placeVisitGapID, let onAddPlaceVisit else {
+            return nil
+        }
+        return { onAddPlaceVisit(gapID) }
     }
 }
 
@@ -472,6 +466,9 @@ private struct TimelineCompactMovementRulerRow: View {
                 distanceMeters: occurrence.kind == .workout
                     ? occurrence.snapshot.workoutDistanceMeters
                     : occurrence.snapshot.transitDistanceMeters,
+                activeEnergyKilocalories: occurrence.kind == .workout
+                    ? occurrence.snapshot.workoutActiveEnergyKilocalories : nil,
+                photoReferences: occurrence.snapshot.photoReferences,
                 startTime: occurrence.startTime,
                 endTime: occurrence.endTime,
                 people: occurrence.snapshot.people,
@@ -483,6 +480,14 @@ private struct TimelineCompactMovementRulerRow: View {
                 onDismissCandidate: onDismissCandidate,
                 onTap: onTap
             )
+        }
+        .anchorPreference(key: TimelineCardBoundsKey.self, value: .bounds) {
+            [
+                TimelineRulerActiveBounds(
+                    anchor: $0,
+                    rangeStyle: .compactMovement
+                )
+            ]
         }
     }
 
@@ -544,7 +549,8 @@ private struct TimelineIntervalRulerContent: View {
                         [
                             TimelineRulerActiveBounds(
                                 anchor: $0,
-                                rangeStyle: .interval(
+                                rangeStyle: row.occurrence.kind == .placeVisit
+                                    ? .placeVisit : .interval(
                                     expansion: TimelineRulerMetrics
                                         .activeRangeExpansion
                                 )
@@ -713,7 +719,7 @@ private struct TimelineBoundaryLabel: View {
         }
         .font(.caption)
         .foregroundStyle(TimelineRulerPalette.timestamp(colorScheme: colorScheme))
-        .frame(height: 28)
+        .frame(height: TimelineRulerMetrics.boundaryLabelHeight)
         .accessibilityElement(children: .combine)
     }
 }

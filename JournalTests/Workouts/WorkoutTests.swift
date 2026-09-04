@@ -9,6 +9,34 @@ import Testing
 @Suite("HealthKit workouts")
 @MainActor
 struct WorkoutTests {
+    @Test("Locked health data does not queue a sync alert on foreground")
+    func protectedDataAlert() {
+        let coordinator = WorkoutImportCoordinator()
+        coordinator.errorMessage = "Previous sync failure"
+        coordinator.handleImportError(NSError(
+            domain: HKErrorDomain,
+            code: HKError.Code.errorDatabaseInaccessible.rawValue,
+            userInfo: [NSLocalizedDescriptionKey: "Localized locked-data message"]
+        ))
+        #expect(coordinator.errorMessage == nil)
+
+        let denied = NSError(
+            domain: HKErrorDomain,
+            code: HKError.Code.errorAuthorizationDenied.rawValue,
+            userInfo: [NSLocalizedDescriptionKey: "Authorization denied"]
+        )
+        coordinator.handleImportError(denied)
+        #expect(coordinator.errorMessage == denied.localizedDescription)
+
+        let unrelated = NSError(
+            domain: "Persistence",
+            code: HKError.Code.errorDatabaseInaccessible.rawValue,
+            userInfo: [NSLocalizedDescriptionKey: "Could not save entries"]
+        )
+        coordinator.handleImportError(unrelated)
+        #expect(coordinator.errorMessage == unrelated.localizedDescription)
+    }
+
     @Test("Walking, running, and cycling are moving workouts")
     func movementClassification() {
         #expect(

@@ -17,67 +17,59 @@ enum TimelineRulerMetrics {
     static let trackWidth: CGFloat = 32
     static let cardSpacing: CGFloat = 9
     static let timestampSpacing: CGFloat = 6
+    static let boundaryLabelHeight: CGFloat = TimelineGapLayout.boundaryLabelHeight
     static let wakeUpTimestampWidth: CGFloat = 38
     static let wakeUpContentSpacing: CGFloat = 6
-    static let compactEntryHeight: CGFloat = 28
+    static let compactEntryHeight: CGFloat = 38
+    static let pseudoPlaceHeight: CGFloat = TimelineGapLayout.pseudoPlaceHeight
+    static let compactMovementActiveTickCount = 5
     static let compactEntryBadgeSize: CGFloat = 26
     static let compactEntryIconSize: CGFloat = 13
     static let compactEntryContentSpacing: CGFloat = 8
-    static let tickPitch: CGFloat = 8
-    static let orphanBoundaryActiveTickCount = 5
+    static let tickPitch: CGFloat = TimelineGapLayout.tickPitch
     static let wakeUpActiveRangeRadius: CGFloat = tickPitch / 2
     static let endCapHeight: CGFloat = tickPitch * 2
     static let firstTickOffset: CGFloat = 0.5
     static let lineWidth: CGFloat = 1
     static let activeRangeExpansion: CGFloat = 14
-    static let minimumSeparateEntryGap: CGFloat = 8
+    static let minimumSeparateEntryGap: CGFloat = TimelineGapLayout.minimumSeparateEntryGap
     static let distinctContiguousBoundaryGap: CGFloat = tickPitch
     static let addTransitGapExpansion: CGFloat = tickPitch
-    static let maximumSeparateEntryGap: CGFloat = 112
+    static let maximumSeparateEntryGap: CGFloat = TimelineGapLayout.maximumSeparateEntryGap
 
-    static func boundaryConnectionRange(
-        in bounds: CGRect
-    ) -> ClosedRange<CGFloat> {
-        let nearestTickIndex = (
-            (bounds.midY - firstTickOffset) / tickPitch
-        ).rounded()
-        let nearestTick = firstTickOffset + nearestTickIndex * tickPitch
-        let radius = tickPitch
-            * CGFloat((orphanBoundaryActiveTickCount - 1) / 2)
-        return (nearestTick - radius)...(nearestTick + radius)
+    // The reference has five full-width ticks centered on each movement.
+    // Snap to the track cadence so an offset row cannot lose an edge tick.
+    static func compactMovementRange(in bounds: CGRect) -> ClosedRange<CGFloat> {
+        let centerIndex = ((bounds.midY - firstTickOffset) / tickPitch).rounded()
+        let center = firstTickOffset + centerIndex * tickPitch
+        let radius = CGFloat(compactMovementActiveTickCount - 1) * tickPitch / 2
+        return (center - radius)...(center + radius)
     }
 
-    private static func boundaryCentersRange(
-        in bounds: CGRect
+    static func placeVisitRange(
+        in bounds: CGRect,
+        previousMovement: CGRect? = nil,
+        nextMovement: CGRect? = nil
     ) -> ClosedRange<CGFloat> {
-        let inset = compactEntryHeight / 2
-        return (bounds.minY + inset)...(bounds.maxY - inset)
-    }
-
-    static func sharedBoundaryConnectionRange(
-        in bounds: CGRect
-    ) -> ClosedRange<CGFloat> {
-        let base = boundaryCentersRange(in: bounds)
-        let samplingAllowance = tickPitch / 2
-        let lowerBound = base.lowerBound - samplingAllowance
-        let upperBound = base.upperBound + samplingAllowance
-        return lowerBound...upperBound
-    }
-
-    static func previousBoundaryConnectionRange(
-        in bounds: CGRect
-    ) -> ClosedRange<CGFloat> {
-        let halfHeight = compactEntryHeight / 2
-        return (bounds.minY - halfHeight)...(bounds.minY + halfHeight)
+        var lower = bounds.minY - activeRangeExpansion
+        var upper = bounds.maxY + activeRangeExpansion
+        // Three tick pitches between active endpoints leave exactly two
+        // shoulder ticks around a shared timestamp, regardless of row offset.
+        if let previousMovement,
+           abs(bounds.minY - previousMovement.maxY - boundaryLabelHeight) < 0.5 {
+            lower = compactMovementRange(in: previousMovement).upperBound
+                + tickPitch * 3
+        }
+        if let nextMovement,
+           abs(nextMovement.minY - bounds.maxY - boundaryLabelHeight) < 0.5 {
+            upper = compactMovementRange(in: nextMovement).lowerBound
+                - tickPitch * 3
+        }
+        return lower...upper
     }
 
     static func separateEntryGap(duration: TimeInterval) -> CGFloat {
-        let scaled = max(
-            minimumSeparateEntryGap,
-            max(duration / 60, 0) / 4
-        )
-        let quantized = ceil(scaled / tickPitch) * tickPitch
-        return min(maximumSeparateEntryGap, quantized)
+        TimelineGapLayout.separateEntryGap(duration: duration)
     }
 
     static func style(

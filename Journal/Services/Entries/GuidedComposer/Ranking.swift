@@ -231,7 +231,7 @@ enum GuidedComposerLocationRanking {
         isHomeName(candidate.displayName)
     }
 
-    static func isHomeName(_ displayName: String) -> Bool {
+    nonisolated static func isHomeName(_ displayName: String) -> Bool {
         GuidedComposerNormalization.text(displayName)
             .split { character in
                 !character.isLetter && !character.isNumber

@@ -13,6 +13,8 @@ struct TimelineCompactMovementRow: View {
     let organizationName: String?
     let serviceIdentifier: String?
     let distanceMeters: Double?
+    let activeEnergyKilocalories: Double?
+    let photoReferences: [PhotoReference]
     let startTime: Date?
     let endTime: Date?
     let people: [TimelinePersonSnapshot]
@@ -30,13 +32,32 @@ struct TimelineCompactMovementRow: View {
                 ) {
                     TimelineCompactMovementBadge(style: style)
 
-                    Text(summary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.72)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(summary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+
+                        if let metrics {
+                            Text(metrics)
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.72)
+                        }
+                    }
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: TimelineRulerMetrics.compactEntryHeight,
+                        maxHeight: TimelineRulerMetrics.compactEntryHeight,
+                        alignment: .leading
+                    )
 
                     if !people.isEmpty {
                         TimelinePeopleAvatarStack(people: people)
+                    }
+
+                    if !photoReferences.isEmpty {
+                        TimelineCompactMovementPhotos(references: photoReferences)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -76,25 +97,18 @@ struct TimelineCompactMovementRow: View {
 
     private var summary: AttributedString {
         var result = AttributedString(title)
-        result.font = .headline.weight(.semibold)
+        result.font = .callout.weight(.semibold)
 
         if let organizationName = normalized(organizationName) {
             var organization = AttributedString(" \(organizationName)")
-            organization.font = .headline.weight(.regular)
+            organization.font = .callout.weight(.regular)
             result.append(organization)
         }
 
         if let serviceIdentifier = normalized(serviceIdentifier) {
             var service = AttributedString(" • \(serviceIdentifier)")
-            service.font = .headline.weight(.regular)
+            service.font = .callout.weight(.regular)
             result.append(service)
-        }
-
-        if let metrics {
-            var metricText = AttributedString("  \(metrics)")
-            metricText.font = .subheadline.weight(.medium)
-            metricText.foregroundColor = .secondary
-            result.append(metricText)
         }
 
         return result
@@ -115,6 +129,9 @@ struct TimelineCompactMovementRow: View {
                 endTime.timeIntervalSince(startTime)
                     .formatted(.compactDuration)
             )
+        }
+        if let activeEnergyKilocalories {
+            values.append("\(activeEnergyKilocalories.formatted(.number.precision(.fractionLength(0)))) kcal")
         }
         return values.isEmpty ? nil : values.joined(separator: " • ")
     }
@@ -184,50 +201,69 @@ struct TimelineCompactMovementBadge: View {
     }
 }
 
-struct TimelineTransitPseudoPlaceRow: View {
-    let name: String
-    let systemImage: PlaceSystemImage
+struct TimelineCompactMovementPhotos: View {
+    let references: [PhotoReference]
 
     var body: some View {
-        HStack(spacing: TimelineRulerMetrics.compactEntryContentSpacing) {
-            TimelineTransitPseudoPlaceBadge(systemImage: systemImage)
-
-            Text(name)
-                .font(.headline)
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
+        HStack(spacing: 4) {
+            ForEach(Array(references.prefix(2).enumerated()), id: \.element.id) { index, reference in
+                TimelinePhotoThumbnail(reference: reference)
+                    .frame(
+                        width: TimelineRulerMetrics.compactEntryHeight,
+                        height: TimelineRulerMetrics.compactEntryHeight
+                    )
+                    .overlay {
+                        if index == 1, references.count > 2 {
+                            ZStack {
+                                Color.black.opacity(0.45)
+                                Text("+\(references.count - 2)")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.white)
+                            }
+                        }
+                    }
+                    .clipShape(.rect(cornerRadius: 10))
+            }
         }
-        .frame(
-            maxWidth: .infinity,
-            minHeight: TimelineRulerMetrics.compactEntryHeight,
-            alignment: .leading
-        )
-        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(references.count) photos")
     }
 }
 
-struct TimelineTransitPseudoPlaceBadge: View {
+struct TimelineTransitPseudoPlaceRow: View {
+    let name: String
     let systemImage: PlaceSystemImage
+    var onAddPlaceVisit: (() -> Void)? = nil
 
     var body: some View {
-        let symbol = PlaceSymbols.symbol(for: systemImage)
-        Image(systemName: symbol.systemImage.rawValue)
-            .resizable()
-            .scaledToFit()
-            .fontWeight(.semibold)
-            .foregroundStyle(.white)
-            .frame(
-                width: TimelineRulerMetrics.compactEntryIconSize,
-                height: TimelineRulerMetrics.compactEntryIconSize
-            )
-            .frame(
-                width: TimelineRulerMetrics.compactEntryBadgeSize,
-                height: TimelineRulerMetrics.compactEntryBadgeSize
-            )
-            .background(symbol.secondary.gradient, in: .circle)
-            .accessibilityHidden(true)
+        HStack(spacing: TimelineRulerMetrics.compactEntryContentSpacing) {
+            FixedSizePlaceSymbol(systemImage: systemImage, size: 18)
+                .accessibilityHidden(true)
+
+            Text(name)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+
+            if let onAddPlaceVisit {
+                Button("Add Place Visit", action: onAddPlaceVisit)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.blue)
+                    .buttonStyle(.plain)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.leading, 10)
+                    .accessibilityLabel("Add place visit at \(name)")
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(
+            maxWidth: .infinity,
+            minHeight: TimelineRulerMetrics.pseudoPlaceHeight,
+            alignment: .leading
+        )
+        .accessibilityElement(children: .contain)
     }
 }
 

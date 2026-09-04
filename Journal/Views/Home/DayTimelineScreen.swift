@@ -12,6 +12,7 @@ struct DayTimelineScreen: View {
     @State private var pendingEntryDeletionID: UUID?
     @State private var pendingCandidateDismissalID: UUID?
     @State private var selectedTransitGap: TimelineTransitGapSelection?
+    @State private var selectedPlaceVisitGap: TimelinePlaceVisitGapID?
     var showsCloseButton = true
     var contentRevision = 0
 
@@ -57,7 +58,8 @@ struct DayTimelineScreen: View {
             onSelectCandidate: { selectedAutomationCandidate = $0 },
             onAcceptCandidateEntry: acceptCandidateEntry,
             onDismissCandidate: dismissCandidate,
-            onAddTransit: addTransit
+            onAddTransit: addTransit,
+            onAddPlaceVisit: { selectedPlaceVisitGap = $0 }
         )
         .navigationTitle(title)
         .navigationSubtitle(
@@ -123,6 +125,13 @@ struct DayTimelineScreen: View {
                 gapID: selection.gapID,
                 onCancel: { selectedTransitGap = nil },
                 onComplete: finishAddingTransit
+            )
+        }
+        .sheet(item: $selectedPlaceVisitGap) { gapID in
+            TimelinePlaceVisitGapReviewSheet(
+                gapID: gapID,
+                onCancel: { selectedPlaceVisitGap = nil },
+                onComplete: finishAddingPlaceVisit
             )
         }
         .alert(
@@ -259,6 +268,21 @@ struct DayTimelineScreen: View {
         selectedTransitGap = nil
         reloadTimelineAndRoutes()
         enrichGapTransit(entryID: entryID)
+    }
+
+    private func finishAddingPlaceVisit(_ entryID: UUID) {
+        selectedPlaceVisitGap = nil
+        reloadTimelineAndRoutes()
+        let container = modelContext.container
+        Task {
+            let enrichmentContext = ModelContext(container)
+            enrichmentContext.autosaveEnabled = false
+            _ = try? await EntryWeatherService.populate(
+                entryID: entryID,
+                in: enrichmentContext
+            )
+            try? await PhotoAutoLinkService.synchronize(in: enrichmentContext)
+        }
     }
 
     private func enrichGapTransit(entryID: UUID) {
