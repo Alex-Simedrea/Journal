@@ -83,6 +83,11 @@ final class UIKitDaySummaryCell: UICollectionViewCell {
         canvas.reset()
     }
 
+    func zoomTiles(in viewport: UIView) -> [HomeFeedZoomTile] {
+        guard let model else { return [] }
+        return canvas.zoomTiles(summary: model.summary, in: viewport)
+    }
+
     func didEndDisplaying() {
         canvas.reset()
     }
@@ -177,6 +182,11 @@ final class UIKitPeriodSummaryCell: UICollectionViewCell {
         model = nil
         titleLabel.text = nil
         canvas.reset()
+    }
+
+    func zoomTiles(in viewport: UIView) -> [HomeFeedZoomTile] {
+        guard let model else { return [] }
+        return canvas.zoomTiles(summary: model.summary, in: viewport)
     }
 
     func didEndDisplaying() {

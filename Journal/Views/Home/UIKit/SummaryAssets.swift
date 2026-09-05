@@ -282,6 +282,31 @@ final class UIKitSummaryMapImageView: UIImageView {
         setNeedsLayout()
     }
 
+    /// Resolve only already cached media before the transition freezes the view.
+    /// Normal loading continues independently; this never waits for MapKit to render.
+    func prepareForZoomSnapshot() async {
+        guard image == nil, bounds.width > 1, bounds.height > 1 else { return }
+        let expectedGeneration = generation
+        let size = bounds.size
+        let input: SummaryMapSnapshotRequestInput = switch source {
+        case .overview(let data): .overview(slotID: slotID, data: data, size: size)
+        case .place(let location): .place(slotID: slotID, location: location, size: size)
+        }
+        let appearance: SummaryMapSnapshotRequest.Appearance =
+            traitCollection.userInterfaceStyle == .dark ? .dark : .light
+        guard let request = await SummaryMapSnapshotRequestBuilder.request(
+            for: input, displayScale: traitCollection.displayScale, appearance: appearance
+        ), !Task.isCancelled else { return }
+        var prepared = SummaryMapDecodedImageCache.cachedImage(for: request)
+        if prepared == nil,
+           let data = await SummaryMapSnapshotStore.shared.cachedData(for: request) {
+            prepared = await SummaryMapDecodedImageCache.image(data: data, for: request)
+        }
+        guard !Task.isCancelled, generation == expectedGeneration,
+              bounds.size == size, image == nil else { return }
+        image = prepared
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
         loadIfNeeded()
@@ -418,5 +443,29 @@ final class UIKitSummaryPhotoView: UIImageView {
         loadTask?.cancel()
         loadTask = nil
         image = nil
+    }
+}
+
+/// Runs once per destination capture, for every visible card (including tiles
+/// that are not selected for morphing). No arbitrary delay or network wait.
+@MainActor
+enum UIKitHomeFeedSnapshotAssets {
+    static func prepare(in roots: [UIView]) async {
+        var maps: [UIKitSummaryMapImageView] = []
+        var avatars: [UIKitContactAvatarView] = []
+        func collect(_ view: UIView) {
+            if let map = view as? UIKitSummaryMapImageView { maps.append(map) }
+            if let avatar = view as? UIKitContactAvatarView { avatars.append(avatar) }
+            for child in view.subviews { collect(child) }
+        }
+        roots.forEach(collect)
+        await withTaskGroup(of: Void.self) { group in
+            for map in maps {
+                group.addTask { await map.prepareForZoomSnapshot() }
+            }
+            for avatar in avatars {
+                group.addTask { await avatar.prepareForZoomSnapshot() }
+            }
+        }
     }
 }

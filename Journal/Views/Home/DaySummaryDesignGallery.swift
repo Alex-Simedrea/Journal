@@ -53,7 +53,7 @@ struct DaySummaryDesignGallery: View {
     }
 }
 
-private enum DaySummaryGalleryFixtures {
+enum DaySummaryGalleryFixtures {
     static let rows: [DaySummaryRowModel] = [
         // Small day: weather and wake-up remain compact while movement
         // expands only enough to balance their column.

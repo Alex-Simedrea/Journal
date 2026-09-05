@@ -16,7 +16,9 @@ import SwiftUI
 struct ContentView: View {
     var body: some View {
 #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-period-summary-gallery") {
+        if ProcessInfo.processInfo.arguments.contains("-home-zoom-gallery") {
+            HomeFeedZoomGallery()
+        } else if ProcessInfo.processInfo.arguments.contains("-period-summary-gallery") {
             PeriodSummaryDesignGallery()
         } else if ProcessInfo.processInfo.arguments.contains("-day-summary-gallery")
             || ProcessInfo.processInfo.environment["DAY_SUMMARY_GALLERY"] == "1" {

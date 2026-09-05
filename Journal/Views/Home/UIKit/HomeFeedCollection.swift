@@ -103,7 +103,12 @@ final class HomeFeedViewController: UIViewController {
     private var displayedItems: [ObjectIdentifier: ItemID] = [:]
     private var isScrolling = false
     private var lastReportedAnchor: HomeFeedAnchor?
+    private var anchorReportScheduled = false
     private var lastLayoutWidth: CGFloat = 0
+    private let zoomTransition = HomeFeedZoomTransition()
+    private var scaleGeneration = 0
+    private var isPreparingScale = false
+    private var zoomAssetPreparation: Task<Void, Never>?
 
     private lazy var dayRegistration = UICollectionView.CellRegistration<
         UIKitDaySummaryCell,
@@ -149,6 +154,12 @@ final class HomeFeedViewController: UIViewController {
         super.viewDidLoad()
 
         view.backgroundColor = .systemGroupedBackground
+        zoomTransition.onCompletion = { [weak self] in
+            guard let self else { return }
+            for indexPath in collectionView.indexPathsForVisibleItems {
+                scheduleEnrichment(at: indexPath)
+            }
+        }
         layout.scrollDirection = .vertical
         layout.sectionInsetReference = .fromSafeArea
 
@@ -211,12 +222,25 @@ final class HomeFeedViewController: UIViewController {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        zoomTransition.synchronizeViewport()
         let width = collectionView.bounds.width
-        guard abs(width - lastLayoutWidth) > 0.5 else { return }
+        guard abs(width - lastLayoutWidth) > 0.5 else {
+            scheduleScalePreparationCompletion()
+            return
+        }
+        zoomTransition.finish()
         lastLayoutWidth = width
         layout.invalidateLayout()
         collectionView.layoutIfNeeded()
         performPendingScrollRequestIfPossible()
+        scheduleScalePreparationCompletion()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        zoomAssetPreparation?.cancel()
+        zoomAssetPreparation = nil
+        zoomTransition.finish()
     }
 
     func update(
@@ -233,6 +257,27 @@ final class HomeFeedViewController: UIViewController {
     ) {
         loadViewIfNeeded()
         self.callbacks = callbacks
+        let scaleChanged = self.scale != scale
+        if scaleChanged {
+            scaleGeneration += 1
+            zoomAssetPreparation?.cancel()
+            zoomAssetPreparation = nil
+            if let scrollRequest, !scrollRequest.preservesZoomViewport {
+                // An explicit date/card navigation starts a new context. Only
+                // scale-picker toggles reuse a previously captured viewport.
+                zoomTransition.finish()
+            }
+            collectionView.setContentOffset(collectionView.contentOffset, animated: false)
+            animatedScrollRequestID = nil
+            isScrolling = false
+            collectionView.layoutIfNeeded()
+            reportVisibleAnchor()
+            zoomTransition.begin(in: view, collectionView: collectionView,
+                                 scale: self.scale, anchor: lastReportedAnchor,
+                                 tiles: visibleZoomTiles())
+            zoomTransition.prepareForRetarget()
+            isPreparingScale = true
+        }
         self.contentRevision = contentRevision
         self.emptyTransitionDay = emptyTransitionDay
         self.modelContext = modelContext
@@ -240,7 +285,6 @@ final class HomeFeedViewController: UIViewController {
         self.periodRows = Dictionary(
             uniqueKeysWithValues: (monthRows + yearRows).map { ($0.id, $0) }
         )
-        let scaleChanged = self.scale != scale
         self.scale = scale
         if scaleChanged {
             lastReportedAnchor = nil
@@ -279,20 +323,25 @@ final class HomeFeedViewController: UIViewController {
                 collectionView.layoutIfNeeded()
                 performPendingScrollRequestIfPossible()
             }
+            scheduleScalePreparationCompletion()
             return
         }
 
         var snapshot = NSDiffableDataSourceSnapshot<Int, ItemID>()
         snapshot.appendSections([0])
         snapshot.appendItems(items)
+        let generation = scaleGeneration
         let completion = { [weak self] in
-            guard let self else { return }
+            guard let self, self.scaleGeneration == generation else { return }
             UIView.performWithoutAnimation {
                 self.collectionView.collectionViewLayout.invalidateLayout()
                 self.collectionView.layoutIfNeeded()
                 self.performPendingScrollRequestIfPossible()
                 self.reportVisibleAnchor()
             }
+            // Let synchronous cache hits reach newly configured image views before
+            // taking the destination snapshot. Stale reloads cannot start a zoom.
+            self.scheduleScalePreparationCompletion()
         }
         if scaleChanged {
             UIView.performWithoutAnimation {
@@ -368,11 +417,21 @@ final class HomeFeedViewController: UIViewController {
             )
         } else {
             UIView.performWithoutAnimation {
-                collectionView.scrollToItem(
-                    at: indexPath,
-                    at: request.alignment == .top ? .top : .bottom,
-                    animated: false
-                )
+                if isPreparingScale,
+                   let offset = zoomTransition.cachedOffset(for: scale, anchor: request.anchor,
+                                                            preservesViewport: request.preservesZoomViewport) {
+                    let minimum = -collectionView.adjustedContentInset.top
+                    let maximum = max(minimum, collectionView.contentSize.height
+                        - collectionView.bounds.height + collectionView.adjustedContentInset.bottom)
+                    collectionView.setContentOffset(
+                        CGPoint(x: offset.x, y: min(maximum, max(minimum, offset.y))), animated: false)
+                } else {
+                    collectionView.scrollToItem(
+                        at: indexPath,
+                        at: request.alignment == .top ? .top : .bottom,
+                        animated: false
+                    )
+                }
                 collectionView.layoutIfNeeded()
             }
             finishScrollRequest(request.id)
@@ -403,7 +462,7 @@ final class HomeFeedViewController: UIViewController {
         _ day: TimelineDayKey,
         source: HomeTransitionSource
     ) {
-        guard presentedViewController == nil, let modelContext else { return }
+        guard !zoomTransition.isActive, presentedViewController == nil, let modelContext else { return }
         let root = UIKitTimelinePresentationRoot(
             initialDay: day,
             contentRevision: contentRevision,
@@ -449,11 +508,12 @@ final class HomeFeedViewController: UIViewController {
         min(440, max(0, collectionView.bounds.width - 32))
     }
 
-    private func reportVisibleAnchor() {
+    private func reportVisibleAnchor(whilePreparing: Bool = false) {
+        guard !isPreparingScale || whilePreparing else { return }
         let visibleRect = CGRect(
             origin: collectionView.contentOffset,
             size: collectionView.bounds.size
-        )
+        ).inset(by: collectionView.adjustedContentInset)
         let threshold: CGFloat = scale == .days ? 0.1 : 0.2
         let attributes = collectionView.collectionViewLayout
             .layoutAttributesForElements(in: visibleRect)?
@@ -490,7 +550,7 @@ final class HomeFeedViewController: UIViewController {
     }
 
     private func scheduleEnrichment(at indexPath: IndexPath) {
-        guard !isScrolling,
+        guard !isScrolling, !isPreparingScale, !zoomTransition.isActive,
               let item = dataSource.itemIdentifier(for: indexPath),
               enrichmentTasks[item] == nil else { return }
         let task = Task { [weak self] in
@@ -566,6 +626,76 @@ final class HomeFeedViewController: UIViewController {
         }
     }
 
+    private func visibleZoomTiles() -> [HomeFeedZoomTile] {
+        // Leave a little clearance for the soft edge of the toolbar blurs.
+        let viewport = view.bounds.inset(by: collectionView.adjustedContentInset)
+            .insetBy(dx: 0, dy: 8)
+        let cells = collectionView.visibleCells.sorted { $0.frame.minY < $1.frame.minY }
+        let selected: [UICollectionViewCell]
+        if scale == .days {
+            selected = cells
+        } else {
+            // A period roughly fills the screen. Match the anchor card only,
+            // even when an edge of the neighbouring month/year is visible.
+            let anchorCell = lastReportedAnchor.flatMap(itemID).flatMap { item in
+                dataSource.indexPath(for: item).flatMap { collectionView.cellForItem(at: $0) }
+            }
+            selected = anchorCell.map { [$0] } ?? Array(cells.prefix(1))
+        }
+        return selected.flatMap { cell -> [HomeFeedZoomTile] in
+            if let cell = cell as? UIKitDaySummaryCell { return cell.zoomTiles(in: view) }
+            if let cell = cell as? UIKitPeriodSummaryCell { return cell.zoomTiles(in: view) }
+            return []
+        }.compactMap { $0.fullyVisible(in: viewport) }
+    }
+
+    private func scheduleScalePreparationCompletion() {
+        guard isPreparingScale else { return }
+        let generation = scaleGeneration
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.scaleGeneration == generation else { return }
+            self.finishScalePreparationIfPossible()
+        }
+    }
+
+    private func finishScalePreparationIfPossible() {
+        guard isPreparingScale, view.window != nil else { return }
+        if let request = pendingScrollRequest {
+            // A deletion or an empty projection can remove the requested row
+            // during preparation. Show the available destination instead of
+            // leaving the outgoing snapshot frozen indefinitely.
+            if request.scale == scale, let item = itemID(for: request.anchor),
+               dataSource.indexPath(for: item) == nil {
+                pendingScrollRequest = nil
+                finishScrollRequest(request.id)
+            } else {
+                performPendingScrollRequestIfPossible()
+                guard pendingScrollRequest == nil else { return }
+            }
+        }
+        guard zoomAssetPreparation == nil else { return }
+        collectionView.layoutIfNeeded()
+        zoomTransition.synchronizeViewport()
+        reportVisibleAnchor(whilePreparing: true)
+        if zoomTransition.hasScene(for: scale) {
+            isPreparingScale = false
+            zoomTransition.completePreparation(collectionView: collectionView, scale: scale,
+                anchor: lastReportedAnchor, tiles: [])
+            return
+        }
+        let cells = collectionView.visibleCells
+        let generation = scaleGeneration
+        zoomAssetPreparation = Task { [weak self] in
+            await UIKitHomeFeedSnapshotAssets.prepare(in: cells)
+            guard !Task.isCancelled, let self,
+                  self.scaleGeneration == generation, self.isPreparingScale else { return }
+            self.zoomAssetPreparation = nil
+            self.isPreparingScale = false
+            self.zoomTransition.completePreparation(collectionView: self.collectionView, scale: self.scale,
+                anchor: self.lastReportedAnchor, tiles: self.visibleZoomTiles())
+        }
+    }
+
     private func cancelAllLoading() {
         enrichmentTasks.values.forEach { $0.cancel() }
         prefetchTasks.values.forEach { $0.cancel() }
@@ -621,7 +751,8 @@ extension HomeFeedViewController: UICollectionViewDelegateFlowLayout {
         _ collectionView: UICollectionView,
         didSelectItemAt indexPath: IndexPath
     ) {
-        guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
+        guard !zoomTransition.isActive,
+              let item = dataSource.itemIdentifier(for: indexPath) else { return }
         switch item {
         case .day(let day):
             presentTimeline(day, source: .day(day))
@@ -667,6 +798,10 @@ extension HomeFeedViewController: UICollectionViewDelegateFlowLayout {
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        zoomAssetPreparation?.cancel()
+        zoomAssetPreparation = nil
+        zoomTransition.finish()
+        isPreparingScale = false
         pendingScrollRequest = nil
         animatedScrollRequestID = nil
         callbacks?.onUserScroll()
@@ -674,7 +809,17 @@ extension HomeFeedViewController: UICollectionViewDelegateFlowLayout {
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        reportVisibleAnchor()
+        zoomTransition.synchronizeViewport()
+        // UIKit can send this while computing flow-layout attributes. Querying
+        // them synchronously re-enters that layout. Coalesce to the next turn;
+        // scrolling itself remains entirely UIKit-driven.
+        guard !anchorReportScheduled else { return }
+        anchorReportScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            anchorReportScheduled = false
+            reportVisibleAnchor()
+        }
     }
 
     func scrollViewDidEndDragging(

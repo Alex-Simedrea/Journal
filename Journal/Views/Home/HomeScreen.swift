@@ -50,17 +50,20 @@ struct HomeFeedScrollRequest: Hashable {
     let anchor: HomeFeedAnchor
     let alignment: HomeFeedScrollAlignment
     let animated: Bool
+    let preservesZoomViewport: Bool
 
     init(
         scale: JournalSummaryScale,
         anchor: HomeFeedAnchor,
         alignment: HomeFeedScrollAlignment,
-        animated: Bool = false
+        animated: Bool = false,
+        preservesZoomViewport: Bool = false
     ) {
         self.scale = scale
         self.anchor = anchor
         self.alignment = alignment
         self.animated = animated
+        self.preservesZoomViewport = preservesZoomViewport
     }
 }
 
@@ -285,6 +288,7 @@ struct HomeScreen: View {
         to newScale: JournalSummaryScale
     ) {
         guard scale != newScale else { return }
+        let preservesZoomViewport = pendingScaleTarget == nil
         let target = pendingScaleTarget
             ?? inferredTarget(from: scale, to: newScale)
         pendingScaleTarget = nil
@@ -292,7 +296,8 @@ struct HomeScreen: View {
             HomeFeedScrollRequest(
                 scale: newScale,
                 anchor: $0,
-                alignment: .top
+                alignment: .top,
+                preservesZoomViewport: preservesZoomViewport
             )
         }
 
@@ -356,18 +361,27 @@ struct HomeScreen: View {
                 ?? model.yearRows.last?.summary.yearKey
             return year.map { .period(.year($0)) }
         case (.months, .days):
-            let day = visibleMonth.flatMap(model.firstDay) ?? model.days.last
+            let rememberedDay = visibleDay.flatMap { day in
+                MonthKey(day: day) == visibleMonth ? day : nil
+            }
+            let day = rememberedDay ?? visibleMonth.flatMap(model.firstDay) ?? model.days.last
             return day.map(HomeFeedAnchor.day)
         case (.months, .years):
             let year = visibleMonth.map { YearKey(year: $0.year) }
                 ?? model.yearRows.last?.summary.yearKey
             return year.map { .period(.year($0)) }
         case (.years, .days):
-            let day = visibleYear.flatMap { model.firstMonth(in: $0) }
+            let rememberedDay = visibleDay.flatMap { day in
+                day.year == visibleYear?.year ? day : nil
+            }
+            let day = rememberedDay ?? visibleYear.flatMap { model.firstMonth(in: $0) }
                 .flatMap(model.firstDay) ?? model.days.last
             return day.map(HomeFeedAnchor.day)
         case (.years, .months):
-            let month = visibleYear.flatMap(model.firstMonth)
+            let rememberedMonth = visibleMonth.flatMap { month in
+                month.year == visibleYear?.year ? month : nil
+            }
+            let month = rememberedMonth ?? visibleYear.flatMap(model.firstMonth)
                 ?? model.monthRows.last?.summary.monthKey
             return month.map { .period(.month($0)) }
         default:
@@ -414,6 +428,7 @@ struct HomeScreen: View {
 
     private func scrollRequestDidApply(_ requestID: UUID) {
         guard scrollRequest?.id == requestID else { return }
+        scrollRequest = nil
         markFeedPositioned()
     }
 

@@ -39,6 +39,11 @@ private func withoutImplicitAnimations(_ updates: () -> Void) {
 final class UIKitDaySummaryCanvasView: UIView {
     private var tiles: [DaySummaryTileKind: UIView] = [:]
     private var placements: [DaySummaryTilePlacement] = []
+    var transitionTileViews: [(DaySummaryTileKind, UIView)] {
+        placements.compactMap { placement in
+            tiles[placement.tile].map { (placement.tile, $0) }
+        }
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -174,6 +179,11 @@ final class UIKitDaySummaryCanvasView: UIView {
 final class UIKitPeriodSummaryCanvasView: UIView {
     private var tiles: [PeriodSummaryTileKind: UIView] = [:]
     private var placements: [PeriodSummaryTilePlacement] = []
+    var transitionTileViews: [(PeriodSummaryTileKind, UIView)] {
+        placements.compactMap { placement in
+            tiles[placement.tile].map { (placement.tile, $0) }
+        }
+    }
     private var onOpenDay: ((TimelineDayKey) -> Void)?
 
     override init(frame: CGRect) {
@@ -821,6 +831,7 @@ final class UIKitContactAvatarView: UIView {
     private let monogramLabel = UILabel()
     private let gradient = CAGradientLayer()
     private var representedIdentifier: String?
+    private var representedName = ""
     private var loadTask: Task<Void, Never>?
 
     override init(frame: CGRect) {
@@ -847,6 +858,7 @@ final class UIKitContactAvatarView: UIView {
     }
 
     func configure(person: TimelinePersonSnapshot) {
+        representedName = person.name
         monogramLabel.text = PersonMonogram.initials(for: person.name)
         monogramLabel.isHidden = imageView.image != nil
         accessibilityLabel = imageView.image == nil
@@ -878,6 +890,15 @@ final class UIKitContactAvatarView: UIView {
                 ? String(localized: "Monogram for \(person.name)")
                 : String(localized: "Contact photo for \(person.name)")
         }
+    }
+
+    func prepareForZoomSnapshot() async {
+        guard imageView.image == nil, let identifier = representedIdentifier else { return }
+        let cached = await UIKitContactAvatarStore.shared.cachedImage(for: identifier)
+        guard !Task.isCancelled, representedIdentifier == identifier, let cached else { return }
+        imageView.image = cached
+        monogramLabel.isHidden = true
+        accessibilityLabel = String(localized: "Contact photo for \(representedName)")
     }
 
     func reset() {
@@ -912,6 +933,11 @@ final class UIKitPhotoSummaryTileView: UIView {
     private var references: [PhotoReference] = []
     private var totalCount = 0
     private var style: Style = .day
+
+    // Read only during transition capture; preserve the grid's individual shapes.
+    var transitionPhotoViews: [UIView] {
+        Array(imageViews.prefix(references.count))
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
