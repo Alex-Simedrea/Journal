@@ -16,12 +16,6 @@ enum TimelineEntryCardReviewPresentation {
     }
 }
 
-enum TimelineEntryCardLinkPresentation {
-    static func showsBlueInnerShadow(isTemporarilyHighlighted: Bool) -> Bool {
-        isTemporarilyHighlighted
-    }
-}
-
 struct TimelineEntryCard: View {
     let occurrence: TimelineOccurrence
     let onTap: () -> Void
@@ -78,26 +72,7 @@ struct TimelineInteractiveEntryCard: View {
                         Color(uiColor: .secondarySystemGroupedBackground)
                             .shadow(
                                 .inner(
-                                    color: Color.orange.opacity(
-                                        TimelineEntryCardReviewPresentation
-                                            .showsOrangeInnerShadow(
-                                                kind: occurrence.kind,
-                                                needsReview: occurrence.needsReview
-                                            ) && !temporaryLinkHighlight
-                                            ? 1 : 0
-                                    ),
-                                    radius: 3
-                                )
-                            )
-                            .shadow(
-                                .inner(
-                                    color: Color.blue.opacity(
-                                        TimelineEntryCardLinkPresentation
-                                            .showsBlueInnerShadow(
-                                                isTemporarilyHighlighted:
-                                                    temporaryLinkHighlight
-                                            ) ? 1 : 0
-                                    ),
+                                    color: innerShadowColor,
                                     radius: 3
                                 )
                             )
@@ -108,5 +83,18 @@ struct TimelineInteractiveEntryCard: View {
         }
         .buttonStyle(.plain)
         .accessibilityHint("Opens entry details")
+    }
+
+    private var innerShadowColor: Color {
+        if temporaryLinkHighlight {
+            return .blue
+        }
+        if TimelineEntryCardReviewPresentation.showsOrangeInnerShadow(
+            kind: occurrence.kind,
+            needsReview: occurrence.needsReview
+        ) {
+            return .orange
+        }
+        return .clear
     }
 }
