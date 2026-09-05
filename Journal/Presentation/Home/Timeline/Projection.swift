@@ -59,6 +59,7 @@ nonisolated struct TimelineRow: Hashable, Identifiable, Sendable {
     let occurrence: TimelineOccurrence
     let relationshipToPrevious: TimelinePreviousRelationship
     let transitGap: TimelineTransitGap?
+    let boundaryConflict: TimelineBoundaryConflictID?
     let transitPresentation: TimelineTransitRowPresentation?
     let endBoundaryNeedsReview: Bool
     let startBoundaryRenderedByPrevious: Bool
@@ -81,6 +82,13 @@ nonisolated struct TimelineTransitGap: Hashable, Identifiable, Sendable {
     let id: TimelineTransitGapID
     let originName: String
     let destinationName: String
+}
+
+nonisolated struct TimelineBoundaryConflictID: Hashable, Identifiable, Sendable {
+    let previousEntryID: UUID
+    let nextEntryID: UUID
+
+    var id: Self { self }
 }
 
 nonisolated enum TimelineTransitBoundarySide: String, Hashable, Sendable {
@@ -290,6 +298,11 @@ nonisolated struct TimelineProjection: Sendable {
                     relationship: relationships[index],
                     allOccurrences: occurrences
                 ),
+                boundaryConflict: boundaryConflict(
+                    before: occurrence,
+                    previous: previousOccurrence,
+                    relationship: relationships[index]
+                ),
                 transitPresentation: transitPresentation(
                     for: occurrence,
                     previous: previousOccurrence,
@@ -319,6 +332,28 @@ nonisolated struct TimelineProjection: Sendable {
         _ nextStart: Date
     ) -> Bool {
         TimelineBoundaryMatcher.timesMatch(previousEnd, nextStart)
+    }
+
+    private static func boundaryConflict(
+        before occurrence: TimelineOccurrence,
+        previous: TimelineOccurrence?,
+        relationship: TimelinePreviousRelationship
+    ) -> TimelineBoundaryConflictID? {
+        guard relationship == .contiguous,
+              let previous,
+              (previous.usesCompactMovementPresentation
+                && occurrence.kind == .placeVisit)
+                || (previous.kind == .placeVisit
+                    && occurrence.usesCompactMovementPresentation),
+              let previousLocation = boundaryEndLocation(previous),
+              let nextLocation = boundaryStartLocation(occurrence),
+              !TimelineBoundaryMatcher.locationsMatch(
+                previousLocation, nextLocation
+              ) else { return nil }
+        return TimelineBoundaryConflictID(
+            previousEntryID: previous.entryID,
+            nextEntryID: occurrence.entryID
+        )
     }
 
     private static func transitGap(

@@ -8,6 +8,39 @@ import Testing
 struct TransitContinuityTests {
     private let timeZoneIdentifier = "Europe/Bucharest"
 
+    @Test("A mismatched transit and visit boundary exposes resolution")
+    func mismatchedVisitBoundary() throws {
+        let transitDestination = location(
+            name: "AFI Cotroceni", latitude: 44.430, longitude: 26.100
+        )
+        let visitLocation = location(
+            name: "Simonte", latitude: 44.440, longitude: 26.110
+        )
+        let transit = transit(
+            start: "2026-07-17T10:27:00+03:00",
+            end: "2026-07-17T10:29:15+03:00",
+            origin: location(name: "Home"),
+            destination: transitDestination
+        )
+        let visit = placeVisit(
+            start: "2026-07-17T10:29:40+03:00",
+            end: "2026-07-17T11:29:00+03:00",
+            location: visitLocation
+        )
+        let rows = project([transit, visit]).rows
+        let visitRow = try #require(
+            rows.first { $0.occurrence.entryID == visit.id }
+        )
+        #expect(visitRow.relationshipToPrevious == .contiguous)
+        #expect(
+            visitRow.boundaryConflict == TimelineBoundaryConflictID(
+                previousEntryID: transit.id,
+                nextEntryID: visit.id
+            )
+        )
+        #expect(!visitRow.startBoundaryRenderedByPrevious)
+    }
+
     @Test("A gap between consecutive visits offers one transit action")
     func visitGapAction() throws {
         let home = location(name: "Home", latitude: 44.43, longitude: 26.10)

@@ -13,6 +13,7 @@ struct TimelineRulerSequence: View {
     let onDismissCandidate: (UUID) -> Void
     let onAddTransit: (TimelineTransitGapID) -> Void
     let onAddPlaceVisit: (TimelinePlaceVisitGapID) -> Void
+    let onResolveBoundary: (TimelineBoundaryConflictID) -> Void
     let expandsMovementCards: Bool
     let dimmedEntryIDs: Set<UUID>
     let showsTransitGapActions: Bool
@@ -30,6 +31,7 @@ struct TimelineRulerSequence: View {
         onDismissCandidate: @escaping (UUID) -> Void,
         onAddTransit: @escaping (TimelineTransitGapID) -> Void,
         onAddPlaceVisit: @escaping (TimelinePlaceVisitGapID) -> Void = { _ in },
+        onResolveBoundary: @escaping (TimelineBoundaryConflictID) -> Void = { _ in },
         expandsMovementCards: Bool = false,
         dimmedEntryIDs: Set<UUID> = [],
         showsTransitGapActions: Bool = true,
@@ -47,6 +49,7 @@ struct TimelineRulerSequence: View {
         self.onDismissCandidate = onDismissCandidate
         self.onAddTransit = onAddTransit
         self.onAddPlaceVisit = onAddPlaceVisit
+        self.onResolveBoundary = onResolveBoundary
         self.expandsMovementCards = expandsMovementCards
         self.dimmedEntryIDs = dimmedEntryIDs
         self.showsTransitGapActions = showsTransitGapActions
@@ -75,6 +78,7 @@ struct TimelineRulerSequence: View {
                     onDismissCandidate: onDismissCandidate,
                     onAddTransit: onAddTransit,
                     onAddPlaceVisit: onAddPlaceVisit,
+                    onResolveBoundary: onResolveBoundary,
                     expandsMovementCards: expandsMovementCards,
                     dimmedEntryIDs: dimmedEntryIDs,
                     showsTransitGapActions: showsTransitGapActions,
@@ -179,6 +183,7 @@ private struct TimelineRulerRow: View {
     let onDismissCandidate: (UUID) -> Void
     let onAddTransit: (TimelineTransitGapID) -> Void
     let onAddPlaceVisit: (TimelinePlaceVisitGapID) -> Void
+    let onResolveBoundary: (TimelineBoundaryConflictID) -> Void
     let expandsMovementCards: Bool
     let dimmedEntryIDs: Set<UUID>
     let showsTransitGapActions: Bool
@@ -192,9 +197,12 @@ private struct TimelineRulerRow: View {
                 TimelineRulerGap(
                     relationship: row.relationshipToPrevious,
                     transitGap: showsTransitGapActions ? row.transitGap : nil,
+                    boundaryConflict: showsTransitGapActions
+                        ? row.boundaryConflict : nil,
                     separatesDistinctContiguousBoundary:
                         row.presentsDistinctContiguousTransitStart,
                     onAddTransit: onAddTransit,
+                    onResolveBoundary: onResolveBoundary,
                     fixedSeparatedEntryGap: fixedSeparatedEntryGap
                 )
             }
@@ -621,8 +629,10 @@ private struct TimelineWakeUpRulerContent: View {
 private struct TimelineRulerGap: View {
     let relationship: TimelinePreviousRelationship
     let transitGap: TimelineTransitGap?
+    let boundaryConflict: TimelineBoundaryConflictID?
     let separatesDistinctContiguousBoundary: Bool
     let onAddTransit: (TimelineTransitGapID) -> Void
+    let onResolveBoundary: (TimelineBoundaryConflictID) -> Void
     let fixedSeparatedEntryGap: CGFloat?
 
     var body: some View {
@@ -648,6 +658,16 @@ private struct TimelineRulerGap: View {
                 )
             }
 
+            if let boundaryConflict {
+                Button("Resolve") {
+                    onResolveBoundary(boundaryConflict)
+                }
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.blue)
+                .buttonStyle(.plain)
+                .accessibilityLabel("Resolve mismatched locations")
+            }
+
             Spacer(minLength: 0)
         }
         .frame(height: height)
@@ -657,7 +677,9 @@ private struct TimelineRulerGap: View {
         switch relationship {
         case .first: 0
         case .contiguous:
-            separatesDistinctContiguousBoundary
+            boundaryConflict != nil
+                ? TimelineRulerMetrics.boundaryLabelHeight
+                : separatesDistinctContiguousBoundary
                 ? TimelineRulerMetrics.distinctContiguousBoundaryGap
                 : 0
         case .overlap:

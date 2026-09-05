@@ -131,7 +131,7 @@ nonisolated enum EntryLinkingService {
     else { return false }
     if pair.previous.kind == .workout,
       pair.next.kind == .workout,
-      previous.time != next.time
+      !boundaryTimesMatch(previous.time, next.time)
     {
       return false
     }
@@ -156,8 +156,13 @@ nonisolated enum EntryLinkingService {
     guard let lhs = boundary(of: previous, side: .end),
       let rhs = boundary(of: next, side: .start)
     else { return false }
-    return lhs.time == rhs.time
+    return boundaryTimesMatch(lhs.time, rhs.time)
       && locationsMatch(lhs, rhs)
+  }
+
+  static func boundaryTimesMatch(_ lhs: Date, _ rhs: Date) -> Bool {
+    floor(lhs.timeIntervalSinceReferenceDate / 60)
+      == floor(rhs.timeIntervalSinceReferenceDate / 60)
   }
 
   static func boundaryPlacesMatch(_ entry: LogEntry, _ neighbor: LogEntry) -> Bool {
@@ -168,13 +173,15 @@ nonisolated enum EntryLinkingService {
     return locationsMatch(lhs, rhs)
   }
 
+  @discardableResult
   static func link(
     _ entry: LogEntry,
     to neighbor: LogEntry,
     alignment: EntryLinkAlignment? = nil,
     in modelContext: ModelContext,
     persist: Bool = true
-  ) throws {
+  ) throws -> Set<UUID> {
+    var transitsNeedingDistanceRefresh: Set<UUID> = []
     let pair = chronologicalPair(entry, neighbor)
     guard let previousBoundary = boundary(of: pair.previous, side: .end),
       let nextBoundary = boundary(of: pair.next, side: .start)
@@ -191,7 +198,7 @@ nonisolated enum EntryLinkingService {
         )
       let time: EntryBoundaryValue
       if pair.previous.kind == .workout && pair.next.kind == .workout {
-        guard previousBoundary.time == nextBoundary.time else {
+        guard boundaryTimesMatch(previousBoundary.time, nextBoundary.time) else {
           throw EntryLinkingError.immutableWorkoutTimes
         }
         time = previousBoundary
@@ -225,10 +232,16 @@ nonisolated enum EntryLinkingService {
       {
         throw EntryLinkingError.missingBoundary
       }
-      setTimeBoundary(pair.previous, side: .end, from: time)
-      setTimeBoundary(pair.next, side: .start, from: time)
-      setPlaceBoundary(pair.previous, side: .end, from: place)
-      setPlaceBoundary(pair.next, side: .start, from: place)
+      if !boundaryTimesMatch(previousBoundary.time, nextBoundary.time) {
+        setTimeBoundary(pair.previous, side: .end, from: time)
+        setTimeBoundary(pair.next, side: .start, from: time)
+      }
+      if setPlaceBoundary(pair.previous, side: .end, from: place) {
+        transitsNeedingDistanceRefresh.insert(pair.previous.id)
+      }
+      if setPlaceBoundary(pair.next, side: .start, from: place) {
+        transitsNeedingDistanceRefresh.insert(pair.next.id)
+      }
     }
 
     unlinkNext(of: pair.previous, in: modelContext, suppress: false)
@@ -240,15 +253,18 @@ nonisolated enum EntryLinkingService {
       from: pair.previous,
       side: .end,
       entries: entries,
-      visitedEdges: &visitedEdges
+      visitedEdges: &visitedEdges,
+      transitsNeedingDistanceRefresh: &transitsNeedingDistanceRefresh
     )
     propagateLocation(
       from: pair.next,
       side: .start,
       entries: entries,
-      visitedEdges: &visitedEdges
+      visitedEdges: &visitedEdges,
+      transitsNeedingDistanceRefresh: &transitsNeedingDistanceRefresh
     )
     if persist { try modelContext.save() }
+    return transitsNeedingDistanceRefresh
   }
 
   static func unlink(
@@ -330,6 +346,7 @@ nonisolated enum EntryLinkingService {
   ) throws {
     let entries = try entriesByID(in: modelContext)
     var visitedEdges: Set<String> = []
+    var transitsNeedingDistanceRefresh: Set<UUID> = []
     if role.affectsStartBoundary {
       if boundary(of: entry, side: .start) == nil {
         clearLink(at: .start, of: entry, entries: entries)
@@ -338,7 +355,8 @@ nonisolated enum EntryLinkingService {
           from: entry,
           side: .start,
           entries: entries,
-          visitedEdges: &visitedEdges
+          visitedEdges: &visitedEdges,
+          transitsNeedingDistanceRefresh: &transitsNeedingDistanceRefresh
         )
       }
     }
@@ -350,7 +368,8 @@ nonisolated enum EntryLinkingService {
           from: entry,
           side: .end,
           entries: entries,
-          visitedEdges: &visitedEdges
+          visitedEdges: &visitedEdges,
+          transitsNeedingDistanceRefresh: &transitsNeedingDistanceRefresh
         )
       }
     }
@@ -477,7 +496,12 @@ nonisolated enum EntryLinkingService {
     _ entry: LogEntry,
     side: EntryBoundarySide,
     from value: EntryBoundaryValue
-  ) {
+  ) -> Bool {
+    let previousEndpoint = locationEndpoint(of: entry, side: side)
+    let transitEndpointChanged = entry.kind == .transit
+      && (previousEndpoint?.place?.id != value.placeID
+        || previousEndpoint?.location != value.location)
+
     switch entry.kind {
     case .transit:
       if side == .start {
@@ -486,6 +510,7 @@ nonisolated enum EntryLinkingService {
         }
         entry.transitDetails?.originLocation = value.location
         entry.transitDetails?.originRawText = value.name
+        entry.transitDetails?.originCandidates = []
         entry.startTimeZoneIdentifier =
           value.location.timeZoneIdentifier
           ?? entry.startTimeZoneIdentifier
@@ -496,6 +521,7 @@ nonisolated enum EntryLinkingService {
         }
         entry.transitDetails?.destinationLocation = value.location
         entry.transitDetails?.destinationRawText = value.name
+        entry.transitDetails?.destinationCandidates = []
         entry.endTimeZoneIdentifier =
           value.location.timeZoneIdentifier
           ?? entry.endTimeZoneIdentifier
@@ -529,7 +555,11 @@ nonisolated enum EntryLinkingService {
     }
     entry.weather = nil
     entry.endWeather = nil
+    if transitEndpointChanged {
+      entry.transitDetails?.distanceMeters = nil
+    }
     updateNeedsReview(entry)
+    return transitEndpointChanged
   }
 
   private static func locationsMatch(
@@ -549,7 +579,8 @@ nonisolated enum EntryLinkingService {
     from entry: LogEntry,
     side: EntryBoundarySide,
     entries: [UUID: LogEntry],
-    visitedEdges: inout Set<String>
+    visitedEdges: inout Set<String>,
+    transitsNeedingDistanceRefresh: inout Set<UUID>
   ) {
     let neighborID =
       side == .start
@@ -572,14 +603,17 @@ nonisolated enum EntryLinkingService {
       }
       return
     }
-    setPlaceBoundary(neighbor, side: neighborSide, from: value)
+    if setPlaceBoundary(neighbor, side: neighborSide, from: value) {
+      transitsNeedingDistanceRefresh.insert(neighbor.id)
+    }
     guard usesSingleLocation(neighbor) else { return }
     let oppositeSide: EntryBoundarySide = neighborSide == .start ? .end : .start
     propagateLocation(
       from: neighbor,
       side: oppositeSide,
       entries: entries,
-      visitedEdges: &visitedEdges
+      visitedEdges: &visitedEdges,
+      transitsNeedingDistanceRefresh: &transitsNeedingDistanceRefresh
     )
   }
 

@@ -605,7 +605,7 @@ private extension EntryDetailSheet {
         guard let neighbor = allEntries.first(where: { $0.id == entryID }) else {
             throw EntryLinkingError.missingBoundary
         }
-        try EntryLinkingService.link(
+        let transitIDs = try EntryLinkingService.link(
             entry,
             to: neighbor,
             alignment: EntryLinkAlignment(
@@ -614,6 +614,12 @@ private extension EntryDetailSheet {
             ),
             in: modelContext
         )
+        for transit in allEntries where transitIDs.contains(transit.id) {
+            TransitDistanceService.refreshInBackground(
+                transit,
+                in: modelContext
+            )
+        }
         coordinator.session.reload(from: entry)
     }
 

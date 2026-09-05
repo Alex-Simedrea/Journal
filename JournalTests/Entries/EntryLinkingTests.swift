@@ -7,6 +7,35 @@ import Testing
 @Suite("Entry boundary linking")
 @MainActor
 struct EntryLinkingTests {
+  @Test("Boundary times within the same minute do not need resolution")
+  func minuteLevelTimeMatching() throws {
+    let context = try makeContext()
+    let home = place("Home", latitude: 45.65)
+    let visit = visit(home, start: 1_000, end: 2_001)
+    let transit = transit(
+      from: home,
+      to: place("Work", latitude: 45.70),
+      start: 2_039,
+      end: 3_000
+    )
+    context.insert(home)
+    context.insert(visit)
+    context.insert(transit)
+
+    #expect(EntryLinkingService.boundaryTimesMatch(
+      visit.endTime!, transit.startTime!
+    ))
+    #expect(EntryLinkingService.boundariesMatch(previous: visit, next: transit))
+    #expect(try EntryLinkingService.reconcile(in: context))
+    #expect(visit.endTime == Date(timeIntervalSince1970: 2_001))
+    #expect(transit.startTime == Date(timeIntervalSince1970: 2_039))
+
+    transit.startTime = Date(timeIntervalSince1970: 2_061)
+    #expect(!EntryLinkingService.boundaryTimesMatch(
+      visit.endTime!, transit.startTime!
+    ))
+  }
+
   @Test("Existing adjacent entries are linked retroactively")
   func retroactiveReconciliation() throws {
     let context = try makeContext()
@@ -101,8 +130,16 @@ struct EntryLinkingTests {
     [home, work, cafe].forEach(context.insert)
     [visit, transit].forEach(context.insert)
     try context.save()
+    transit.transitDetails?.distanceMeters = 42_000
+    transit.transitDetails?.originCandidates = [
+      LocationCandidate(
+        name: "Old candidate",
+        latitude: 45.71,
+        longitude: 25.61
+      )
+    ]
 
-    try EntryLinkingService.link(
+    let transitsNeedingDistanceRefresh = try EntryLinkingService.link(
       visit,
       to: transit,
       alignment: EntryLinkAlignment(
@@ -114,8 +151,47 @@ struct EntryLinkingTests {
 
     #expect(transit.startTime == visit.endTime)
     #expect(transit.transitDetails?.originPlace?.id == home.id)
+    #expect(transit.transitDetails?.originLocation == home.location)
+    #expect(transit.transitDetails?.originRawText == home.name)
+    #expect(transit.transitDetails?.originCandidates.isEmpty == true)
+    #expect(transit.transitDetails?.distanceMeters == nil)
+    #expect(transitsNeedingDistanceRefresh == Set([transit.id]))
     #expect(visit.linkedNextEntryID == transit.id)
     #expect(transit.linkedPreviousEntryID == visit.id)
+  }
+
+  @Test("Resolving to an unchanged transit endpoint preserves its distance")
+  func unchangedTransitEndpointPreservesDistance() throws {
+    let context = try makeContext()
+    let home = place("Home", latitude: 45.65)
+    let work = place("Work", latitude: 45.70)
+    let cafe = place("Cafe", latitude: 45.75)
+    let visit = visit(home, start: 1_000, end: 2_000)
+    let transit = transit(
+      from: work,
+      to: cafe,
+      start: 2_000,
+      end: 3_000
+    )
+    [home, work, cafe].forEach(context.insert)
+    [visit, transit].forEach(context.insert)
+    try context.save()
+    transit.transitDetails?.distanceMeters = 9_500
+
+    let transitsNeedingDistanceRefresh = try EntryLinkingService.link(
+      visit,
+      to: transit,
+      alignment: EntryLinkAlignment(
+        timeSource: .current,
+        placeSource: .neighbor
+      ),
+      in: context
+    )
+
+    #expect(visit.placeVisitDetails?.place?.id == work.id)
+    #expect(transit.transitDetails?.originPlace?.id == work.id)
+    #expect(transit.transitDetails?.distanceMeters == 9_500)
+    #expect(transitsNeedingDistanceRefresh.isEmpty)
   }
 
   @Test("Timeline-derived composer suggestions advertise automatic linking")

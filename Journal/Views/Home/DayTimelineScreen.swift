@@ -13,6 +13,7 @@ struct DayTimelineScreen: View {
     @State private var pendingCandidateDismissalID: UUID?
     @State private var selectedTransitGap: TimelineTransitGapSelection?
     @State private var selectedPlaceVisitGap: TimelinePlaceVisitGapID?
+    @State private var selectedBoundaryConflict: TimelineBoundaryConflictID?
     var showsCloseButton = true
     var contentRevision = 0
 
@@ -59,7 +60,8 @@ struct DayTimelineScreen: View {
             onAcceptCandidateEntry: acceptCandidateEntry,
             onDismissCandidate: dismissCandidate,
             onAddTransit: addTransit,
-            onAddPlaceVisit: { selectedPlaceVisitGap = $0 }
+            onAddPlaceVisit: { selectedPlaceVisitGap = $0 },
+            onResolveBoundary: { selectedBoundaryConflict = $0 }
         )
         .navigationTitle(title)
         .navigationSubtitle(
@@ -132,6 +134,16 @@ struct DayTimelineScreen: View {
                 gapID: gapID,
                 onCancel: { selectedPlaceVisitGap = nil },
                 onComplete: finishAddingPlaceVisit
+            )
+        }
+        .sheet(item: $selectedBoundaryConflict) { conflictID in
+            TimelineBoundaryResolutionSheet(
+                conflictID: conflictID,
+                onCancel: { selectedBoundaryConflict = nil },
+                onComplete: {
+                    selectedBoundaryConflict = nil
+                    reloadTimelineAndRoutes()
+                }
             )
         }
         .alert(

@@ -183,10 +183,11 @@ struct EntryLinkResolutionEditor: View {
     let neighbor: LogEntry
     @Binding var timeSource: EntryLinkValueSource
     @Binding var placeSource: EntryLinkValueSource
+    var includesTime = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            if !timesMatch {
+            if includesTime && !timesMatch {
                 choiceSection(
                     title: "Time",
                     selection: $timeSource,
@@ -233,7 +234,11 @@ struct EntryLinkResolutionEditor: View {
     }
 
     private var timesMatch: Bool {
-        values.map { $0.current.time == $0.neighbor.time } ?? true
+        values.map {
+            EntryLinkingService.boundaryTimesMatch(
+                $0.current.time, $0.neighbor.time
+            )
+        } ?? true
     }
 
     private var placesMatch: Bool {
