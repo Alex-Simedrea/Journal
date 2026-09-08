@@ -36,8 +36,9 @@ actor LocationGeographyClient {
     }
 }
 
-@MainActor
-enum LocationGeographyService {
+/// Runs on whichever executor owns the passed context; launch-time backfill
+/// calls this from `JournalBackgroundMaintenance`, off the main thread.
+nonisolated enum LocationGeographyService {
     static func populateMissing(in modelContext: ModelContext) async {
         do {
             let placeTargets = try modelContext.fetch(FetchDescriptor<Place>())

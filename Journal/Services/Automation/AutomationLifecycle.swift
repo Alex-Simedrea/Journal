@@ -270,11 +270,11 @@ final class AutomationCoordinator {
             motionSegments: motionSegments
         )
         await Task.yield()
-        maintenance.synchronizeCandidates()
+        await maintenance.synchronizeCandidates()
         await Task.yield()
         await maintenance.synchronizePhotos()
         MotionTransitDetectionService.shared.startLiveUpdates(
-            modelContainer: maintenance.modelContext.container
+            modelContainer: maintenance.modelContainer
         )
     }
 
@@ -291,12 +291,12 @@ final class AutomationCoordinator {
             motionSegments: motionSegments
         )
         await Task.yield()
-        maintenance.synchronizeCandidates()
+        await maintenance.synchronizeCandidates()
         await Task.yield()
         await maintenance.synchronizePhotos()
         VisitMonitoringCoordinator.shared.resumeIfAuthorized()
         MotionTransitDetectionService.shared.startLiveUpdates(
-            modelContainer: maintenance.modelContext.container
+            modelContainer: maintenance.modelContainer
         )
     }
 

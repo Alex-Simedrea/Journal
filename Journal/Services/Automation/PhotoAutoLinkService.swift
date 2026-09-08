@@ -31,11 +31,12 @@ nonisolated struct AutomaticPhotoMatchTarget: Hashable, Sendable {
     let geometry: AutomaticPhotoMatchGeometry
 }
 
-@MainActor
-enum PhotoAutoLinkService {
-    nonisolated static let minimumStaticRadiusMeters = 250.0
-    nonisolated static let corridorMultiplier = 1.25
-    nonisolated static let corridorAllowanceMeters = 2_000.0
+/// Runs on whichever executor owns the passed context; periodic
+/// synchronization happens on `JournalBackgroundMaintenance`.
+nonisolated enum PhotoAutoLinkService {
+    static let minimumStaticRadiusMeters = 250.0
+    static let corridorMultiplier = 1.25
+    static let corridorAllowanceMeters = 2_000.0
 
     static func synchronize(in modelContext: ModelContext) async throws {
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)

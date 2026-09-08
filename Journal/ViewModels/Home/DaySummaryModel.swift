@@ -347,16 +347,62 @@ final class HomeFeedModel {
     private var reloadRevision = 0
 
     @ObservationIgnored
+    private var reloadGeneration = 0
+
+    @ObservationIgnored
+    private var activeReload: Task<Void, Never>?
+
+    @ObservationIgnored
+    private var pendingReload: Task<Void, Never>?
+
+    @ObservationIgnored
     private var periodProjectionTask: Task<Void, Never>?
 
     var days: [TimelineDayKey] { rows.map(\.id) }
 
+    /// Serializes projection loads. Every awaited call returns only after a
+    /// load that started at or after the call has been applied, so a launch
+    /// task never observes an empty model because a concurrent reload
+    /// superseded its own pass. Calls made while a pass is already queued
+    /// share that queued pass instead of stacking further fetches.
     func reload(in modelContext: ModelContext) async {
+        let container = modelContext.container
+        if let pending = pendingReload {
+            await pending.value
+            return
+        }
+        if let active = activeReload {
+            let pending = Task { [weak self] in
+                await active.value
+                guard let self else { return }
+                pendingReload = nil
+                await startReload(container: container).value
+            }
+            pendingReload = pending
+            await pending.value
+            return
+        }
+        await startReload(container: container).value
+    }
+
+    private func startReload(container: ModelContainer) -> Task<Void, Never> {
+        reloadGeneration &+= 1
+        let generation = reloadGeneration
+        let task = Task { [weak self] in
+            await self?.performReload(container: container)
+            guard let self, reloadGeneration == generation else { return }
+            activeReload = nil
+        }
+        activeReload = task
+        return task
+    }
+
+    private func performReload(container: ModelContainer) async {
         reloadRevision &+= 1
         let revision = reloadRevision
         do {
             let store = await JournalPersistenceServices.shared.homeFeed(
-                for: modelContext.container
+                for: container
             )
             let projection = try await store.load()
             guard !Task.isCancelled, revision == reloadRevision else { return }

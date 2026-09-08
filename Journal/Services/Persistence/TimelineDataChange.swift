@@ -28,7 +28,9 @@ enum TimelineDataChange {
     .debounce(for: .milliseconds(75), scheduler: RunLoop.main)
     .eraseToAnyPublisher()
 
-    static func post(_ kind: Kind = .enrichment) {
+    /// Safe from any executor: `NotificationCenter` posting is thread-safe
+    /// and the publisher above re-delivers on the main run loop.
+    nonisolated static func post(_ kind: Kind = .enrichment) {
         NotificationCenter.default.post(
             name: .timelineDataDidChange,
             object: kind

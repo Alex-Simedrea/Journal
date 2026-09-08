@@ -20,8 +20,9 @@ nonisolated private struct TransitDistanceUpdate: Sendable {
     let distanceMeters: Double
 }
 
-@MainActor
-enum TransitDistanceService {
+/// Runs on whichever executor owns the passed context: the main actor for
+/// entries the UI just edited, or `JournalBackgroundMaintenance` for backfill.
+nonisolated enum TransitDistanceService {
     static func populateMissing(in modelContext: ModelContext) async {
         guard let requests = try? modelContext.fetch(
             FetchDescriptor<LogEntry>()

@@ -3,22 +3,6 @@ import SwiftData
 import SwiftUI
 import UIKit
 
-@MainActor
-@Observable
-private final class HomeFeedDeferredLoadingPolicy {
-    private(set) var allowsLoading = true
-
-    @ObservationIgnored
-    private var phase: ScrollPhase = .idle
-
-    func phaseDidChange(
-        to newPhase: ScrollPhase
-    ) {
-        phase = newPhase
-        allowsLoading = newPhase == .idle
-    }
-}
-
 enum HomeTransitionSource: Hashable {
     case day(TimelineDayKey)
     case period(PeriodSummaryKey)
@@ -82,6 +66,7 @@ struct HomeScreen: View {
     @State private var visibleYear: YearKey?
     @State private var isFeedReady = false
     @State private var isFeedPositioned = false
+    @State private var isFeedScrolling = false
     @State private var didReportInitialFeedReady = false
     @State private var emptyTransitionDay = TimelineDayKey.today()
     @State private var presentedTimeline: PresentedTimeline?
@@ -196,6 +181,7 @@ struct HomeScreen: View {
                 onVisibleAnchorChange: updateVisibleAnchor,
                 onScrollRequestApplied: scrollRequestDidApply,
                 onUserScroll: userDidScrollFeed,
+                onScrollStateChange: { isFeedScrolling = $0 },
                 onOpenDay: {
                     presentTimeline($0, source: .day($0))
                 },
@@ -213,7 +199,7 @@ struct HomeScreen: View {
             )
             .modifier(HomeFeedPrewarmingModifier(
                 model: model,
-                isEnabled: isFeedPositioned,
+                isEnabled: isFeedPositioned && !isFeedScrolling,
                 contentWidth: min(440, max(0, proxy.size.width - 32))
             ))
         }
@@ -720,268 +706,6 @@ private struct HomeFeedPrewarmingModifier: ViewModifier {
     }
 }
 
-private struct HomeFeedContent: View {
-    let model: HomeFeedModel
-    let scale: JournalSummaryScale
-    let namespace: Namespace.ID
-    let emptyTransitionDay: TimelineDayKey
-    let prewarmingEnabled: Bool
-    @Binding var scrollPosition: HomeFeedAnchor?
-    let scrollRequest: HomeFeedScrollRequest?
-    let onVisibleAnchorChange: (JournalSummaryScale, HomeFeedAnchor) -> Void
-    let onScrollRequestApplied: (UUID) -> Void
-    let onUserScroll: () -> Void
-    let onOpenDay: (TimelineDayKey) -> Void
-    let onOpenPeriod: (PeriodSummary) -> Void
-    let onOpenPeriodDay: (TimelineDayKey, PeriodSummaryKey) -> Void
-    let onStartToday: () -> Void
-
-    @State private var deferredLoading = HomeFeedDeferredLoadingPolicy()
-
-    var body: some View {
-        GeometryReader { container in
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(
-                        alignment: .leading,
-                        spacing: scale == .days ? 32 : 34
-                    ) {
-                        switch scale {
-                        case .days:
-                            dayRows
-                        case .months:
-                            periodRows(model.monthRows)
-                        case .years:
-                            periodRows(model.yearRows)
-                        }
-                    }
-                    .scrollTargetLayout()
-                    .frame(maxWidth: 440)
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 16)
-                }
-                .defaultScrollAnchor(.bottom)
-                .contentMargins(.bottom, 16, for: .scrollContent)
-                .scrollPosition(id: $scrollPosition, anchor: .top)
-                .scrollEdgeEffectStyle(.soft, for: [.top, .bottom])
-                .onScrollTargetVisibilityChange(
-                    idType: HomeFeedAnchor.self,
-                    threshold: scale == .days ? 0.1 : 0.2
-                ) { visible in
-                    if let first = visible.first {
-                        onVisibleAnchorChange(scale, first)
-                    }
-                }
-                .onScrollPhaseChange { _, newPhase, context in
-                    if newPhase == .interacting {
-                        onUserScroll()
-                    }
-                    deferredLoading.phaseDidChange(to: newPhase)
-                }
-                .background(Color(uiColor: .systemGroupedBackground))
-                .scrollContentBackground(.hidden)
-                .task(id: scrollRequest?.id) {
-                    guard let scrollRequest,
-                          scrollRequest.scale == scale else { return }
-                    await Task.yield()
-                    guard !Task.isCancelled else { return }
-                    jump(proxy, using: scrollRequest)
-                    await Task.yield()
-                    guard !Task.isCancelled else { return }
-                    jump(proxy, using: scrollRequest)
-                    await Task.yield()
-                    guard !Task.isCancelled else { return }
-                    onScrollRequestApplied(scrollRequest.id)
-                }
-            }
-            .modifier(
-                HomeFeedPrewarmingModifier(
-                    model: model,
-                    isEnabled: prewarmingEnabled
-                        && deferredLoading.allowsLoading,
-                    contentWidth: min(440, max(0, container.size.width - 32))
-                )
-            )
-        }
-    }
-
-    @ViewBuilder
-    private var dayRows: some View {
-        if let errorMessage = model.errorMessage {
-            HomeFeedErrorView(message: errorMessage)
-        } else if model.rows.isEmpty {
-            HomeFeedEmptyView(onStartToday: onStartToday)
-                .matchedTransitionSource(
-                    id: HomeTransitionSource.empty(emptyTransitionDay),
-                    in: namespace
-                )
-        } else {
-            ForEach(model.rows) { rowModel in
-                HomeFeedDayRow(
-                    model: rowModel,
-                    namespace: namespace,
-                    loadsDeferredContent: deferredLoading.allowsLoading,
-                    onOpen: { onOpenDay(rowModel.id) }
-                )
-                .id(HomeFeedAnchor.day(rowModel.id))
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func periodRows(_ rows: [PeriodSummaryRowModel]) -> some View {
-        ForEach(rows) { row in
-            PeriodFeedRow(
-                model: row,
-                namespace: namespace,
-                loadsDeferredContent: deferredLoading.allowsLoading,
-                onOpen: { onOpenPeriod(row.summary) },
-                onOpenDay: { onOpenPeriodDay($0, row.summary.key) }
-            )
-            .id(HomeFeedAnchor.period(row.id))
-        }
-    }
-
-    private func jump(
-        _ proxy: ScrollViewProxy,
-        using request: HomeFeedScrollRequest
-    ) {
-        if request.animated {
-            withAnimation(.smooth) {
-                proxy.scrollTo(
-                    request.anchor,
-                    anchor: request.alignment == .top ? .top : .bottom
-                )
-            }
-            return
-        }
-
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            proxy.scrollTo(
-                request.anchor,
-                anchor: request.alignment == .top ? .top : .bottom
-            )
-        }
-    }
-}
-
-private struct HomeFeedDayRow: View {
-    let model: DaySummaryRowModel
-    let namespace: Namespace.ID
-    let loadsDeferredContent: Bool
-    let onOpen: () -> Void
-
-    var body: some View {
-        Button(action: onOpen) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(DaySummaryDatePresentation.dayTitle(for: model.summary.day))
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.primary)
-                DaySummaryCardContent(
-                    model: model,
-                    loadsDeferredContent: loadsDeferredContent
-                )
-            }
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .matchedTransitionSource(
-            id: HomeTransitionSource.day(model.id),
-            in: namespace
-        )
-        .accessibilityHint("Opens this day’s timeline")
-        .task(id: enrichmentTaskID) {
-            guard loadsDeferredContent else { return }
-            try? await Task.sleep(for: .milliseconds(350))
-            guard !Task.isCancelled else { return }
-            await model.loadEnrichment()
-        }
-    }
-
-    private var enrichmentTaskID: DayEnrichmentTaskID {
-        DayEnrichmentTaskID(
-            loadsDeferredContent: loadsDeferredContent,
-            revision: model.enrichmentRevision
-        )
-    }
-}
-
-private struct DayEnrichmentTaskID: Hashable {
-    let loadsDeferredContent: Bool
-    let revision: Int
-}
-
-private struct PeriodFeedRow: View {
-    let model: PeriodSummaryRowModel
-    let namespace: Namespace.ID
-    let loadsDeferredContent: Bool
-    let onOpen: () -> Void
-    let onOpenDay: (TimelineDayKey) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.title2.weight(.bold))
-            PeriodSummaryCardContent(
-                model: model,
-                loadsDeferredContent: loadsDeferredContent,
-                onOpenDay: onOpenDay
-            )
-        }
-        .contentShape(.rect)
-        .onTapGesture(perform: onOpen)
-        .matchedTransitionSource(
-            id: HomeTransitionSource.period(model.summary.key),
-            in: namespace
-        )
-        .accessibilityHint("Opens the next level of this period")
-        .task(id: loadsDeferredContent) {
-            guard loadsDeferredContent else { return }
-            try? await Task.sleep(for: .milliseconds(350))
-            guard !Task.isCancelled else { return }
-            await model.loadEnrichment()
-        }
-    }
-
-    private var title: String {
-        switch model.summary.key {
-        case .month(let month): PeriodSummaryDatePresentation.title(for: month)
-        case .year(let year): PeriodSummaryDatePresentation.title(for: year)
-        }
-    }
-}
-
-private struct HomeFeedEmptyView: View {
-    let onStartToday: () -> Void
-
-    var body: some View {
-        ContentUnavailableView {
-            Label("No Journal Days", systemImage: "book.closed")
-        } description: {
-            Text("Create your first entry in today’s timeline.")
-        } actions: {
-            Button("Start Today", action: onStartToday)
-                .buttonStyle(.borderedProminent)
-        }
-        .frame(maxWidth: .infinity, minHeight: 360)
-    }
-}
-
-private struct HomeFeedErrorView: View {
-    let message: String
-
-    var body: some View {
-        ContentUnavailableView {
-            Label("Couldn’t Load Journal", systemImage: "exclamationmark.triangle")
-        } description: {
-            Text(message)
-        }
-        .frame(maxWidth: .infinity, minHeight: 360)
-    }
-}
 
 private struct TimelineFullScreenCover: View {
     @State private var selectedDay: TimelineDayKey

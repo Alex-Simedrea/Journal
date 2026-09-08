@@ -73,8 +73,7 @@ private struct JournalApplicationContent: View {
             async let backgroundMaintenance: Void = runBackgroundMaintenance(
                 maintenance
             )
-            _ = try? await ContactPersonSyncService
-                .synchronizeAllContacts(in: modelContext)
+            try? await maintenance.synchronizeContacts()
             await workoutImports.start(modelContainer: modelContext.container)
             await backgroundMaintenance
             contentRevision &+= 1

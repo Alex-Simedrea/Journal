@@ -85,19 +85,11 @@ final class AutomationCandidateReviewModel {
             guard performEnrichment else { return true }
             let acceptedEntryID = acceptedEntry.id
             let acceptedKind = acceptedEntry.kind
-            let enrichmentContext = modelContext.container.mainContext
-            _ = try? await EntryWeatherService.populate(
+            let maintenance = await JournalPersistenceServices.shared
+                .maintenance(for: modelContext.container)
+            await maintenance.enrichNewEntry(
                 entryID: acceptedEntryID,
-                in: enrichmentContext
-            )
-            if acceptedKind == .transit {
-                await TransitDistanceService.populate(
-                    entryID: acceptedEntryID,
-                    in: enrichmentContext
-                )
-            }
-            try? await PhotoAutoLinkService.synchronize(
-                in: enrichmentContext
+                includesDistance: acceptedKind == .transit
             )
             return true
         } catch {

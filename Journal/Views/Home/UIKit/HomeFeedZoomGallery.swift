@@ -56,7 +56,7 @@ struct HomeFeedZoomGallery: View {
                 scale: scale, contentRevision: 0, emptyTransitionDay: days[0].id,
                 scrollRequest: request,
                 callbacks: .init(onVisibleAnchorChange: { _, _ in }, onScrollRequestApplied: { _ in },
-                    onUserScroll: {}, onOpenDay: { _ in }, onOpenPeriod: { _ in },
+                    onUserScroll: {}, onScrollStateChange: { _ in }, onOpenDay: { _ in }, onOpenPeriod: { _ in },
                     onOpenPeriodDay: { _, _ in }, onStartToday: {},
                     onTimelineDayChange: { .day($0) }, onTimelineDismiss: {}))
         }

@@ -1,18 +1,13 @@
 import Foundation
 import SwiftData
 
-/// Performs maintenance through the same context used by journal editors.
-@MainActor
-final class JournalBackgroundMaintenance {
-    // A context does not substitute for owning the container/store lifetime.
-    let modelContainer: ModelContainer
-    let modelContext: ModelContext
-
-    init(modelContainer: ModelContainer) {
-        self.modelContainer = modelContainer
-        modelContext = modelContainer.mainContext
-    }
-
+/// Performs detection, enrichment, and synchronization work on a dedicated
+/// background executor. Models fetched here never leave the actor: every
+/// operation works on IDs and value snapshots across suspension points,
+/// re-fetches its targets afterwards, and saves through
+/// `JournalPersistence.save` so a failure cannot leave staged mutations.
+@ModelActor
+actor JournalBackgroundMaintenance {
 #if DEBUG
     func executorUsesMainThreadForTesting() -> Bool {
         Thread.isMainThread
@@ -104,5 +99,40 @@ final class JournalBackgroundMaintenance {
         await EntryWeatherService.populateMissing(in: modelContext)
         await TransitDistanceService.populateMissing(in: modelContext)
         await LocationGeographyService.populateMissing(in: modelContext)
+    }
+
+    func refreshEntryWeather(entryID: UUID) async {
+        await EntryWeatherService.populateEndpoints(
+            entryID: entryID,
+            in: modelContext,
+            force: true
+        )
+    }
+
+    /// Post-creation enrichment for a single accepted or composed entry.
+    func enrichNewEntry(
+        entryID: UUID,
+        includesWeather: Bool = true,
+        includesDistance: Bool = false
+    ) async {
+        if includesWeather {
+            _ = try? await EntryWeatherService.populate(
+                entryID: entryID,
+                in: modelContext
+            )
+        }
+        if includesDistance {
+            await TransitDistanceService.populate(
+                entryID: entryID,
+                in: modelContext
+            )
+        }
+        await synchronizePhotos()
+    }
+
+    func synchronizeContacts() async throws {
+        _ = try await ContactPersonSyncService.synchronizeAllContacts(
+            in: modelContext
+        )
     }
 }

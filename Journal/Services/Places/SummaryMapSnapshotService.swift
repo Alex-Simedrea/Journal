@@ -852,6 +852,14 @@ actor SummaryMapSnapshotStore {
             .appendingPathExtension("heic")
     }
 
+    /// How many content revisions of one slot survive per appearance, beyond
+    /// the revision just written. A day or period alternates between at least
+    /// two contents while route enrichment is pending (endpoint-only and
+    /// exact-route projections), and reloads recreate the base content.
+    /// Deleting every other revision on write made those alternations destroy
+    /// each other's files, forcing a fresh MapKit render on every pass.
+    private static let retainedContentRevisionsPerSlot = 3
+
     private func trimContentRevisions(
         for request: SummaryMapSnapshotRequest
     ) throws {
@@ -859,7 +867,10 @@ actor SummaryMapSnapshotStore {
             path: request.slotHash,
             directoryHint: .isDirectory
         )
-        let keys: Set<URLResourceKey> = [.isDirectoryKey]
+        let keys: Set<URLResourceKey> = [
+            .isDirectoryKey,
+            .contentModificationDateKey,
+        ]
         let revisions = try FileManager.default.contentsOfDirectory(
             at: slotDirectory,
             includingPropertiesForKeys: Array(keys),
@@ -869,9 +880,18 @@ actor SummaryMapSnapshotStore {
             return values?.isDirectory == true
         }
         let appearancePrefix = "\(request.variant.appearance.rawValue)-"
+        let staleRevisions = revisions
+            .filter { $0.lastPathComponent != request.contentHash }
+            .sorted { lhs, rhs in
+                let lhsDate = (try? lhs.resourceValues(forKeys: keys))?
+                    .contentModificationDate ?? .distantPast
+                let rhsDate = (try? rhs.resourceValues(forKeys: keys))?
+                    .contentModificationDate ?? .distantPast
+                return lhsDate > rhsDate
+            }
+            .dropFirst(Self.retainedContentRevisionsPerSlot)
 
-        for revision in revisions where
-            revision.lastPathComponent != request.contentHash {
+        for revision in staleRevisions {
             let files = (try? FileManager.default.contentsOfDirectory(
                 at: revision,
                 includingPropertiesForKeys: nil,

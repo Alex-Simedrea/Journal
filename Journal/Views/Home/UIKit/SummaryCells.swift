@@ -1,3 +1,4 @@
+import Observation
 import UIKit
 
 @MainActor
@@ -10,6 +11,8 @@ final class UIKitDaySummaryCell: UICollectionViewCell {
     private let titleLabel = UILabel()
     private let canvas = UIKitDaySummaryCanvasView()
     private var model: DaySummaryRowModel?
+    private var loadsDeferredContent = false
+    private var observationGeneration = 0
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -48,6 +51,7 @@ final class UIKitDaySummaryCell: UICollectionViewCell {
     ) {
         UIView.performWithoutAnimation {
             self.model = model
+            self.loadsDeferredContent = loadsDeferredContent
             let title = DaySummaryDatePresentation.dayTitle(for: model.summary.day)
             titleLabel.text = title
             accessibilityLabel = title
@@ -56,6 +60,31 @@ final class UIKitDaySummaryCell: UICollectionViewCell {
                 loadsDeferredContent: loadsDeferredContent
             )
             setNeedsLayout()
+        }
+        observeModel()
+    }
+
+    /// Enrichment (weather, exact workout routes) lands on the row model
+    /// whenever its background work finishes. Reconfigure this cell as soon
+    /// as that happens instead of waiting for the next scroll to redisplay it.
+    private func observeModel() {
+        observationGeneration &+= 1
+        let generation = observationGeneration
+        guard let model else { return }
+        withObservationTracking {
+            _ = model.weatherState
+            _ = model.overviewData
+            _ = model.isWorkoutRouteEnrichmentPending
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self,
+                      observationGeneration == generation,
+                      self.model === model else { return }
+                configure(
+                    model: model,
+                    loadsDeferredContent: loadsDeferredContent
+                )
+            }
         }
     }
 
@@ -78,6 +107,7 @@ final class UIKitDaySummaryCell: UICollectionViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        observationGeneration &+= 1
         model = nil
         titleLabel.text = nil
         canvas.reset()
@@ -89,6 +119,7 @@ final class UIKitDaySummaryCell: UICollectionViewCell {
     }
 
     func didEndDisplaying() {
+        observationGeneration &+= 1
         canvas.reset()
     }
 }
@@ -103,6 +134,9 @@ final class UIKitPeriodSummaryCell: UICollectionViewCell {
     private let titleLabel = UILabel()
     private let canvas = UIKitPeriodSummaryCanvasView()
     private var model: PeriodSummaryRowModel?
+    private var loadsDeferredContent = false
+    private var onOpenDay: ((TimelineDayKey) -> Void)?
+    private var observationGeneration = 0
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -140,6 +174,8 @@ final class UIKitPeriodSummaryCell: UICollectionViewCell {
     ) {
         UIView.performWithoutAnimation {
             self.model = model
+            self.loadsDeferredContent = loadsDeferredContent
+            self.onOpenDay = onOpenDay
             let title: String
             switch model.summary.key {
             case .month(let month):
@@ -157,6 +193,32 @@ final class UIKitPeriodSummaryCell: UICollectionViewCell {
                 onOpenDay: onOpenDay
             )
             setNeedsLayout()
+        }
+        observeModel()
+    }
+
+    /// Route enrichment replaces the period's map projections after HealthKit
+    /// lookups finish. Reconfigure as soon as the row model changes.
+    private func observeModel() {
+        observationGeneration &+= 1
+        let generation = observationGeneration
+        guard let model else { return }
+        withObservationTracking {
+            _ = model.overviewData
+            _ = model.frequentRouteData
+            _ = model.longestJourneyData
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self,
+                      observationGeneration == generation,
+                      self.model === model,
+                      let onOpenDay else { return }
+                configure(
+                    model: model,
+                    loadsDeferredContent: loadsDeferredContent,
+                    onOpenDay: onOpenDay
+                )
+            }
         }
     }
 
@@ -179,7 +241,9 @@ final class UIKitPeriodSummaryCell: UICollectionViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        observationGeneration &+= 1
         model = nil
+        onOpenDay = nil
         titleLabel.text = nil
         canvas.reset()
     }
@@ -190,6 +254,7 @@ final class UIKitPeriodSummaryCell: UICollectionViewCell {
     }
 
     func didEndDisplaying() {
+        observationGeneration &+= 1
         canvas.reset()
     }
 }

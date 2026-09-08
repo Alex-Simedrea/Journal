@@ -6,7 +6,8 @@ enum UIKitHomeFeedAssetPrefetcher {
         day row: DaySummaryRowModel,
         contentWidth: CGFloat,
         displayScale: CGFloat,
-        appearance: SummaryMapSnapshotRequest.Appearance
+        appearance: SummaryMapSnapshotRequest.Appearance,
+        rendersMissingSnapshots: Bool = true
     ) async {
         async let photos: Void = SummaryPhotoThumbnailService.prewarm(
             Array(row.summary.photos.prefix(4))
@@ -25,7 +26,7 @@ enum UIKitHomeFeedAssetPrefetcher {
         await SummaryMapSnapshotStore.shared.prewarm(
             requests,
             retainDecodedImages: true,
-            rendersMissingSnapshots: true
+            rendersMissingSnapshots: rendersMissingSnapshots
         )
         _ = await (photos, contacts)
     }
@@ -34,7 +35,8 @@ enum UIKitHomeFeedAssetPrefetcher {
         period row: PeriodSummaryRowModel,
         contentWidth: CGFloat,
         displayScale: CGFloat,
-        appearance: SummaryMapSnapshotRequest.Appearance
+        appearance: SummaryMapSnapshotRequest.Appearance,
+        rendersMissingSnapshots: Bool = true
     ) async {
         async let photos: Void = SummaryPhotoThumbnailService.prewarm(
             Array(row.summary.photos.prefix(4))
@@ -55,7 +57,7 @@ enum UIKitHomeFeedAssetPrefetcher {
         await SummaryMapSnapshotStore.shared.prewarm(
             requests,
             retainDecodedImages: true,
-            rendersMissingSnapshots: true
+            rendersMissingSnapshots: rendersMissingSnapshots
         )
         _ = await (photos, contacts)
     }
@@ -209,6 +211,8 @@ final class UIKitSummaryMapImageView: UIImageView {
     private var slotID = ""
     private var source = Source.overview(TimelineOverviewData())
     private var loadsContent = false
+    /// Cache key of the image currently displayed (or being decoded for
+    /// display). `nil` whenever the shown image may not match the source.
     private var requestKey: String?
     private var loadTask: Task<Void, Never>?
     private var generation = 0
@@ -267,19 +271,29 @@ final class UIKitSummaryMapImageView: UIImageView {
         loadsContent: Bool,
         accessibilityLabel: String
     ) {
-        let changed = self.slotID != slotID || self.source != source
-            || self.loadsContent != loadsContent
+        let slotChanged = self.slotID != slotID
+        let contentChanged = slotChanged || self.source != source
+        let loadsContentChanged = self.loadsContent != loadsContent
         self.slotID = slotID
         self.source = source
         self.loadsContent = loadsContent
         self.accessibilityLabel = accessibilityLabel
-        guard changed else { return }
+        guard contentChanged || loadsContentChanged else { return }
         generation &+= 1
-        requestKey = nil
         loadTask?.cancel()
         loadTask = nil
-        image = nil
+        if contentChanged {
+            requestKey = nil
+        }
+        if slotChanged {
+            // Only a different day/period invalidates what is on screen.
+            // Enrichment of the same slot (exact workout routes, refreshed
+            // projections) keeps the previous image until its replacement
+            // is decoded, instead of flashing an empty tile.
+            image = nil
+        }
         setNeedsLayout()
+        loadIfNeeded()
     }
 
     /// Resolve only already cached media before the transition freezes the view.
@@ -362,15 +376,18 @@ final class UIKitSummaryMapImageView: UIImageView {
                 appearance: appearance
             ), !Task.isCancelled,
             self?.generation == expectedGeneration else { return }
-            guard self?.requestKey != request.cacheKey else { return }
-            self?.requestKey = request.cacheKey
+            let expectedKey = request.cacheKey
+            // Already showing exactly this content.
+            guard self?.requestKey != expectedKey || self?.image == nil else {
+                return
+            }
 
             if let cached = SummaryMapDecodedImageCache.cachedImage(for: request) {
+                self?.requestKey = expectedKey
                 self?.image = cached
                 return
             }
 
-            let expectedKey = request.cacheKey
             let cachedData = await SummaryMapSnapshotStore.shared.cachedData(
                 for: request
             )
@@ -382,15 +399,20 @@ final class UIKitSummaryMapImageView: UIImageView {
                     for: request
                 )
             } else {
+                // Rendering is deferred (for instance while the feed
+                // scrolls). Leave `requestKey` unset so the next configure
+                // pass with `loadsContent` retries this content.
                 encodedData = nil
             }
             guard let encodedData, !Task.isCancelled,
+                  self?.generation == expectedGeneration,
                   let decoded = await SummaryMapDecodedImageCache.image(
                     data: encodedData,
                     for: request
                   ),
                   !Task.isCancelled,
-                  self?.requestKey == expectedKey else { return }
+                  self?.generation == expectedGeneration else { return }
+            self?.requestKey = expectedKey
             self?.image = decoded
         }
     }

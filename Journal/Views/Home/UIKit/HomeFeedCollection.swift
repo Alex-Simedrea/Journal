@@ -12,6 +12,7 @@ struct UIKitHomeFeed: UIViewControllerRepresentable {
     let onVisibleAnchorChange: (JournalSummaryScale, HomeFeedAnchor) -> Void
     let onScrollRequestApplied: (UUID) -> Void
     let onUserScroll: () -> Void
+    let onScrollStateChange: (Bool) -> Void
     let onOpenDay: (TimelineDayKey) -> Void
     let onOpenPeriod: (PeriodSummary) -> Void
     let onOpenPeriodDay: (TimelineDayKey, PeriodSummaryKey) -> Void
@@ -41,6 +42,7 @@ struct UIKitHomeFeed: UIViewControllerRepresentable {
                 onVisibleAnchorChange: onVisibleAnchorChange,
                 onScrollRequestApplied: onScrollRequestApplied,
                 onUserScroll: onUserScroll,
+                onScrollStateChange: onScrollStateChange,
                 onOpenDay: onOpenDay,
                 onOpenPeriod: onOpenPeriod,
                 onOpenPeriodDay: onOpenPeriodDay,
@@ -58,6 +60,7 @@ final class HomeFeedViewController: UIViewController {
         let onVisibleAnchorChange: (JournalSummaryScale, HomeFeedAnchor) -> Void
         let onScrollRequestApplied: (UUID) -> Void
         let onUserScroll: () -> Void
+        let onScrollStateChange: (Bool) -> Void
         let onOpenDay: (TimelineDayKey) -> Void
         let onOpenPeriod: (PeriodSummary) -> Void
         let onOpenPeriodDay: (TimelineDayKey, PeriodSummaryKey) -> Void
@@ -366,7 +369,11 @@ final class HomeFeedViewController: UIViewController {
         for day: TimelineDayKey
     ) {
         guard let row = dayRows[day] else { return }
-        cell.configure(model: row, loadsDeferredContent: true)
+        // While the user scrolls, cells only surface already cached content;
+        // MapKit renders would otherwise compete with UIKit for main-thread
+        // frame time. `setScrolling(false)` reconfigures visible cells so
+        // deferred loads resume the moment the feed settles.
+        cell.configure(model: row, loadsDeferredContent: !isScrolling)
     }
 
     private func configure(
@@ -376,7 +383,7 @@ final class HomeFeedViewController: UIViewController {
         guard let row = periodRows[key] else { return }
         cell.configure(
             model: row,
-            loadsDeferredContent: true,
+            loadsDeferredContent: !isScrolling,
             onOpenDay: { [weak self] day in
                 self?.presentTimeline(day, source: .period(key))
             }
@@ -545,8 +552,14 @@ final class HomeFeedViewController: UIViewController {
         if !value {
             for indexPath in collectionView.indexPathsForVisibleItems {
                 scheduleEnrichment(at: indexPath)
+                if let item = dataSource.itemIdentifier(for: indexPath) {
+                    // Prefetch passes that ran during the scroll skipped
+                    // MapKit renders; retry them now that the feed is idle.
+                    startPrefetching(item)
+                }
             }
         }
+        callbacks?.onScrollStateChange(value)
     }
 
     private func scheduleEnrichment(at indexPath: IndexPath) {
@@ -566,15 +579,6 @@ final class HomeFeedViewController: UIViewController {
             }
             guard !Task.isCancelled else { return }
             enrichmentTasks[item] = nil
-            guard let currentIndexPath = dataSource.indexPath(for: item) else { return }
-            switch (item, collectionView.cellForItem(at: currentIndexPath)) {
-            case let (.day(day), cell as UIKitDaySummaryCell):
-                configure(cell, for: day)
-            case let (.period(period), cell as UIKitPeriodSummaryCell):
-                configure(cell, for: period)
-            default:
-                break
-            }
         }
         enrichmentTasks[item] = task
     }
@@ -585,6 +589,10 @@ final class HomeFeedViewController: UIViewController {
         let scale = traitCollection.displayScale
         let appearance: SummaryMapSnapshotRequest.Appearance =
             traitCollection.userInterfaceStyle == .dark ? .dark : .light
+        // Rendering a missing snapshot needs MKMapView time on the main
+        // thread. During a scroll, only cached snapshots are warmed; the
+        // renders happen when the feed settles.
+        let rendersMissingSnapshots = !isScrolling
         prefetchTasks[item] = Task { [weak self] in
             guard let self else { return }
             switch item {
@@ -596,7 +604,8 @@ final class HomeFeedViewController: UIViewController {
                     day: row,
                     contentWidth: width,
                     displayScale: scale,
-                    appearance: appearance
+                    appearance: appearance,
+                    rendersMissingSnapshots: rendersMissingSnapshots
                 )
             case .period(let period):
                 guard let row = periodRows[period] else { return }
@@ -606,23 +615,13 @@ final class HomeFeedViewController: UIViewController {
                     period: row,
                     contentWidth: width,
                     displayScale: scale,
-                    appearance: appearance
+                    appearance: appearance,
+                    rendersMissingSnapshots: rendersMissingSnapshots
                 )
             case .empty, .error:
                 break
             }
             prefetchTasks[item] = nil
-            guard let currentIndexPath = dataSource.indexPath(for: item) else {
-                return
-            }
-            switch (item, collectionView.cellForItem(at: currentIndexPath)) {
-            case let (.day(day), cell as UIKitDaySummaryCell):
-                configure(cell, for: day)
-            case let (.period(period), cell as UIKitPeriodSummaryCell):
-                configure(cell, for: period)
-            default:
-                break
-            }
         }
     }
 

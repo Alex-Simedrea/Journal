@@ -13,17 +13,12 @@ nonisolated struct ResolvedWorkoutImport: Sendable {
     let locations: WorkoutResolvedLocations
 }
 
-@MainActor
-final class WorkoutImportPersistence {
-    // A context does not substitute for owning the container/store lifetime.
-    let modelContainer: ModelContainer
-    let modelContext: ModelContext
-
-    init(modelContainer: ModelContainer) {
-        self.modelContainer = modelContainer
-        modelContext = modelContainer.mainContext
-    }
-
+/// Applies HealthKit change sets on a background executor. The pipeline hands
+/// this actor only value snapshots (`HealthKitWorkoutChangeSet`,
+/// `ResolvedWorkoutImport`); every fetch, reconciliation, and save happens
+/// inside one isolated call with no suspension points in between.
+@ModelActor
+actor WorkoutImportPersistence {
     func references() throws -> [WorkoutEntryReference] {
         try workoutEntries().compactMap { entry in
             guard let details = entry.workoutDetails else { return nil }
@@ -40,7 +35,7 @@ final class WorkoutImportPersistence {
         _ changeSet: HealthKitWorkoutChangeSet,
         wakeUps: [HealthKitWakeUpSnapshot],
         resolvedSnapshots: [ResolvedWorkoutImport]
-    ) async throws {
+    ) throws {
         do {
             let existingEntries = try workoutEntries()
             clearResolvedLocationReviews(in: existingEntries)

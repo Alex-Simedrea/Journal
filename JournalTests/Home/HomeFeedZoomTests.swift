@@ -482,7 +482,7 @@ struct HomeFeedZoomTests {
                 scrollRequest: HomeFeedScrollRequest(scale: scale, anchor: anchor, alignment: .top,
                                                      preservesZoomViewport: true),
                 callbacks: .init(onVisibleAnchorChange: { _, _ in }, onScrollRequestApplied: { _ in },
-                    onUserScroll: {}, onOpenDay: { _ in }, onOpenPeriod: { _ in },
+                    onUserScroll: {}, onScrollStateChange: { _ in }, onOpenDay: { _ in }, onOpenPeriod: { _ in },
                     onOpenPeriodDay: { _, _ in }, onStartToday: {},
                     onTimelineDayChange: { .day($0) }, onTimelineDismiss: {}))
         }

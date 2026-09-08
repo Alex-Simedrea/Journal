@@ -143,8 +143,9 @@ actor ContactsService {
     ]
 }
 
-@MainActor
-enum ContactPersonSyncService {
+/// Runs on whichever executor owns the passed context; the launch-time sync
+/// happens on `JournalBackgroundMaintenance`, off the main thread.
+nonisolated enum ContactPersonSyncService {
     static func synchronizeAllContacts(
         in modelContext: ModelContext
     ) async throws -> ContactSyncResult {
@@ -209,8 +210,8 @@ enum ContactPersonSyncService {
     }
 }
 
-@MainActor
-enum ContactImportExclusionStore {
+/// `UserDefaults` is thread-safe; callers read this from any executor.
+nonisolated enum ContactImportExclusionStore {
     private static let key = "excludedContactImportIdentifiers"
 
     static var identifiers: Set<String> {

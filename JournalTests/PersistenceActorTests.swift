@@ -33,7 +33,7 @@ private actor ReviewPersistenceProbe {
 
 @Suite("Persistence actors")
 struct PersistenceActorTests {
-    @Test("Persistence services share the UI context and executor")
+    @Test("Persistence services run off the main thread and are cached per container")
     func backgroundModelActorExecutor() async throws {
         let schema = Schema([
             LogEntry.self,
@@ -52,12 +52,17 @@ struct PersistenceActorTests {
         let actor = await JournalPersistenceServices.shared.maintenance(
             for: container
         )
-        #expect(actor.executorUsesMainThreadForTesting())
-        #expect(actor.modelContext === container.mainContext)
+        #expect(await !actor.executorUsesMainThreadForTesting())
+        #expect(actor.modelContainer === container)
         let again = await JournalPersistenceServices.shared.maintenance(
             for: container
         )
         #expect(actor === again)
+
+        let feed = await JournalPersistenceServices.shared.homeFeed(
+            for: container
+        )
+        #expect(await !feed.executorUsesMainThreadForTesting())
     }
 
     @Test("Review collections materialize on a model actor")

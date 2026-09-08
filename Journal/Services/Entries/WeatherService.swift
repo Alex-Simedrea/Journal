@@ -169,13 +169,14 @@ actor WeatherKitEntryClient {
     }
 }
 
-@MainActor
-enum EntryWeatherService {
-    nonisolated static func request(for entry: LogEntry) -> EntryWeatherRequest? {
+/// Runs on whichever executor owns the passed context: the main actor for
+/// entries the UI just edited, or `JournalBackgroundMaintenance` for backfill.
+nonisolated enum EntryWeatherService {
+    static func request(for entry: LogEntry) -> EntryWeatherRequest? {
         request(for: entry, endpoint: .start)
     }
 
-    nonisolated static func request(
+    static func request(
         for entry: LogEntry,
         endpoint: EntryWeatherEndpoint
     ) -> EntryWeatherRequest? {
@@ -304,12 +305,9 @@ enum EntryWeatherService {
         let entryID = entry.id
         let container = modelContext.container
         Task {
-            let enrichmentContext = container.mainContext
-            await populateEndpoints(
-                entryID: entryID,
-                in: enrichmentContext,
-                force: true
-            )
+            let maintenance = await JournalPersistenceServices.shared
+                .maintenance(for: container)
+            await maintenance.refreshEntryWeather(entryID: entryID)
         }
     }
 
@@ -350,7 +348,7 @@ enum EntryWeatherService {
         return try modelContext.fetch(descriptor).first
     }
 
-    nonisolated private static func resolvedLocation(
+    private static func resolvedLocation(
         for entry: LogEntry,
         endpoint: EntryWeatherEndpoint
     ) -> Location? {

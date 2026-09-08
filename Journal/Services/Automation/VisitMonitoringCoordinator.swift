@@ -66,7 +66,7 @@ final class VisitMonitoringCoordinator: NSObject, CLLocationManagerDelegate {
             let maintenance = await JournalPersistenceServices.shared.maintenance(
                 for: modelContainer
             )
-            maintenance.persistVisit(snapshot)
+            await maintenance.persistVisit(snapshot)
         }
     }
 
@@ -77,7 +77,9 @@ final class VisitMonitoringCoordinator: NSObject, CLLocationManagerDelegate {
         print("Visit monitoring failed: \(error)")
     }
 
-    static func enrichClosedVisits(
+    /// Runs on whichever executor owns the passed context; periodic
+    /// synchronization calls this from `JournalBackgroundMaintenance`.
+    nonisolated static func enrichClosedVisits(
         in modelContext: ModelContext,
         resolve: (Location) async throws -> Location = { location in
             await LocationService.shared.location(at: location.coordinate)

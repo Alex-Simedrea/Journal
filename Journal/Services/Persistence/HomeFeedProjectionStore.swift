@@ -13,18 +13,19 @@ nonisolated struct HomeFeedProjectionResult: Sendable {
     let weatherStorageEntryByDay: [TimelineDayKey: UUID]
 }
 
-@MainActor
-final class HomeFeedProjectionStore {
-    // A context does not substitute for owning the container/store lifetime.
-    let modelContainer: ModelContainer
-    let modelContext: ModelContext
-
-    init(modelContainer: ModelContainer) {
-        self.modelContainer = modelContainer
-        modelContext = modelContainer.mainContext
+/// Read-mostly projection of the whole journal into value snapshots for the
+/// home feed. Runs on its own background executor: models fetched here never
+/// leave the actor, and the only write (`persistWeather`) re-fetches its
+/// target by ID and saves in the same isolation without suspension points.
+@ModelActor
+actor HomeFeedProjectionStore {
+#if DEBUG
+    func executorUsesMainThreadForTesting() -> Bool {
+        Thread.isMainThread
     }
+#endif
 
-    func load() async throws -> HomeFeedProjectionResult {
+    func load() throws -> HomeFeedProjectionResult {
         let entries = try modelContext.fetch(
             FetchDescriptor<LogEntry>(
                 sortBy: [SortDescriptor(\LogEntry.createdAt)]
@@ -33,9 +34,7 @@ final class HomeFeedProjectionStore {
         let snapshots = entries.map(TimelineEntrySnapshot.init)
         let recordsByID = Dictionary(entries.map { ($0.id, $0.dayWeatherRecords) },
                                      uniquingKeysWith: { first, _ in first })
-        return await Task.detached(priority: .userInitiated) {
-            Self.project(snapshots: snapshots, recordsByID: recordsByID)
-        }.value
+        return Self.project(snapshots: snapshots, recordsByID: recordsByID)
     }
 
     nonisolated private static func project(

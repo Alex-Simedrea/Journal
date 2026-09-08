@@ -129,7 +129,7 @@ final class MotionTransitDetectionService {
                     .maintenance(
                         for: modelContainer
                     )
-                maintenance.persistMotion(segments)
+                await maintenance.persistMotion(segments)
             }
         }
     }

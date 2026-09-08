@@ -256,17 +256,11 @@ struct DayTimelineScreen: View {
     private func enrichAcceptedTransit(entryID: UUID) {
         let container = modelContext.container
         Task {
-            let enrichmentContext = container.mainContext
-            _ = try? await EntryWeatherService.populate(
+            let maintenance = await JournalPersistenceServices.shared
+                .maintenance(for: container)
+            await maintenance.enrichNewEntry(
                 entryID: entryID,
-                in: enrichmentContext
-            )
-            await TransitDistanceService.populate(
-                entryID: entryID,
-                in: enrichmentContext
-            )
-            try? await PhotoAutoLinkService.synchronize(
-                in: enrichmentContext
+                includesDistance: true
             )
         }
     }
@@ -286,25 +280,21 @@ struct DayTimelineScreen: View {
         reloadTimelineAndRoutes()
         let container = modelContext.container
         Task {
-            let enrichmentContext = container.mainContext
-            _ = try? await EntryWeatherService.populate(
-                entryID: entryID,
-                in: enrichmentContext
-            )
-            try? await PhotoAutoLinkService.synchronize(in: enrichmentContext)
+            let maintenance = await JournalPersistenceServices.shared
+                .maintenance(for: container)
+            await maintenance.enrichNewEntry(entryID: entryID)
         }
     }
 
     private func enrichGapTransit(entryID: UUID) {
         let container = modelContext.container
         Task {
-            let enrichmentContext = container.mainContext
-            await TransitDistanceService.populate(
+            let maintenance = await JournalPersistenceServices.shared
+                .maintenance(for: container)
+            await maintenance.enrichNewEntry(
                 entryID: entryID,
-                in: enrichmentContext
-            )
-            try? await PhotoAutoLinkService.synchronize(
-                in: enrichmentContext
+                includesWeather: false,
+                includesDistance: true
             )
         }
     }

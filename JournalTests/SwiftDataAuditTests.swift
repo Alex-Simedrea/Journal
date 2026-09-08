@@ -393,7 +393,7 @@ struct SwiftDataAuditTests {
         search.load(in: context)
         let store = await JournalPersistenceServices.shared.homeFeed(for: container)
         let snapshot = try await store.load()
-        #expect(store.modelContext === context)
+        #expect(store.modelContainer === container)
         #expect(home.entry(withID: id) === entry)
         try JournalDeletionService.delete(entry, in: context)
         #expect(home.entry(withID: id) == nil)
