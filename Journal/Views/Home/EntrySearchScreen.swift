@@ -58,12 +58,11 @@ struct EntrySearchScreen: View {
                 Text(operationErrorMessage ?? "An unknown error occurred.")
             }
             .task {
-                model.load(in: modelContext)
-                await Task.yield()
                 isSearchFocused = true
+                await model.load(in: modelContext)
             }
             .onReceive(TimelineDataChange.publisher) { _ in
-                model.load(in: modelContext)
+                Task { await model.load(in: modelContext) }
             }
     }
 
@@ -120,11 +119,11 @@ struct EntrySearchScreen: View {
                 operationErrorMessage = error.localizedDescription
             }
         }
-        model.load(in: modelContext)
+        reloadEntries()
     }
 
     private func reloadEntries() {
-        model.load(in: modelContext)
+        Task { await model.load(in: modelContext) }
     }
 }
 

@@ -209,39 +209,48 @@ final class EntrySearchModel {
     private(set) var errorMessage: String?
 
     @ObservationIgnored
-    private var entriesByID: [UUID: LogEntry] = [:]
-    @ObservationIgnored
     private var candidates: [EntrySearchCandidate] = []
+    @ObservationIgnored
+    private var modelContext: ModelContext?
+    @ObservationIgnored
+    private var loadRevision = 0
 
     var hasQuery: Bool {
         !EntrySearchIndex.normalize(query).isEmpty
     }
 
-    func load(in modelContext: ModelContext) {
+    /// Builds the search index from the shared background projection instead
+    /// of fetching and snapshotting the whole journal on the main thread.
+    func load(in modelContext: ModelContext) async {
+        self.modelContext = modelContext
+        loadRevision &+= 1
+        let revision = loadRevision
         do {
-            let entries = try modelContext.fetch(
-                FetchDescriptor<LogEntry>(
-                    sortBy: [SortDescriptor(\LogEntry.createdAt)]
-                )
+            let store = await JournalPersistenceServices.shared.homeFeed(
+                for: modelContext.container
             )
-            entriesByID = Dictionary(
-                uniqueKeysWithValues: entries.map { ($0.id, $0) }
-            )
-            candidates = entries.map {
-                EntrySearchCandidate(snapshot: TimelineEntrySnapshot(entry: $0))
-            }
+            let projection = try await store.load()
+            guard revision == loadRevision else { return }
+            candidates = projection.snapshots.map(EntrySearchCandidate.init)
             errorMessage = nil
             applySearch()
         } catch {
-            entriesByID = [:]
+            guard revision == loadRevision else { return }
             candidates = []
             sections = []
             errorMessage = error.localizedDescription
         }
     }
 
+    /// Navigation resolves one live model on demand; the index itself never
+    /// retains fetched models.
     func entry(withID id: UUID) -> LogEntry? {
-        guard let entry = entriesByID[id],
+        guard let modelContext else { return nil }
+        var descriptor = FetchDescriptor<LogEntry>(
+            predicate: #Predicate { $0.id == id }
+        )
+        descriptor.fetchLimit = 1
+        guard let entry = try? modelContext.fetch(descriptor).first,
               entry.modelContext != nil, !entry.isDeleted else { return nil }
         return entry
     }

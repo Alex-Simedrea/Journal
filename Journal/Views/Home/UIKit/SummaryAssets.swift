@@ -278,7 +278,12 @@ final class UIKitSummaryMapImageView: UIImageView {
         self.source = source
         self.loadsContent = loadsContent
         self.accessibilityLabel = accessibilityLabel
-        guard contentChanged || loadsContentChanged else { return }
+        guard contentChanged || loadsContentChanged else {
+            // Redisplaying an unchanged tile whose load was cancelled when
+            // it left the screen: resume where it stopped.
+            if image == nil, loadTask == nil { loadIfNeeded() }
+            return
+        }
         generation &+= 1
         loadTask?.cancel()
         loadTask = nil

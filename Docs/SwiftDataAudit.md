@@ -51,7 +51,7 @@ The share extension transports value data through the inbox; it does not open Sw
 
 ## Persistence rules going forward
 
-1. Live app models belong to the main context. A new context is not a background-work strategy by itself. If the architecture later moves to a dedicated persistence actor, the UI must first stop retaining live models and use values/IDs throughout.
+1. Live app models that the UI edits belong to the main context. Whole-journal fetching, projection, and enrichment belong to the per-container background service actors (see the follow-up section below); those actors never hand models out and communicate in value snapshots and IDs. A new context is still not a background-work strategy by itself — the actor's serialization and the value-snapshot discipline together are.
 2. Retain the `ModelContainer` for the entire lifetime of a persistence service. A cached context alone is insufficient. Container-keyed caches must not outlive the container identity they represent.
 3. Across an `await`, carry immutable input values and stable IDs. Resolve the current target again and compare relevant input values before applying a result. Actor isolation does not prevent reentrancy during suspension.
 4. Reviews stay detached until confirmation. Do not attach saved people/places to a review or insert the visible draft itself into a transaction that can roll back.
@@ -98,3 +98,111 @@ Existing kind-conversion code intentionally retains detached old child details s
 The first-import smoke check seeded only a synthetic journey in the dedicated simulator's shared inbox and launched the app's import deep link. The app remained alive, but system HealthKit authorization and URL-opening prompts covered it. Simulator UI controls were unavailable through the enabled computer-use tool, so this does **not** count as end-to-end verification of the share-extension handoff or review presentation. The synthetic inbox file was removed. The automated first-import test covers overlapping airport preparation, library writes, detached draft construction, and concurrent feed loading; the exact reported first-import device crash remains unverified.
 
 Physical-device permission changes, background location delivery, HealthKit delivery while locked, and Live Activity behavior are not exercised by the simulator tests. See the existing recording device test plan for those hardware-specific checks. No debugger reproduction is required to use or review these changes.
+
+## Follow-up: threading correction and home feed lifecycle — September 2026
+
+The first pass of this audit consolidated every persistence service onto the
+container's main context. That fixed graph ownership but moved whole-journal
+fetching, snapshotting, and enrichment onto the main thread: launch blocked
+for seconds, every foreground synchronization and timeline notification
+re-ran an O(journal) fetch on the UI thread, and scrolling contended with
+MapKit renders. This follow-up keeps the first pass's correctness rules
+(value snapshots and IDs across suspension points, re-fetch and revalidate
+before applying results, `JournalPersistence.save` rollback, detached review
+drafts) and moves the heavy work back off the main thread.
+
+### Threading model
+
+| Work | Where it runs |
+| --- | --- |
+| Live editing, review confirmation, day timeline (one day window), recording | Main context, main actor |
+| Home feed projection, search index source | `HomeFeedProjectionStore` actor |
+| Detection, candidate sync, photo linking, weather/distance/geography backfill, contact sync, single-entry post-creation enrichment | `JournalBackgroundMaintenance` actor |
+| HealthKit workout/wake-up import | `WorkoutImportPersistence` actor |
+
+The service actors conform to `ModelActor` manually and supply their own
+serial `DispatchSerialQueue` as the actor executor. This is deliberate:
+measured on the current SDK, `DefaultSerialModelExecutor` provides mutual
+exclusion but no thread of its own — a `@ModelActor` job awaited from the
+main actor executes **on the main thread** (verified by a regression test
+that asserts the executor thread from both a main-actor and a detached
+caller). Detached construction, the previous workaround, no longer changes
+this. With the queue executors, no service call runs on the main thread
+regardless of the caller.
+
+Enrichment helpers (`EntryWeatherService`, `TransitDistanceService`,
+`LocationGeographyService`, `PhotoAutoLinkService`, `ContactPersonSyncService`,
+visit geocoding, and the entry stores) are `nonisolated` and run on whichever
+executor owns the context they are handed: the maintenance actor for
+backfill, the main actor for a user-visible single-entry operation. The
+`nonisolated(nonsending)` default means these calls never silently hop
+executors, so a `ModelContext` parameter always stays with its owner.
+Cross-context visibility relies on refetches: background saves post
+`TimelineDataChange`, and every UI surface reloads from the store instead of
+assuming a live object updated in place.
+
+### Home feed loading and lifecycle
+
+- **Reload serialization.** `HomeFeedModel.reload` previously let a newer
+  concurrent reload discard an older pass's result. At launch, the scene
+  activation reload superseded the launch task's reload, so the launch task
+  positioned an empty feed: the empty state flashed and the feed no longer
+  started at the bottom. Reloads are now queued (with coalescing: a call
+  made while a pass is queued joins that pass), so every awaited `reload`
+  returns only after a projection at least as new as the call has been
+  applied.
+- **Nothing loads on the main actor during scrolling.** Cells configure with
+  `loadsDeferredContent: false` while the collection view scrolls: cached
+  snapshots (memory or disk, decoded off-main) still appear, but MapKit
+  renders — which require main-thread `MKMapView` time — are deferred, as is
+  prefetch rendering and browsing-window prewarming. When scrolling settles,
+  visible cells are reconfigured, enrichment is rescheduled, and deferred
+  renders retry.
+- **Cells observe their row models.** Weather and route enrichment land on
+  `DaySummaryRowModel`/`PeriodSummaryRowModel` whenever their background
+  work finishes. UIKit cells use `withObservationTracking` to reconfigure
+  immediately, so a loaded weather tile or enriched map no longer waits for
+  the cell to scroll off-screen and back.
+- **Map images never blank while content is replaced.** A map image view
+  clears its image only when its *slot* (day/period) changes. Enrichment of
+  the same slot keeps the previous image until the replacement is decoded. A
+  load pass that could not render (deferred during scroll) leaves no state
+  behind that would block a later retry.
+- **Snapshot disk cache retains recent content revisions.** A slot's cache
+  previously kept exactly one content revision per appearance; days and
+  periods alternate between endpoint-only and exact-route projections, so
+  the two revisions deleted each other's files on every write and forced a
+  fresh `MKMapView` render (with network tile loads) on every pass — the
+  “cached but takes forever / blank map” symptom. The store now keeps the
+  three most recent superseded revisions per slot; the global 200 MB LRU
+  trim is unchanged. Pruning one appearance's files still never touches the
+  other appearance.
+- **Search reuses the projection.** `EntrySearchModel` built its index by
+  fetching and snapshotting every entry on the main thread each time the
+  search screen appeared or a timeline change posted. It now consumes
+  `HomeFeedProjectionStore.load()` value snapshots and resolves a live model
+  by ID only when navigating to a result.
+
+Flows intentionally left on the main context: the day timeline
+(`HomePresentationModel`, bounded to one day's window and required to hand
+live models to editors), detail sheets and editors, review confirmation,
+recording, and archive export/restore (modal, whole-graph, identity
+preserving by design). Archive export of a very large journal on the main
+thread during an explicit settings action is a known, acceptable cost; move
+it behind a progress UI before changing its threading.
+
+### Validation (follow-up)
+
+- Debug simulator: **414 tests in 38 suites passed**; the persistence,
+  audit, weather, and snapshot-cache suites passed with five repetitions.
+- New/updated regressions: service executors must not run on the main
+  thread (asserted from main-actor and detached callers); snapshot cache
+  retains alternating content revisions without re-rendering and prunes
+  the oldest beyond the window; pruning one appearance preserves the other.
+- Release simulator build succeeded.
+- Launch smoke test on the audit simulator: app reaches the positioned feed
+  and starts its deferred background services (HealthKit prompt appears),
+  no crash.
+- Scroll-hitch and map-latency behavior needs on-device Instruments
+  confirmation with a real journal; the simulator has no representative
+  data set.

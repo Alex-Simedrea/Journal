@@ -6,8 +6,9 @@
 import Foundation
 import SwiftData
 
-@MainActor
-enum PlaceVisitEntryStore {
+/// Pure model construction/insertion on the caller's context; runs on
+/// whichever executor owns that context.
+nonisolated enum PlaceVisitEntryStore {
     static func insert(
         draft: ResolvedPlaceVisitDraft,
         rawInput: String?,
@@ -21,7 +22,7 @@ enum PlaceVisitEntryStore {
         return entry
     }
 
-    nonisolated static func makeEntry(
+    static func makeEntry(
         draft: ResolvedPlaceVisitDraft,
         rawInput: String?,
         detachedRelationships: Bool = false

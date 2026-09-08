@@ -1,12 +1,5 @@
 import SwiftData
 
-/// `ModelContainer` is safe to hand to a newly created SwiftData actor, but it
-/// does not currently declare `Sendable`. This wrapper only carries the
-/// container across the detached actor-construction boundary.
-nonisolated private struct JournalModelContainerBox: @unchecked Sendable {
-    let container: ModelContainer
-}
-
 /// Retains one background persistence service per container.
 ///
 /// Live journal models that the UI edits belong to the container's main
@@ -15,9 +8,8 @@ nonisolated private struct JournalModelContainerBox: @unchecked Sendable {
 /// immediately, so heavy fetching, projection, and enrichment stay off the
 /// main thread without a second long-lived copy of the relationship graph.
 ///
-/// SwiftData chooses a model actor's executor when the actor is initialized,
-/// so construction is deliberately performed by a detached task instead of a
-/// main-actor SwiftUI task.
+/// Each service owns a serial dispatch queue as its actor executor, so the
+/// construction thread does not matter and no call runs on the main thread.
 @MainActor
 final class JournalPersistenceServices {
     static let shared = JournalPersistenceServices()
@@ -31,11 +23,7 @@ final class JournalPersistenceServices {
     ) async -> JournalBackgroundMaintenance {
         let identifier = ObjectIdentifier(container)
         if let existing = maintenanceServices[identifier] { return existing }
-        let box = JournalModelContainerBox(container: container)
-        let service = await Task.detached(priority: .utility) {
-            JournalBackgroundMaintenance(modelContainer: box.container)
-        }.value
-        if let existing = maintenanceServices[identifier] { return existing }
+        let service = JournalBackgroundMaintenance(modelContainer: container)
         maintenanceServices[identifier] = service
         return service
     }
@@ -45,11 +33,7 @@ final class JournalPersistenceServices {
     ) async -> HomeFeedProjectionStore {
         let identifier = ObjectIdentifier(container)
         if let existing = homeFeedServices[identifier] { return existing }
-        let box = JournalModelContainerBox(container: container)
-        let service = await Task.detached(priority: .userInitiated) {
-            HomeFeedProjectionStore(modelContainer: box.container)
-        }.value
-        if let existing = homeFeedServices[identifier] { return existing }
+        let service = HomeFeedProjectionStore(modelContainer: container)
         homeFeedServices[identifier] = service
         return service
     }
@@ -59,11 +43,7 @@ final class JournalPersistenceServices {
     ) async -> WorkoutImportPersistence {
         let identifier = ObjectIdentifier(container)
         if let existing = workoutImportServices[identifier] { return existing }
-        let box = JournalModelContainerBox(container: container)
-        let service = await Task.detached(priority: .utility) {
-            WorkoutImportPersistence(modelContainer: box.container)
-        }.value
-        if let existing = workoutImportServices[identifier] { return existing }
+        let service = WorkoutImportPersistence(modelContainer: container)
         workoutImportServices[identifier] = service
         return service
     }

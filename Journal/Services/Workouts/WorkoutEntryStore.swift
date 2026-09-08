@@ -12,8 +12,9 @@ nonisolated struct WorkoutResolvedLocations: Sendable {
     let destination: Location?
 }
 
-@MainActor
-enum WorkoutEntryStore {
+/// Pure model construction/update on the caller's context; runs on whichever
+/// executor owns that context (the workout import actor during sync).
+nonisolated enum WorkoutEntryStore {
     static func upsert(
         snapshot: HealthKitWorkoutSnapshot,
         locations: WorkoutResolvedLocations,

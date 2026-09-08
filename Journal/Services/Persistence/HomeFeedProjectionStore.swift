@@ -17,8 +17,31 @@ nonisolated struct HomeFeedProjectionResult: Sendable {
 /// home feed. Runs on its own background executor: models fetched here never
 /// leave the actor, and the only write (`persistWeather`) re-fetches its
 /// target by ID and saves in the same isolation without suspension points.
-@ModelActor
-actor HomeFeedProjectionStore {
+///
+/// `DefaultSerialModelExecutor` provides mutual exclusion but no thread of
+/// its own: a model-actor job awaited from the main actor would run on the
+/// main thread. This actor exists to keep whole-journal fetches off the UI
+/// thread, so it supplies its own serial dispatch queue as executor.
+actor HomeFeedProjectionStore: ModelActor {
+    nonisolated let modelExecutor: any ModelExecutor
+    nonisolated let modelContainer: ModelContainer
+    private nonisolated let queue: DispatchSerialQueue
+
+    nonisolated var unownedExecutor: UnownedSerialExecutor {
+        queue.asUnownedSerialExecutor()
+    }
+
+    init(modelContainer: ModelContainer) {
+        queue = DispatchSerialQueue(
+            label: "journal.home-feed-projection",
+            qos: .userInitiated
+        )
+        self.modelContainer = modelContainer
+        modelExecutor = DefaultSerialModelExecutor(
+            modelContext: ModelContext(modelContainer)
+        )
+    }
+
 #if DEBUG
     func executorUsesMainThreadForTesting() -> Bool {
         Thread.isMainThread

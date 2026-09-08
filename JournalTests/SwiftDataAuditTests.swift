@@ -390,7 +390,7 @@ struct SwiftDataAuditTests {
         let home = HomePresentationModel()
         home.reloadTimeline(in: context)
         let search = EntrySearchModel()
-        search.load(in: context)
+        await search.load(in: context)
         let store = await JournalPersistenceServices.shared.homeFeed(for: container)
         let snapshot = try await store.load()
         #expect(store.modelContainer === container)

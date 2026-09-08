@@ -1,7 +1,7 @@
 import Combine
 import Foundation
 
-extension Notification.Name {
+nonisolated extension Notification.Name {
     static let timelineDataDidChange = Notification.Name(
         "journal.timelineDataDidChange"
     )

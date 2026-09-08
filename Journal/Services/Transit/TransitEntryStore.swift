@@ -6,8 +6,9 @@
 import Foundation
 import SwiftData
 
-@MainActor
-enum TransitEntryStore {
+/// Pure model construction/insertion on the caller's context; runs on
+/// whichever executor owns that context.
+nonisolated enum TransitEntryStore {
     static func insert(
         draft: ResolvedTransitDraft,
         rawInput: String?,
@@ -25,7 +26,7 @@ enum TransitEntryStore {
         return entry
     }
 
-    nonisolated static func makeEntry(
+    static func makeEntry(
         draft: ResolvedTransitDraft,
         rawInput: String?,
         sourceOrganizationName: String? = nil,

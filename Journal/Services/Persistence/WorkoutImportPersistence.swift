@@ -17,8 +17,31 @@ nonisolated struct ResolvedWorkoutImport: Sendable {
 /// this actor only value snapshots (`HealthKitWorkoutChangeSet`,
 /// `ResolvedWorkoutImport`); every fetch, reconciliation, and save happens
 /// inside one isolated call with no suspension points in between.
-@ModelActor
-actor WorkoutImportPersistence {
+///
+/// `DefaultSerialModelExecutor` provides mutual exclusion but no thread of
+/// its own: a model-actor job awaited from the main actor would run on the
+/// main thread. This actor supplies its own serial dispatch queue as
+/// executor so imports stay off the UI thread.
+actor WorkoutImportPersistence: ModelActor {
+    nonisolated let modelExecutor: any ModelExecutor
+    nonisolated let modelContainer: ModelContainer
+    private nonisolated let queue: DispatchSerialQueue
+
+    nonisolated var unownedExecutor: UnownedSerialExecutor {
+        queue.asUnownedSerialExecutor()
+    }
+
+    init(modelContainer: ModelContainer) {
+        queue = DispatchSerialQueue(
+            label: "journal.workout-import",
+            qos: .utility
+        )
+        self.modelContainer = modelContainer
+        modelExecutor = DefaultSerialModelExecutor(
+            modelContext: ModelContext(modelContainer)
+        )
+    }
+
     func references() throws -> [WorkoutEntryReference] {
         try workoutEntries().compactMap { entry in
             guard let details = entry.workoutDetails else { return nil }

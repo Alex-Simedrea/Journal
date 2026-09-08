@@ -6,8 +6,31 @@ import SwiftData
 /// operation works on IDs and value snapshots across suspension points,
 /// re-fetches its targets afterwards, and saves through
 /// `JournalPersistence.save` so a failure cannot leave staged mutations.
-@ModelActor
-actor JournalBackgroundMaintenance {
+///
+/// `DefaultSerialModelExecutor` provides mutual exclusion but no thread of
+/// its own: a model-actor job awaited from the main actor would run on the
+/// main thread. This actor exists to keep backfill off the UI thread, so it
+/// supplies its own serial dispatch queue as executor.
+actor JournalBackgroundMaintenance: ModelActor {
+    nonisolated let modelExecutor: any ModelExecutor
+    nonisolated let modelContainer: ModelContainer
+    private nonisolated let queue: DispatchSerialQueue
+
+    nonisolated var unownedExecutor: UnownedSerialExecutor {
+        queue.asUnownedSerialExecutor()
+    }
+
+    init(modelContainer: ModelContainer) {
+        queue = DispatchSerialQueue(
+            label: "journal.background-maintenance",
+            qos: .utility
+        )
+        self.modelContainer = modelContainer
+        modelExecutor = DefaultSerialModelExecutor(
+            modelContext: ModelContext(modelContainer)
+        )
+    }
+
 #if DEBUG
     func executorUsesMainThreadForTesting() -> Bool {
         Thread.isMainThread

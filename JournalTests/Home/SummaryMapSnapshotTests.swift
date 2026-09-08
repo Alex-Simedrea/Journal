@@ -203,7 +203,7 @@ struct SummaryMapSnapshotTests {
         #expect(renderCount == 1)
     }
 
-    @Test("A slot discards a superseded content revision")
+    @Test("A slot retains recent content revisions and prunes the oldest")
     func supersededContentRevision() async throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -215,25 +215,42 @@ struct SummaryMapSnapshotTests {
                 return Data(request.contentHash.utf8)
             }
         )
-        let oldRequest = request(slot: "day-2026-8-5", version: 1)
-        let newRequest = request(slot: "day-2026-8-5", version: 2)
+        // A slot alternates between contents while route enrichment is
+        // pending (endpoint-only vs. exact-route projections). Recent
+        // revisions must coexist so the alternation never re-renders.
+        let base = request(slot: "day-2026-8-5", version: 1)
+        let enriched = request(slot: "day-2026-8-5", version: 2)
+        _ = try await store.data(for: base)
+        // Revisions are pruned by modification recency; keep distinct
+        // timestamps on filesystems with coarse resolution.
+        try await Task.sleep(for: .milliseconds(25))
+        _ = try await store.data(for: enriched)
+        #expect(await store.cachedData(for: base) != nil)
+        #expect(await store.cachedData(for: enriched) != nil)
+        _ = try await store.data(for: base)
+        _ = try await store.data(for: enriched)
+        #expect(await counter.value == 2)
 
-        _ = try await store.data(for: oldRequest)
-        _ = try await store.data(for: newRequest)
-
+        // Beyond the retention window the oldest revision is pruned.
+        for version in 3...5 {
+            try await Task.sleep(for: .milliseconds(25))
+            _ = try await store.data(
+                for: request(slot: "day-2026-8-5", version: version)
+            )
+        }
         let slot = directory.appending(
-            path: newRequest.slotHash,
+            path: base.slotHash,
             directoryHint: .isDirectory
         )
         let contentDirectories = try FileManager.default.contentsOfDirectory(
             at: slot,
             includingPropertiesForKeys: nil
         )
-        #expect(contentDirectories.map(\.lastPathComponent) == [
-            newRequest.contentHash,
-        ])
-        let renderCount = await counter.value
-        #expect(renderCount == 2)
+        #expect(contentDirectories.count == 4)
+        #expect(!contentDirectories.map(\.lastPathComponent).contains(
+            base.contentHash
+        ))
+        #expect(await counter.value == 5)
     }
 
     @Test("A slot retains light and dark appearance variants")
@@ -274,72 +291,52 @@ struct SummaryMapSnapshotTests {
         #expect(await counter.value == 2)
     }
 
-    @Test("Each appearance retains only its current content revision")
+    @Test("Pruning one appearance never evicts the other appearance's files")
     func contentRevisionLimit() async throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let counter = InvocationCounter()
-        let oldLight = request(
-            slot: "day-2026-8-5",
-            version: 1,
-            appearance: .light
-        )
-        let oldDark = request(
-            slot: "day-2026-8-5",
-            version: 101,
-            appearance: .dark
-        )
-        let newLight = request(
-            slot: "day-2026-8-5",
-            version: 2,
-            appearance: .light
-        )
-        let newDark = request(
-            slot: "day-2026-8-5",
-            version: 102,
-            appearance: .dark
-        )
         let store = SummaryMapSnapshotStore(
             directory: directory,
             renderer: { request in
                 await counter.increment()
-                return Data(request.contentHash.utf8)
+                return Data(
+                    "\(request.variant.appearance.rawValue)-\(request.contentHash)"
+                        .utf8
+                )
             }
         )
-        _ = try await store.data(for: oldLight)
-        _ = try await store.data(for: oldDark)
-        _ = try await store.data(for: newLight)
-
-        // Updating light mode must not evict the cached dark-mode image.
-        let oldLightAfterLightUpdate = await store.cachedData(for: oldLight)
-        let oldDarkAfterLightUpdate = await store.cachedData(for: oldDark)
-        let newLightAfterLightUpdate = await store.cachedData(for: newLight)
-        #expect(oldLightAfterLightUpdate == nil)
-        #expect(oldDarkAfterLightUpdate != nil)
-        #expect(newLightAfterLightUpdate != nil)
-
-        _ = try await store.data(for: newDark)
-
-        let slot = directory.appending(
-            path: newLight.slotHash,
-            directoryHint: .isDirectory
+        // The oldest revision holds both appearances.
+        let oldestLight = request(
+            slot: "day-2026-8-5",
+            version: 1,
+            appearance: .light
         )
-        let retained = try FileManager.default.contentsOfDirectory(
-            at: slot,
-            includingPropertiesForKeys: [.isDirectoryKey]
-        ).filter {
-            (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?
-                .isDirectory == true
+        let oldestDark = request(
+            slot: "day-2026-8-5",
+            version: 1,
+            appearance: .dark
+        )
+        _ = try await store.data(for: oldestLight)
+        _ = try await store.data(for: oldestDark)
+
+        // Enough newer light revisions to prune the oldest one. Revisions
+        // are pruned by modification recency; keep distinct timestamps on
+        // filesystems with coarse resolution.
+        for version in 2...5 {
+            try await Task.sleep(for: .milliseconds(25))
+            _ = try await store.data(for: request(
+                slot: "day-2026-8-5",
+                version: version,
+                appearance: .light
+            ))
         }
-        #expect(Set(retained.map(\.lastPathComponent)) == Set([
-            newLight.contentHash,
-            newDark.contentHash,
-        ]))
-        let oldDarkAfterDarkUpdate = await store.cachedData(for: oldDark)
-        let newDarkAfterDarkUpdate = await store.cachedData(for: newDark)
-        #expect(oldDarkAfterDarkUpdate == nil)
-        #expect(newDarkAfterDarkUpdate != nil)
-        #expect(await counter.value == 4)
+
+        // The light file of the pruned revision is gone; the dark file of
+        // that same revision must survive a light-triggered prune.
+        #expect(await store.cachedData(for: oldestLight) == nil)
+        #expect(await store.cachedData(for: oldestDark) != nil)
+        #expect(await counter.value == 6)
     }
 
     @Test("Concurrent readers share one render task")

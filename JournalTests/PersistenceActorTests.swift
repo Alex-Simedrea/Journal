@@ -52,7 +52,12 @@ struct PersistenceActorTests {
         let actor = await JournalPersistenceServices.shared.maintenance(
             for: container
         )
-        #expect(await !actor.executorUsesMainThreadForTesting())
+        let fromMain = await actor.executorUsesMainThreadForTesting()
+        let fromDetached = await Task.detached {
+            await actor.executorUsesMainThreadForTesting()
+        }.value
+        #expect(!fromMain, "maintenance job ran on the main thread when awaited from MainActor")
+        #expect(!fromDetached, "maintenance job ran on the main thread when awaited from a detached task")
         #expect(actor.modelContainer === container)
         let again = await JournalPersistenceServices.shared.maintenance(
             for: container
@@ -62,7 +67,8 @@ struct PersistenceActorTests {
         let feed = await JournalPersistenceServices.shared.homeFeed(
             for: container
         )
-        #expect(await !feed.executorUsesMainThreadForTesting())
+        let feedFromMain = await feed.executorUsesMainThreadForTesting()
+        #expect(!feedFromMain, "feed load ran on the main thread when awaited from MainActor")
     }
 
     @Test("Review collections materialize on a model actor")
