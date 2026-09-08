@@ -128,7 +128,9 @@ struct TimelinePlaceVisitGapTests {
             in: context
         )
         #expect(savedID == draft.id)
-        #expect(Set(draft.people.map(\.id)) == [shared.id, departureOnly.id])
+        let saved = try #require(context.fetch(FetchDescriptor<LogEntry>()).first { $0.id == savedID })
+        #expect(Set(saved.people.map(\.id)) == [shared.id, departureOnly.id])
+        #expect(draft.modelContext == nil)
         #expect(try context.fetch(FetchDescriptor<LogEntry>()).count == 3)
         #expect(throws: (any Error).self) {
             try TimelinePlaceVisitGapService.makeDraft(gapID: id, in: context)

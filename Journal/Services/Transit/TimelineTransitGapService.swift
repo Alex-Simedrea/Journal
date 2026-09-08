@@ -63,7 +63,7 @@ enum TimelineTransitGapService {
             unresolvedPeople: [],
             fieldReviews: []
         )
-        let entry = TransitEntryStore.makeEntry(draft: draft, rawInput: nil)
+        let entry = TransitEntryStore.makeEntry(draft: draft, rawInput: nil, detachedRelationships: true)
         entry.startTimeZoneIdentifier = gap.originEntry.endTimeZoneIdentifier
         entry.endTimeZoneIdentifier = gap.destinationEntry.startTimeZoneIdentifier
         return entry
@@ -92,8 +92,9 @@ enum TimelineTransitGapService {
             throw TimelineTransitGapError.conflictingTransit
         }
 
-        draft.people = try modelContext.fetch(FetchDescriptor<Person>())
-            .filter { selectedPeopleIDs.contains($0.id) }
+        let draft = try EntryDraftGraph.materialize(
+            draft, selectedPeopleIDs: selectedPeopleIDs, in: modelContext
+        )
         try TransitEntryStore.insert(
             draft,
             refreshDistance: false,

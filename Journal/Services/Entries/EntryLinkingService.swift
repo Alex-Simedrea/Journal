@@ -97,7 +97,7 @@ nonisolated enum EntryLinkingService {
 
   static func reconcileAndSave(in modelContext: ModelContext) throws {
     if try reconcile(in: modelContext) {
-      try modelContext.save()
+      try JournalPersistence.save(modelContext)
     }
   }
 
@@ -117,6 +117,9 @@ nonisolated enum EntryLinkingService {
       try link(
         entry,
         to: neighbor,
+        // The accepted draft contains the user's confirmed boundary edits.
+        // Chronological defaults would restore an earlier neighbor's old values.
+        alignment: EntryLinkAlignment(timeSource: .current, placeSource: .current),
         in: modelContext,
         persist: false
       )
@@ -263,7 +266,7 @@ nonisolated enum EntryLinkingService {
       visitedEdges: &visitedEdges,
       transitsNeedingDistanceRefresh: &transitsNeedingDistanceRefresh
     )
-    if persist { try modelContext.save() }
+    if persist { try JournalPersistence.save(modelContext) }
     return transitsNeedingDistanceRefresh
   }
 
@@ -282,7 +285,7 @@ nonisolated enum EntryLinkingService {
       pair.next.linkedPreviousEntryID = nil
       pair.next.suppressedPreviousEntryID = pair.previous.id
     }
-    if persist { try modelContext.save() }
+    if persist { try JournalPersistence.save(modelContext) }
   }
 
   static func propagateTimeEdit(

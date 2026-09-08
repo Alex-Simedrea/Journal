@@ -32,11 +32,9 @@ final class WorkoutImportCoordinator {
     func start(modelContainer: ModelContainer) async {
         do {
             try await client.requestAuthorization()
-            let persistence = await JournalPersistenceActors.shared
+            let persistence = await JournalPersistenceServices.shared
                 .workoutImport(
-                    for: JournalModelContainerReference(
-                        modelContainer
-                    )
+                    for: modelContainer
                 )
             await synchronize(using: persistence)
             await startObserving(using: persistence)
@@ -51,8 +49,8 @@ final class WorkoutImportCoordinator {
     }
 
     func synchronize(modelContainer: ModelContainer) async {
-        let persistence = await JournalPersistenceActors.shared.workoutImport(
-            for: JournalModelContainerReference(modelContainer)
+        let persistence = await JournalPersistenceServices.shared.workoutImport(
+            for: modelContainer
         )
         await synchronize(using: persistence)
     }

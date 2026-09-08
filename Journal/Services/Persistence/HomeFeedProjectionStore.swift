@@ -13,33 +13,50 @@ nonisolated struct HomeFeedProjectionResult: Sendable {
     let weatherStorageEntryByDay: [TimelineDayKey: UUID]
 }
 
-@ModelActor
-actor HomeFeedProjectionStore {
-    func load() throws -> HomeFeedProjectionResult {
+@MainActor
+final class HomeFeedProjectionStore {
+    // A context does not substitute for owning the container/store lifetime.
+    let modelContainer: ModelContainer
+    let modelContext: ModelContext
+
+    init(modelContainer: ModelContainer) {
+        self.modelContainer = modelContainer
+        modelContext = modelContainer.mainContext
+    }
+
+    func load() async throws -> HomeFeedProjectionResult {
         let entries = try modelContext.fetch(
             FetchDescriptor<LogEntry>(
                 sortBy: [SortDescriptor(\LogEntry.createdAt)]
             )
         )
         let snapshots = entries.map(TimelineEntrySnapshot.init)
+        let recordsByID = Dictionary(entries.map { ($0.id, $0.dayWeatherRecords) },
+                                     uniquingKeysWith: { first, _ in first })
+        return await Task.detached(priority: .userInitiated) {
+            Self.project(snapshots: snapshots, recordsByID: recordsByID)
+        }.value
+    }
+
+    nonisolated private static func project(
+        snapshots: [TimelineEntrySnapshot],
+        recordsByID: [UUID: [PersistedDayWeather]]
+    ) -> HomeFeedProjectionResult {
         let summaries = DaySummaryProjector.makeSummaries(entries: snapshots)
-        let entriesByID = Dictionary(
-            uniqueKeysWithValues: entries.map { ($0.id, $0) }
-        )
         var weatherByDay: [TimelineDayKey: HomeFeedWeatherCache] = [:]
         var weatherStorageEntryByDay: [TimelineDayKey: UUID] = [:]
 
         for summary in summaries {
             let storageEntryID = summary.occurrences.lazy
                 .map(\.entryID)
-                .first { entriesByID[$0] != nil }
+                .first { recordsByID[$0] != nil }
             if let storageEntryID {
                 weatherStorageEntryByDay[summary.day] = storageEntryID
             }
             guard let request = summary.weatherRequest else { continue }
             for occurrence in summary.occurrences {
-                guard let entry = entriesByID[occurrence.entryID],
-                      let record = entry.dayWeatherRecords.first(where: {
+                guard let records = recordsByID[occurrence.entryID],
+                      let record = records.first(where: {
                           $0.matches(request)
                       }) else { continue }
                 weatherByDay[summary.day] = HomeFeedWeatherCache(
@@ -77,6 +94,6 @@ actor HomeFeedProjectionStore {
                 && $0.day == record.day
         }
         entry.dayWeatherRecords.append(record)
-        try modelContext.save()
+        try JournalPersistence.save(modelContext)
     }
 }

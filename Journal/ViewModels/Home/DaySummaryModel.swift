@@ -344,17 +344,22 @@ final class HomeFeedModel {
     private var periodProjectionRevision = 0
 
     @ObservationIgnored
+    private var reloadRevision = 0
+
+    @ObservationIgnored
     private var periodProjectionTask: Task<Void, Never>?
 
     var days: [TimelineDayKey] { rows.map(\.id) }
 
     func reload(in modelContext: ModelContext) async {
+        reloadRevision &+= 1
+        let revision = reloadRevision
         do {
-            let store = await JournalPersistenceActors.shared.homeFeed(
-                for: JournalModelContainerReference(modelContext.container)
+            let store = await JournalPersistenceServices.shared.homeFeed(
+                for: modelContext.container
             )
             let projection = try await store.load()
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, revision == reloadRevision else { return }
             let snapshots = projection.snapshots
             let summaries = projection.daySummaries
             latestSnapshots = snapshots
@@ -401,6 +406,7 @@ final class HomeFeedModel {
             )
             errorMessage = nil
         } catch {
+            guard revision == reloadRevision else { return }
             rows = []
             monthRows = []
             yearRows = []

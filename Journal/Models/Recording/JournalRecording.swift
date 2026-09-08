@@ -105,7 +105,13 @@ final class ActiveJournalRecording {
     var activityID: String?
     var approximateDistanceMeters: Double
     var currentMovement: RecordedTransitMode
-    var points: [TrackedLocationPoint]
+    @Attribute(originalName: "points")
+    private var pointsData: Data?
+
+    var points: [TrackedLocationPoint] {
+        get { PersistedJSON.decode([TrackedLocationPoint].self, from: pointsData) ?? [] }
+        set { pointsData = PersistedJSON.encode(newValue) }
+    }
     var lastDiagnostic: String?
 
     init(
@@ -132,7 +138,7 @@ final class ActiveJournalRecording {
         self.activityID = activityID
         self.approximateDistanceMeters = approximateDistanceMeters
         self.currentMovement = currentMovement
-        self.points = points
+        self.pointsData = PersistedJSON.encode(points)
         self.lastDiagnostic = lastDiagnostic
     }
 }

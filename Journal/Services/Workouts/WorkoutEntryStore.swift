@@ -12,7 +12,8 @@ nonisolated struct WorkoutResolvedLocations: Sendable {
     let destination: Location?
 }
 
-nonisolated enum WorkoutEntryStore {
+@MainActor
+enum WorkoutEntryStore {
     static func upsert(
         snapshot: HealthKitWorkoutSnapshot,
         locations: WorkoutResolvedLocations,

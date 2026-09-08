@@ -27,6 +27,8 @@ final class BoardingPassReviewModel {
     var errorMessage: String?
 
     private let hadCompleteTime: Bool
+    @ObservationIgnored private var hasCommitted = false
+    @ObservationIgnored private var preparationRevision = 0
     @ObservationIgnored private var resolvedOriginTimeZoneIdentifier: String?
     @ObservationIgnored private var resolvedDestinationTimeZoneIdentifier: String?
     @ObservationIgnored private let airportResolver:
@@ -61,17 +63,21 @@ final class BoardingPassReviewModel {
     }
 
     func prepare(places: [Place], transitTypes: [TransitType]) async {
+        preparationRevision &+= 1
+        let revision = preparationRevision
+        // Airport resolution suspends; keep detached place values for that work.
+        let places = places.compactMap { EntryDraftGraph.place($0) }
         if transitType.isEmpty {
             transitType = transitTypes.first?.canonicalName ?? ""
         }
-        if originPlaceID == nil {
+        if originPlaceID == nil || !places.contains(where: { $0.id == originPlaceID }) {
             originPlaceID = matchPlace(
                 named: originName,
                 airportCode: pendingImport.originAirportCode,
                 in: places
             )?.id
         }
-        if destinationPlaceID == nil {
+        if destinationPlaceID == nil || !places.contains(where: { $0.id == destinationPlaceID }) {
             destinationPlaceID = matchPlace(
                 named: destinationName,
                 airportCode: pendingImport.destinationAirportCode,
@@ -83,13 +89,17 @@ final class BoardingPassReviewModel {
            originPlaceID == nil,
            originLocation == nil,
            let code = pendingImport.originAirportCode {
-            originLocation = await airportResolver(code, originName)
+            let resolved = await airportResolver(code, originName)
+            guard revision == preparationRevision, !Task.isCancelled else { return }
+            originLocation = resolved
         }
         if isFlightImport,
            destinationPlaceID == nil,
            destinationLocation == nil,
            let code = pendingImport.destinationAirportCode {
-            destinationLocation = await airportResolver(code, destinationName)
+            let resolved = await airportResolver(code, destinationName)
+            guard revision == preparationRevision, !Task.isCancelled else { return }
+            destinationLocation = resolved
         }
 
         let originPlace = places.first { $0.id == originPlaceID }
@@ -111,7 +121,8 @@ final class BoardingPassReviewModel {
             draft: draft,
             rawInput: nil,
             sourceOrganizationName: pendingImport.organizationName,
-            sourceServiceIdentifier: pendingImport.serviceIdentifier
+            sourceServiceIdentifier: pendingImport.serviceIdentifier,
+            detachedRelationships: true
         )
     }
 
@@ -120,14 +131,17 @@ final class BoardingPassReviewModel {
         selectedPeopleIDs: Set<UUID>,
         in modelContext: ModelContext
     ) async -> Bool {
+        // Inbox cleanup may be retried after a successful database write.
+        if hasCommitted { return true }
+        guard !isSaving else { return false }
         isSaving = true
         errorMessage = nil
         defer { isSaving = false }
 
         do {
-            entry.people = try modelContext.fetch(
-                FetchDescriptor<Person>()
-            ).filter { selectedPeopleIDs.contains($0.id) }
+            let entry = try EntryDraftGraph.materialize(
+                entry, selectedPeopleIDs: selectedPeopleIDs, in: modelContext
+            )
             if isFlightImport {
                 try AirportPlaceStore.attachAirports(
                     to: entry,
@@ -139,7 +153,8 @@ final class BoardingPassReviewModel {
                 )
             }
             try TransitEntryStore.insert(entry, in: modelContext)
-            _ = try? await EntryWeatherService.populate(entry, in: modelContext)
+            hasCommitted = true
+            EntryWeatherService.refreshInBackground(entry, in: modelContext)
             return true
         } catch {
             modelContext.rollback()

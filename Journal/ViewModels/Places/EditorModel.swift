@@ -229,10 +229,9 @@ final class PlaceEditorModel {
         modelContext.insert(place)
 
         do {
-            try modelContext.save()
+            try JournalPersistence.save(modelContext)
             return place
         } catch {
-            modelContext.delete(place)
             saveErrorMessage = error.localizedDescription
             return nil
         }
@@ -241,10 +240,6 @@ final class PlaceEditorModel {
     func update(_ place: Place, in modelContext: ModelContext) -> Bool {
         guard let location, canSave else { return false }
 
-        let previousName = place.name
-        let previousSymbol = place.systemImage
-        let previousLocation = place.location
-        let previousAccuracyRadiusMeters = place.accuracyRadiusMeters
 
         place.name = trimmedName
         place.systemImage = selectedSymbol
@@ -252,13 +247,9 @@ final class PlaceEditorModel {
         place.accuracyRadiusMeters = accuracyRadiusMeters
 
         do {
-            try modelContext.save()
+            try JournalPersistence.save(modelContext)
             return true
         } catch {
-            place.name = previousName
-            place.systemImage = previousSymbol
-            place.location = previousLocation
-            place.accuracyRadiusMeters = previousAccuracyRadiusMeters
             saveErrorMessage = error.localizedDescription
             return false
         }

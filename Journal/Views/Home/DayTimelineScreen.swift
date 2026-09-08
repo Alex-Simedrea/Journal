@@ -256,8 +256,7 @@ struct DayTimelineScreen: View {
     private func enrichAcceptedTransit(entryID: UUID) {
         let container = modelContext.container
         Task {
-            let enrichmentContext = ModelContext(container)
-            enrichmentContext.autosaveEnabled = false
+            let enrichmentContext = container.mainContext
             _ = try? await EntryWeatherService.populate(
                 entryID: entryID,
                 in: enrichmentContext
@@ -287,8 +286,7 @@ struct DayTimelineScreen: View {
         reloadTimelineAndRoutes()
         let container = modelContext.container
         Task {
-            let enrichmentContext = ModelContext(container)
-            enrichmentContext.autosaveEnabled = false
+            let enrichmentContext = container.mainContext
             _ = try? await EntryWeatherService.populate(
                 entryID: entryID,
                 in: enrichmentContext
@@ -300,8 +298,7 @@ struct DayTimelineScreen: View {
     private func enrichGapTransit(entryID: UUID) {
         let container = modelContext.container
         Task {
-            let enrichmentContext = ModelContext(container)
-            enrichmentContext.autosaveEnabled = false
+            let enrichmentContext = container.mainContext
             await TransitDistanceService.populate(
                 entryID: entryID,
                 in: enrichmentContext

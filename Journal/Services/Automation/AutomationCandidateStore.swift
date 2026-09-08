@@ -152,14 +152,14 @@ nonisolated enum AutomationCandidateStore {
         candidate.status = .dismissed
         candidate.updatedAt = .now
         do {
-            try modelContext.delete(
-                model: LogEntry.self,
-                where: #Predicate {
-                    $0.id == candidateID
-                        || $0.automationCandidateID == candidateID
+            let entries = try modelContext.fetch(FetchDescriptor<LogEntry>(
+                predicate: #Predicate {
+                    $0.id == candidateID || $0.automationCandidateID == candidateID
                 }
-            )
-            try modelContext.save()
+            ))
+            for entry in entries { modelContext.delete(entry) }
+            _ = try EntryLinkingService.reconcile(in: modelContext)
+            try JournalPersistence.save(modelContext)
             NotificationCenter.default.post(
                 name: .automationCandidatesDidChange,
                 object: nil
@@ -223,7 +223,7 @@ nonisolated enum AutomationCandidateStore {
         markAccepted(candidate, entryID: entry.id)
 
         do {
-            try modelContext.save()
+            try JournalPersistence.save(modelContext)
             NotificationCenter.default.post(
                 name: .automationCandidatesDidChange,
                 object: nil

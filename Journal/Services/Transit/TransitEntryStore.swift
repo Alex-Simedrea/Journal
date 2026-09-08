@@ -6,7 +6,8 @@
 import Foundation
 import SwiftData
 
-nonisolated enum TransitEntryStore {
+@MainActor
+enum TransitEntryStore {
     static func insert(
         draft: ResolvedTransitDraft,
         rawInput: String?,
@@ -24,11 +25,12 @@ nonisolated enum TransitEntryStore {
         return entry
     }
 
-    static func makeEntry(
+    nonisolated static func makeEntry(
         draft: ResolvedTransitDraft,
         rawInput: String?,
         sourceOrganizationName: String? = nil,
-        sourceServiceIdentifier: String? = nil
+        sourceServiceIdentifier: String? = nil,
+        detachedRelationships: Bool = false
     ) -> LogEntry {
         let originLocation = draft.originLocation?
             .withFallbackDisplayName(draft.originPlace?.name)
@@ -38,10 +40,10 @@ nonisolated enum TransitEntryStore {
             type: draft.transitType,
             sourceOrganizationName: sourceOrganizationName,
             sourceServiceIdentifier: sourceServiceIdentifier,
-            originPlace: draft.originPlace,
+            originPlace: detachedRelationships ? EntryDraftGraph.place(draft.originPlace) : draft.originPlace,
             originLocation: originLocation,
             originRawText: draft.originRawText,
-            destinationPlace: draft.destinationPlace,
+            destinationPlace: detachedRelationships ? EntryDraftGraph.place(draft.destinationPlace) : draft.destinationPlace,
             destinationLocation: destinationLocation,
             destinationRawText: draft.destinationRawText,
             durationSource: draft.durationSource,
@@ -72,7 +74,7 @@ nonisolated enum TransitEntryStore {
             needsReview: draft.needsReview
         )
         entry.transitDetails = details
-        entry.people = draft.people
+        entry.people = detachedRelationships ? draft.people.map(EntryDraftGraph.person) : draft.people
 
         return entry
     }
@@ -82,9 +84,14 @@ nonisolated enum TransitEntryStore {
         refreshDistance: Bool = true,
         in modelContext: ModelContext
     ) throws {
-        modelContext.insert(entry)
-        _ = try EntryLinkingService.reconcile(in: modelContext)
-        try modelContext.save()
+        do {
+            modelContext.insert(entry)
+            _ = try EntryLinkingService.reconcile(in: modelContext)
+            try JournalPersistence.save(modelContext)
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
         if refreshDistance {
             TransitDistanceService.refreshInBackground(entry, in: modelContext)
         }

@@ -58,9 +58,12 @@ at 2048 pixels on the longest edge. Candidate images are released immediately
 after matching; only the five selected actors retain their high-resolution images.
 These images become flying views;
 their original rectangles are covered with the surface background color. These
-slots stay opaque. Moving snapshots carry separate corner masks in points, so
-resizing the bitmap does not stretch its radii. Photo grids retain each image's
-original clipping and gaps; their live day/period styling is unchanged. Third-level
+slots stay opaque. Photos match individually by identity, within the same five-actor
+budget; whole grids with different spacing are never superimposed. Each actor's
+textures share a single corner clip, whose radius springs between its original
+day/period values alongside its size. Snapshot capture removes baked silhouette
+rounding so it cannot stretch or show a second edge during the crossfade. Live
+photo styling is unchanged. Third-level
 retargeting extends existing actors instead of allocating another set. All images,
 covers and actors are released on completion or cancellation.
 
@@ -95,6 +98,7 @@ available feed instead of leaving preparation stuck.
 `HomeFeedZoomTests` covers identity/date matching, distribution across day cards,
 the five-actor cap, whole-tile eligibility, cached-map readiness, image pixels in
 source snapshots, native-resolution backgrounds, supersampled moving tiles,
+individual photo identity matching and pixel comparisons of shared corner clipping during reversals,
 native toolbar blur hosting and before/during pixel comparison, refresh-rate independence, momentum preservation,
 30 rapid retargets, overlay cleanup, and real collection-view reload/scroll-offset
 restoration. The integration test attaches a rendered mid-transition image.

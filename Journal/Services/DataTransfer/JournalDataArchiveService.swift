@@ -184,33 +184,9 @@ enum JournalDataArchiveService {
         let imported = try makeImportedGraph(from: archive)
 
         do {
-            try deleteExistingData(in: modelContext)
-            // Commit removals before inserting records with the same unique
-            // IDs. Otherwise SwiftData can treat the restore as an upsert and
-            // try to merge nested Codable values such as EntryWeather using
-            // its unsupported key-path append machinery.
-            try modelContext.save()
-
-            for place in imported.places { modelContext.insert(place) }
-            for person in imported.people { modelContext.insert(person) }
-            for transitType in imported.transitTypes {
-                modelContext.insert(transitType)
-            }
-            for entry in imported.entries { modelContext.insert(entry) }
-            for candidate in imported.automationCandidates {
-                modelContext.insert(candidate)
-            }
-            for details in imported.orphanTransitDetails {
-                modelContext.insert(details)
-            }
-            for details in imported.orphanPlaceVisitDetails {
-                modelContext.insert(details)
-            }
-            for details in imported.orphanWorkoutDetails {
-                modelContext.insert(details)
-            }
+            try mergeImportedGraph(imported, in: modelContext)
             _ = try EntryLinkingService.reconcile(in: modelContext)
-            try modelContext.save()
+            try JournalPersistence.save(modelContext)
             NotificationCenter.default.post(
                 name: .automationCandidatesDidChange,
                 object: nil
@@ -689,42 +665,193 @@ enum JournalDataArchiveService {
         )
     }
 
-    private static func deleteExistingData(
-        in modelContext: ModelContext
+    /// Restore is one transaction. Reusing matching identities avoids SwiftData
+    /// unique-ID upserts and keeps visible models valid when a backup contains
+    /// the same entries. No empty-store checkpoint is committed on the way.
+    private static func mergeImportedGraph(
+        _ imported: ImportedGraph, in context: ModelContext
     ) throws {
-        for entry in try modelContext.fetch(FetchDescriptor<LogEntry>()) {
-            modelContext.delete(entry)
+        let oldPlace = try context.fetch(FetchDescriptor<Place>())
+        let oldPerson = try context.fetch(FetchDescriptor<Person>())
+        let oldTransitType = try context.fetch(FetchDescriptor<TransitType>())
+        let oldAutomationCandidate = try context.fetch(FetchDescriptor<AutomationCandidate>())
+        let oldLogEntry = try context.fetch(FetchDescriptor<LogEntry>())
+        let oldTransitDetails = try context.fetch(FetchDescriptor<TransitDetails>())
+        let oldPlaceVisitDetails = try context.fetch(FetchDescriptor<PlaceVisitDetails>())
+        let oldWorkoutDetails = try context.fetch(FetchDescriptor<WorkoutDetails>())
+
+        var placesByID: [UUID: Place] = [:]
+        var peopleByID: [UUID: Person] = [:]
+        var retained = Set<ObjectIdentifier>()
+
+        let existingPlace = Dictionary(oldPlace.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for source in imported.places {
+            let target = existingPlace[source.id] ?? source
+            target.name = source.name
+            target.aliases = source.aliases
+            target.location = source.location
+            target.systemImage = source.systemImage
+            target.createdAt = source.createdAt
+            target.accuracyRadiusMeters = source.accuracyRadiusMeters
+            context.insert(target)
+            retained.insert(ObjectIdentifier(target))
+            placesByID[target.id] = target
         }
-        for details in try modelContext.fetch(
-            FetchDescriptor<TransitDetails>()
-        ) {
-            modelContext.delete(details)
+
+        let existingPerson = Dictionary(oldPerson.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for source in imported.people {
+            let target = existingPerson[source.id] ?? Person(
+                id: source.id, name: source.name, aliases: source.aliases
+            )
+            target.name = source.name
+            target.aliases = source.aliases
+            target.contactIdentifier = source.contactIdentifier
+            target.firstMetAt = source.firstMetAt
+            target.lastMetAt = source.lastMetAt
+            target.firstMetPlace = source.firstMetPlace.flatMap { placesByID[$0.id] }
+            target.lastMetPlace = source.lastMetPlace.flatMap { placesByID[$0.id] }
+            context.insert(target)
+            retained.insert(ObjectIdentifier(target))
+            peopleByID[target.id] = target
         }
-        for details in try modelContext.fetch(
-            FetchDescriptor<PlaceVisitDetails>()
-        ) {
-            modelContext.delete(details)
+
+        let existingTransitType = Dictionary(oldTransitType.map { ($0.canonicalName, $0) }, uniquingKeysWith: { first, _ in first })
+        for source in imported.transitTypes {
+            let target = existingTransitType[source.canonicalName] ?? source
+            target.aliases = source.aliases
+            target.routingMode = source.routingMode
+            context.insert(target)
+            retained.insert(ObjectIdentifier(target))
         }
-        for details in try modelContext.fetch(
-            FetchDescriptor<WorkoutDetails>()
-        ) {
-            modelContext.delete(details)
+
+        let existingAutomationCandidate = Dictionary(oldAutomationCandidate.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for source in imported.automationCandidates {
+            let target = existingAutomationCandidate[source.id] ?? source
+            target.sourceFingerprint = source.sourceFingerprint
+            target.kind = source.kind
+            target.status = source.status
+            target.createdAt = source.createdAt
+            target.updatedAt = source.updatedAt
+            target.startTime = source.startTime
+            target.endTime = source.endTime
+            target.timeZoneIdentifier = source.timeZoneIdentifier
+            target.visitLocation = source.visitLocation
+            target.visitHorizontalAccuracyMeters = source.visitHorizontalAccuracyMeters
+            target.visitPlaceID = source.visitPlaceID
+            target.motionKind = source.motionKind
+            target.motionConfidenceRawValue = source.motionConfidenceRawValue
+            target.originLocation = source.originLocation
+            target.originPlaceID = source.originPlaceID
+            target.destinationLocation = source.destinationLocation
+            target.destinationPlaceID = source.destinationPlaceID
+            target.acceptedEntryID = source.acceptedEntryID
+            target.provenanceRecordedAt = source.provenanceRecordedAt
+            context.insert(target)
+            retained.insert(ObjectIdentifier(target))
         }
-        for person in try modelContext.fetch(FetchDescriptor<Person>()) {
-            modelContext.delete(person)
+
+        let existingEntries = Dictionary(oldLogEntry.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let existingWorkouts = Dictionary(oldWorkoutDetails.map { ($0.healthKitWorkoutUUID, $0) }, uniquingKeysWith: { first, _ in first })
+        func workout(_ source: WorkoutDetails) -> WorkoutDetails {
+            let target = existingWorkouts[source.healthKitWorkoutUUID] ?? source
+            target.activityTypeRawValue = source.activityTypeRawValue
+            target.activityName = source.activityName
+            target.movementKind = source.movementKind
+            target.distanceMeters = source.distanceMeters
+            target.activeEnergyKilocalories = source.activeEnergyKilocalories
+            target.routeImportState = source.routeImportState
+            target.sourceLocation = source.sourceLocation
+            target.originLocation = source.originLocation
+            target.destinationLocation = source.destinationLocation
+            target.placeResolutionSource = source.placeResolutionSource
+            target.originResolutionSource = source.originResolutionSource
+            target.destinationResolutionSource = source.destinationResolutionSource
+            target.fieldReviews = source.fieldReviews
+            target.place = source.place.flatMap { placesByID[$0.id] }
+            target.originPlace = source.originPlace.flatMap { placesByID[$0.id] }
+            target.destinationPlace = source.destinationPlace.flatMap { placesByID[$0.id] }
+            context.insert(target)
+            retained.insert(ObjectIdentifier(target))
+            return target
         }
-        for place in try modelContext.fetch(FetchDescriptor<Place>()) {
-            modelContext.delete(place)
+        func transit(_ source: TransitDetails) -> TransitDetails {
+            source.originPlace = source.originPlace.flatMap { placesByID[$0.id] }
+            source.destinationPlace = source.destinationPlace.flatMap { placesByID[$0.id] }
+            context.insert(source)
+            retained.insert(ObjectIdentifier(source))
+            return source
         }
-        for transitType in try modelContext.fetch(
-            FetchDescriptor<TransitType>()
-        ) {
-            modelContext.delete(transitType)
+        func visit(_ source: PlaceVisitDetails) -> PlaceVisitDetails {
+            source.place = source.place.flatMap { placesByID[$0.id] }
+            context.insert(source)
+            retained.insert(ObjectIdentifier(source))
+            return source
         }
-        for candidate in try modelContext.fetch(
-            FetchDescriptor<AutomationCandidate>()
-        ) {
-            modelContext.delete(candidate)
+        for source in imported.entries {
+            let target = existingEntries[source.id] ?? source
+            target.kind = source.kind
+            target.createdAt = source.createdAt
+            target.startTime = source.startTime
+            target.endTime = source.endTime
+            target.startTimeZoneIdentifier = source.startTimeZoneIdentifier
+            target.endTimeZoneIdentifier = source.endTimeZoneIdentifier
+            target.creationTimeZoneIdentifier = source.creationTimeZoneIdentifier
+            target.timeConfidence = source.timeConfidence
+            target.rawInputString = source.rawInputString
+            target.automationCandidateID = source.automationCandidateID
+            target.journalRecordingID = source.journalRecordingID
+            target.needsReview = source.needsReview
+            target.entryKindReviewReason = source.entryKindReviewReason
+            target.linkedPreviousEntryID = source.linkedPreviousEntryID
+            target.linkedNextEntryID = source.linkedNextEntryID
+            target.suppressedPreviousEntryID = source.suppressedPreviousEntryID
+            target.suppressedNextEntryID = source.suppressedNextEntryID
+            target.photoReferences = source.photoReferences
+            target.weather = source.weather
+            target.endWeather = source.endWeather
+            target.dayWeatherRecords = source.dayWeatherRecords
+            target.wakeUpSourceSampleUUID = source.wakeUpSourceSampleUUID
+            target.sleepDurationSeconds = source.sleepDurationSeconds
+            target.transitDetails = source.transitDetails.map(transit)
+            target.placeVisitDetails = source.placeVisitDetails.map(visit)
+            target.workoutDetails = source.workoutDetails.map(workout)
+            target.people = source.people.compactMap { peopleByID[$0.id] }
+            context.insert(target)
+            retained.insert(ObjectIdentifier(target))
+        }
+        for details in imported.orphanTransitDetails { _ = transit(details) }
+        for details in imported.orphanPlaceVisitDetails { _ = visit(details) }
+        for details in imported.orphanWorkoutDetails { _ = workout(details) }
+
+        for entry in oldLogEntry where !retained.contains(ObjectIdentifier(entry)) {
+            // A workout detail may have moved to a different imported entry ID.
+            // Detach before cascade deletion so its new owner survives.
+            entry.transitDetails = nil
+            entry.placeVisitDetails = nil
+            entry.workoutDetails = nil
+            entry.people = []
+            context.delete(entry)
+        }
+        for model in oldTransitDetails where !retained.contains(ObjectIdentifier(model)) {
+            context.delete(model)
+        }
+        for model in oldPlaceVisitDetails where !retained.contains(ObjectIdentifier(model)) {
+            context.delete(model)
+        }
+        for model in oldWorkoutDetails where !retained.contains(ObjectIdentifier(model)) {
+            context.delete(model)
+        }
+        for model in oldPerson where !retained.contains(ObjectIdentifier(model)) {
+            context.delete(model)
+        }
+        for model in oldPlace where !retained.contains(ObjectIdentifier(model)) {
+            context.delete(model)
+        }
+        for model in oldTransitType where !retained.contains(ObjectIdentifier(model)) {
+            context.delete(model)
+        }
+        for model in oldAutomationCandidate where !retained.contains(ObjectIdentifier(model)) {
+            context.delete(model)
         }
     }
 

@@ -104,10 +104,6 @@ final class TransitEditModel {
             return false
         }
 
-        let originalState = TransitEditOriginalState(
-            entry: entry,
-            details: details
-        )
         let didChangeTime = originalStartTime != startTime
             || originalEndTime != endTime
 
@@ -153,7 +149,7 @@ final class TransitEditModel {
                 role: .destination,
                 in: modelContext
             )
-            try modelContext.save()
+            try JournalPersistence.save(modelContext)
             EntryWeatherService.refreshInBackground(
                 entry,
                 in: modelContext
@@ -164,78 +160,9 @@ final class TransitEditModel {
             )
             return true
         } catch {
-            originalState.restore(entry: entry, details: details)
+            modelContext.rollback()
             errorMessage = error.localizedDescription
             return false
         }
-    }
-}
-
-private struct TransitEditOriginalState {
-    let transitType: String
-    let originPlace: Place?
-    let originLocation: Location?
-    let destinationPlace: Place?
-    let destinationLocation: Location?
-    let durationSource: DurationSource
-    let distanceMeters: Double?
-    let originCandidates: [LocationCandidate]
-    let destinationCandidates: [LocationCandidate]
-    let unresolvedPeople: [String]
-    let fieldReviews: [TransitFieldReview]
-    let startTime: Date?
-    let endTime: Date?
-    let startTimeZoneIdentifier: String
-    let endTimeZoneIdentifier: String
-    let timeConfidence: TimeConfidence
-    let people: [Person]
-    let needsReview: Bool
-    let weather: EntryWeather?
-    let endWeather: EntryWeather?
-
-    init(entry: LogEntry, details: TransitDetails) {
-        transitType = details.type
-        originPlace = details.originPlace
-        originLocation = details.originLocation
-        destinationPlace = details.destinationPlace
-        destinationLocation = details.destinationLocation
-        durationSource = details.durationSource
-        distanceMeters = details.distanceMeters
-        originCandidates = details.originCandidates
-        destinationCandidates = details.destinationCandidates
-        unresolvedPeople = details.unresolvedPeople
-        fieldReviews = details.fieldReviews
-        startTime = entry.startTime
-        endTime = entry.endTime
-        startTimeZoneIdentifier = entry.startTimeZoneIdentifier
-        endTimeZoneIdentifier = entry.endTimeZoneIdentifier
-        timeConfidence = entry.timeConfidence
-        people = entry.people
-        needsReview = entry.needsReview
-        weather = entry.weather
-        endWeather = entry.endWeather
-    }
-
-    func restore(entry: LogEntry, details: TransitDetails) {
-        details.type = transitType
-        details.originPlace = originPlace
-        details.originLocation = originLocation
-        details.destinationPlace = destinationPlace
-        details.destinationLocation = destinationLocation
-        details.durationSource = durationSource
-        details.distanceMeters = distanceMeters
-        details.originCandidates = originCandidates
-        details.destinationCandidates = destinationCandidates
-        details.unresolvedPeople = unresolvedPeople
-        details.fieldReviews = fieldReviews
-        entry.startTime = startTime
-        entry.endTime = endTime
-        entry.startTimeZoneIdentifier = startTimeZoneIdentifier
-        entry.endTimeZoneIdentifier = endTimeZoneIdentifier
-        entry.timeConfidence = timeConfidence
-        entry.people = people
-        entry.needsReview = needsReview
-        entry.weather = weather
-        entry.endWeather = endWeather
     }
 }

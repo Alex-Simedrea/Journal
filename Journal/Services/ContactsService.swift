@@ -199,7 +199,7 @@ enum ContactPersonSyncService {
         }
 
         if addedCount > 0 || updatedCount > 0 {
-            try modelContext.save()
+            try JournalPersistence.save(modelContext)
         }
 
         return ContactSyncResult(

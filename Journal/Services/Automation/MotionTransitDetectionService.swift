@@ -125,11 +125,11 @@ final class MotionTransitDetectionService {
                     from: [previous, sample]
                 )
                 guard !segments.isEmpty else { return }
-                let maintenance = await JournalPersistenceActors.shared
+                let maintenance = await JournalPersistenceServices.shared
                     .maintenance(
-                        for: JournalModelContainerReference(modelContainer)
+                        for: modelContainer
                     )
-                await maintenance.persistMotion(segments)
+                maintenance.persistMotion(segments)
             }
         }
     }
@@ -238,7 +238,7 @@ final class MotionTransitDetectionService {
             )
         }
         if modelContext.hasChanges {
-            try modelContext.save()
+            try JournalPersistence.save(modelContext)
             NotificationCenter.default.post(
                 name: .automationCandidatesDidChange,
                 object: nil

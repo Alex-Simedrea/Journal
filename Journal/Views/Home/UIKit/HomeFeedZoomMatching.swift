@@ -114,7 +114,7 @@ extension JournalSummaryScale {
 extension UIKitDaySummaryCanvasView {
     func zoomTiles(summary: DaySummary, in viewport: UIView) -> [HomeFeedZoomTile] {
         let owner = "day-\(summary.day.id)"
-        return transitionTileViews.compactMap { kind, view in
+        return transitionTileViews.flatMap { kind, view -> [HomeFeedZoomTile] in
             let family: HomeFeedZoomTile.Family
             var ids: Set<String> = []
             switch kind {
@@ -123,19 +123,19 @@ extension UIKitDaySummaryCanvasView {
                 family = .map
                 ids = Set([summary.featuredPlace?.location.id].compactMap { $0 })
             case .photos:
-                family = .photos
-                ids = Set(summary.photos.map(\.id))
+                return (view as? UIKitPhotoSummaryTileView)?.zoomTiles(
+                    owner: owner, days: [summary.day], in: viewport) ?? []
             case .people:
                 family = .people
                 ids = Set(summary.people.map { $0.id.uuidString })
             case .movement: family = .movement
             case .wakeUp: family = .sleep
             case .review: family = .review
-            case .weather: return nil
+            case .weather: return []
             }
-            return HomeFeedZoomTile(id: owner + "/" + kind.rawValue, owner: owner,
+            return [HomeFeedZoomTile(id: owner + "/" + kind.rawValue, owner: owner,
                 role: kind.rawValue, family: family, days: [summary.day], contentIDs: ids,
-                frame: view.convert(view.bounds, to: viewport), view: view)
+                frame: view.convert(view.bounds, to: viewport), view: view)]
         }
     }
 }
@@ -143,7 +143,7 @@ extension UIKitDaySummaryCanvasView {
 extension UIKitPeriodSummaryCanvasView {
     func zoomTiles(summary: PeriodSummary, in viewport: UIView) -> [HomeFeedZoomTile] {
         let owner = summary.key.id
-        return transitionTileViews.compactMap { kind, view in
+        return transitionTileViews.flatMap { kind, view -> [HomeFeedZoomTile] in
             let family: HomeFeedZoomTile.Family
             var ids: Set<String> = []
             var days = Set(summary.days.map(\.day))
@@ -156,8 +156,8 @@ extension UIKitPeriodSummaryCanvasView {
                 family = .map
                 ids = Set([summary.mostVisitedPlace?.location.id].compactMap { $0 })
             case .photos:
-                family = .photos
-                ids = Set(summary.photos.map(\.id))
+                return (view as? UIKitPhotoSummaryTileView)?.zoomTiles(
+                    owner: owner, days: days, in: viewport) ?? []
             case .people:
                 family = .people
                 ids = Set(summary.people.map { $0.id.uuidString })
@@ -168,11 +168,21 @@ extension UIKitPeriodSummaryCanvasView {
             case .countries: family = .countries
             case .review: family = .review
             case .newGround: family = .newGround
-            case .busiestDay: return nil
+            case .busiestDay: return []
             }
-            return HomeFeedZoomTile(id: owner + "/" + kind.rawValue, owner: owner,
+            return [HomeFeedZoomTile(id: owner + "/" + kind.rawValue, owner: owner,
                 role: kind.rawValue, family: family, days: days, contentIDs: ids,
-                frame: view.convert(view.bounds, to: viewport), view: view)
+                frame: view.convert(view.bounds, to: viewport), view: view)]
+        }
+    }
+}
+
+extension UIKitPhotoSummaryTileView {
+    func zoomTiles(owner: String, days: Set<TimelineDayKey>, in viewport: UIView) -> [HomeFeedZoomTile] {
+        transitionPhotos.enumerated().map { index, photo in
+            HomeFeedZoomTile(id: owner + "/photos/\(index)", owner: owner, role: "photos",
+                family: .photos, days: days, contentIDs: [photo.id],
+                frame: photo.view.convert(photo.view.bounds, to: viewport), view: photo.view)
         }
     }
 }

@@ -17,6 +17,14 @@ struct TransitDetailSheet: View {
     @State private var saveLocationRequest: SaveLocationAsPlaceRequest?
 
     var body: some View {
+        if entry.modelContext != nil && !entry.isDeleted {
+            detailContent
+        } else {
+            ContentUnavailableView("Item Unavailable", systemImage: "exclamationmark.triangle")
+        }
+    }
+
+    private var detailContent: some View {
         NavigationStack {
             Form {
                 if let details = entry.transitDetails {

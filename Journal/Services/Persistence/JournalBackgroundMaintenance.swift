@@ -1,13 +1,18 @@
 import Foundation
 import SwiftData
 
-/// Owns the model context used by launch and foreground maintenance.
-///
-/// Instances are created by `JournalPersistenceActors` from detached
-/// execution. This matters because SwiftData chooses the model context's
-/// executor when a model actor is initialized.
-@ModelActor
-actor JournalBackgroundMaintenance {
+/// Performs maintenance through the same context used by journal editors.
+@MainActor
+final class JournalBackgroundMaintenance {
+    // A context does not substitute for owning the container/store lifetime.
+    let modelContainer: ModelContainer
+    let modelContext: ModelContext
+
+    init(modelContainer: ModelContainer) {
+        self.modelContainer = modelContainer
+        modelContext = modelContainer.mainContext
+    }
+
 #if DEBUG
     func executorUsesMainThreadForTesting() -> Bool {
         Thread.isMainThread
@@ -20,7 +25,7 @@ actor JournalBackgroundMaintenance {
                 snapshot,
                 in: modelContext
             ) != nil else { return }
-            try modelContext.save()
+            try JournalPersistence.save(modelContext)
             NotificationCenter.default.post(
                 name: .automationCandidatesDidChange,
                 object: nil

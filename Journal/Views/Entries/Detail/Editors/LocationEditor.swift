@@ -23,6 +23,7 @@ struct EntryDetailLocationEditor: View {
     let linkedCount: Int
     let onEditLinks: () -> Void
     let onSaveAsPlace: () -> Void
+    let isActive: () -> Bool
 
     var body: some View {
         DynamicSheetScrollView(
@@ -44,15 +45,12 @@ struct EntryDetailLocationEditor: View {
             .padding(.top, 8)
             .padding(.bottom, 24)
         }
-        .onChange(of: model.selection) { _, selection in
-            guard let selection else { return }
-            session.setSelection(selection, for: role)
-        }
         .onAppear {
-            model.prepare(selection: session.selection(for: role))
-        }
-        .onDisappear {
-            model.stop()
+            guard isActive() else { return }
+            model.prepare(selection: session.selection(for: role)) { selection in
+                guard isActive() else { return }
+                session.setSelection(selection, for: role)
+            }
         }
     }
 }

@@ -45,9 +45,27 @@ final class WorkoutDetails {
     var activeEnergyKilocalories: Double?
     var routeImportState: WorkoutRouteImportState
 
-    var sourceLocation: Location?
-    var originLocation: Location?
-    var destinationLocation: Location?
+    @Attribute(originalName: "sourceLocationPayload")
+    private var sourceLocationData: Data?
+
+    var sourceLocation: Location? {
+        get { PersistedJSON.decode(Location.self, from: sourceLocationData) }
+        set { sourceLocationData = newValue.flatMap(PersistedJSON.encode) }
+    }
+    @Attribute(originalName: "originLocationPayload")
+    private var originLocationData: Data?
+
+    var originLocation: Location? {
+        get { PersistedJSON.decode(Location.self, from: originLocationData) }
+        set { originLocationData = newValue.flatMap(PersistedJSON.encode) }
+    }
+    @Attribute(originalName: "destinationLocationPayload")
+    private var destinationLocationData: Data?
+
+    var destinationLocation: Location? {
+        get { PersistedJSON.decode(Location.self, from: destinationLocationData) }
+        set { destinationLocationData = newValue.flatMap(PersistedJSON.encode) }
+    }
 
     var place: Place?
     var originPlace: Place?
@@ -99,9 +117,9 @@ final class WorkoutDetails {
         self.distanceMeters = distanceMeters
         self.activeEnergyKilocalories = activeEnergyKilocalories
         self.routeImportState = routeImportState
-        self.sourceLocation = sourceLocation
-        self.originLocation = originLocation
-        self.destinationLocation = destinationLocation
+        self.sourceLocationData = (sourceLocation).flatMap(PersistedJSON.encode)
+        self.originLocationData = (originLocation).flatMap(PersistedJSON.encode)
+        self.destinationLocationData = (destinationLocation).flatMap(PersistedJSON.encode)
         self.place = place
         self.originPlace = originPlace
         self.destinationPlace = destinationPlace

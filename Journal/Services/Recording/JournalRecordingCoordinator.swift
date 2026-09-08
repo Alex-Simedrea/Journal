@@ -64,6 +64,7 @@ final class JournalRecordingCoordinator {
     private let tracker = JournalRecordingLocationTracker()
     private let liveActivity = JournalRecordingLiveActivityController()
     private let finalizer = JournalRecordingFinalizer()
+    private var isTransitioning = false
     private var backgroundActivitySession: CLBackgroundActivitySession?
 
     private init() {}
@@ -72,7 +73,10 @@ final class JournalRecordingCoordinator {
         origin: JournalRecordingToggleOrigin,
         mode: JournalRecordingMode = .singleEntry
     ) async throws -> JournalRecordingToggleResult {
-        let context = ModelContext(JournalModelContainer.shared)
+        guard !isTransitioning else { return .transitionInProgress }
+        isTransitioning = true
+        defer { isTransitioning = false }
+        let context = try JournalModelContainer.load().mainContext
         let recording = try activeRecording(in: context)
         if let recording {
             JournalRecordingLog.recording.info(
@@ -102,14 +106,18 @@ final class JournalRecordingCoordinator {
     }
 
     func restoreIfNeeded(applicationIsActive: Bool) {
-        let context = ModelContext(JournalModelContainer.shared)
+        guard let context = try? JournalModelContainer.load().mainContext else { return }
         guard let recording = try? activeRecording(in: context) else { return }
         JournalRecordingLog.recording.info(
             "[Recording] app restored with active session \(recording.id) in state \(recording.status.rawValue)"
         )
         if recording.status == .stopping {
             Task { [weak self] in
-                _ = try? await self?.finishStopping(recording, in: context)
+                guard let self, !isTransitioning,
+                      recording.modelContext != nil, !recording.isDeleted else { return }
+                isTransitioning = true
+                defer { isTransitioning = false }
+                _ = try? await finishStopping(recording, in: context)
             }
             return
         }
@@ -119,7 +127,7 @@ final class JournalRecordingCoordinator {
         }
         if applicationIsActive, recording.status == .awaitingForeground {
             Task { [weak self] in
-                _ = try? await self?.resumeInForeground(recording, in: context)
+                await self?.resumeIfAvailable(recording, in: context)
             }
         } else {
             startTracking(recording, in: context)
@@ -128,16 +136,29 @@ final class JournalRecordingCoordinator {
     }
 
     func appDidBecomeActive() {
-        let context = ModelContext(JournalModelContainer.shared)
+        guard let context = try? JournalModelContainer.load().mainContext else { return }
         guard let recording = try? activeRecording(in: context),
               recording.status == .awaitingForeground else { return }
         Task { [weak self] in
-            _ = try? await self?.resumeInForeground(recording, in: context)
+            await self?.resumeIfAvailable(recording, in: context)
         }
     }
 
+    private func resumeIfAvailable(
+        _ recording: ActiveJournalRecording, in context: ModelContext
+    ) async {
+        guard !isTransitioning, recording.modelContext != nil,
+              !recording.isDeleted, recording.status == .awaitingForeground else { return }
+        isTransitioning = true
+        defer { isTransitioning = false }
+        _ = try? await resumeInForeground(recording, in: context)
+    }
+
     func stopFromLiveActivity() async throws {
-        let context = ModelContext(JournalModelContainer.shared)
+        guard !isTransitioning else { return }
+        isTransitioning = true
+        defer { isTransitioning = false }
+        let context = try JournalModelContainer.load().mainContext
         guard let recording = try activeRecording(in: context) else { return }
         switch recording.status {
         case .recording, .awaitingForeground:
@@ -157,7 +178,7 @@ final class JournalRecordingCoordinator {
             : .foregroundFallback
         let recording = ActiveJournalRecording(startPath: path, mode: mode)
         context.insert(recording)
-        try context.save()
+        try JournalPersistence.save(context)
         JournalRecordingLog.recording.info(
             "[Recording] started session \(recording.id) via \(path.rawValue)"
         )
@@ -167,11 +188,11 @@ final class JournalRecordingCoordinator {
         }
         do {
             recording.activityID = try liveActivity.start(for: recording)
-            try context.save()
+            try JournalPersistence.save(context)
             JournalRecordingLog.recording.info("[Recording] Live Activity started")
         } catch {
             recording.lastDiagnostic = "live-activity-error: \(error.localizedDescription)"
-            try context.save()
+            try JournalPersistence.save(context)
             JournalRecordingLog.recording.error(
                 "[Recording] Live Activity failed: \(error.localizedDescription)"
             )
@@ -182,13 +203,13 @@ final class JournalRecordingCoordinator {
         case .requiresForeground, .authorizationDenied:
             recording.status = .awaitingForeground
             recording.lastUpdatedAt = .now
-            try context.save()
+            try JournalPersistence.save(context)
             await liveActivity.update(for: recording)
             return .needsForeground
         case .established, .unconfirmed:
             recording.status = .recording
             recording.lastUpdatedAt = .now
-            try context.save()
+            try JournalPersistence.save(context)
             return .started
         }
     }
@@ -204,7 +225,7 @@ final class JournalRecordingCoordinator {
         recording.startPath = .foregroundFallback
         recording.lastDiagnostic = nil
         recording.lastUpdatedAt = .now
-        try context.save()
+        try JournalPersistence.save(context)
 
         let startup = await beginTracking(recording, in: context)
         recording.status = switch startup {
@@ -212,7 +233,7 @@ final class JournalRecordingCoordinator {
         case .established, .unconfirmed: .recording
         }
         recording.lastUpdatedAt = .now
-        try context.save()
+        try JournalPersistence.save(context)
         await liveActivity.update(for: recording)
         return recording.status == .recording ? .started : .needsForeground
     }
@@ -224,7 +245,7 @@ final class JournalRecordingCoordinator {
         recording.status = .stopping
         recording.endedAt = .now
         recording.lastUpdatedAt = .now
-        try context.save()
+        try JournalPersistence.save(context)
         JournalRecordingLog.recording.info(
             "[Recording] stopping session \(recording.id)"
         )
@@ -246,10 +267,11 @@ final class JournalRecordingCoordinator {
             finalization: result,
             entries: entries
         )
+        let recordingID = recording.id
         context.delete(recording)
-        try context.save()
+        try JournalPersistence.save(context)
         JournalRecordingLog.recording.info(
-            "[Recording] finalized session \(recording.id)"
+            "[Recording] finalized session \(recordingID)"
         )
         return .stopped(result)
     }
@@ -281,15 +303,17 @@ final class JournalRecordingCoordinator {
         Task { [weak self] in
             guard let self else { return }
             let startup = await beginTracking(recording, in: context)
+            guard recording.modelContext != nil, !recording.isDeleted,
+                  recording.status != .stopping else { return }
             if startup == .requiresForeground
                 || startup == .authorizationDenied {
                 recording.status = .awaitingForeground
                 recording.lastUpdatedAt = .now
-                try? context.save()
+                try? JournalPersistence.save(context)
                 await liveActivity.update(for: recording)
             } else if recording.status == .starting {
                 recording.status = .recording
-                try? context.save()
+                try? JournalPersistence.save(context)
             }
         }
     }
@@ -300,7 +324,7 @@ final class JournalRecordingCoordinator {
     ) {
         do {
             recording.activityID = try liveActivity.start(for: recording)
-            try context.save()
+            try JournalPersistence.save(context)
         } catch {
             JournalRecordingLog.recording.error(
                 "[Recording] unable to restore Live Activity: \(error.localizedDescription)"
@@ -313,7 +337,8 @@ final class JournalRecordingCoordinator {
         for recording: ActiveJournalRecording,
         in context: ModelContext
     ) async {
-        guard recording.status != .stopping,
+        guard recording.modelContext != nil, !recording.isDeleted,
+              recording.status != .stopping,
               CLLocationCoordinate2DIsValid(location.coordinate),
               location.horizontalAccuracy >= 0,
               location.horizontalAccuracy
@@ -373,7 +398,7 @@ final class JournalRecordingCoordinator {
         recording.status = .recording
         recording.lastUpdatedAt = .now
         do {
-            try context.save()
+            try JournalPersistence.save(context)
             JournalRecordingLog.location.debug(
                 "[Location] received \(point.latitude), \(point.longitude), accuracy \(point.horizontalAccuracy)m"
             )
@@ -399,12 +424,14 @@ final class JournalRecordingCoordinator {
         for recording: ActiveJournalRecording,
         in context: ModelContext
     ) async {
+        guard recording.modelContext != nil, !recording.isDeleted,
+              recording.status != .stopping else { return }
         recording.lastDiagnostic = diagnostic
         recording.lastUpdatedAt = .now
         if diagnostic == "insufficiently-in-use" {
             recording.status = .awaitingForeground
         }
-        try? context.save()
+        try? JournalPersistence.save(context)
         JournalRecordingLog.location.notice(
             "[Location] diagnostic: \(diagnostic)"
         )

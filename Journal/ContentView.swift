@@ -7,8 +7,19 @@ import SwiftUI
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .modelContainer(JournalModelContainer.shared)
+            switch JournalModelContainer.result {
+            case .success(let container):
+                ContentView().modelContainer(container)
+            case .failure(let error):
+                ContentUnavailableView {
+                    Label("Couldn’t Open Journal", systemImage: "externaldrive.badge.exclamationmark")
+                } description: {
+                    Text("Your saved data has not been reset. Journal could not open it.")
+                    Text(error.localizedDescription)
+                        .font(.footnote)
+                        .textSelection(.enabled)
+                }
+            }
         }
     }
 }
@@ -55,16 +66,15 @@ private struct JournalApplicationContent: View {
             try? await Task.sleep(for: .seconds(2))
             guard !Task.isCancelled else { return }
             hasStartedBackgroundServices = true
-            let maintenance = await JournalPersistenceActors.shared.maintenance(
-                for: JournalModelContainerReference(modelContext.container)
+            let maintenance = await JournalPersistenceServices.shared.maintenance(
+                for: modelContext.container
             )
-            let contactContext = backgroundContext()
             await automation.start(using: maintenance)
             async let backgroundMaintenance: Void = runBackgroundMaintenance(
                 maintenance
             )
             _ = try? await ContactPersonSyncService
-                .synchronizeAllContacts(in: contactContext)
+                .synchronizeAllContacts(in: modelContext)
             await workoutImports.start(modelContainer: modelContext.container)
             await backgroundMaintenance
             contentRevision &+= 1
@@ -77,11 +87,9 @@ private struct JournalApplicationContent: View {
                 guard isInitialFeedReady,
                       hasStartedBackgroundServices else { return }
                 Task {
-                    let maintenance = await JournalPersistenceActors.shared
+                    let maintenance = await JournalPersistenceServices.shared
                         .maintenance(
-                            for: JournalModelContainerReference(
-                                modelContext.container
-                            )
+                            for: modelContext.container
                         )
                     await automation.synchronize(using: maintenance)
                     async let backgroundMaintenance: Void =
@@ -139,12 +147,6 @@ private struct JournalApplicationContent: View {
                     ?? "An unknown error occurred."
             )
         }
-    }
-
-    private func backgroundContext() -> ModelContext {
-        let context = ModelContext(modelContext.container)
-        context.autosaveEnabled = false
-        return context
     }
 
     private func runBackgroundMaintenance(

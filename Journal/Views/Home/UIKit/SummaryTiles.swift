@@ -934,9 +934,13 @@ final class UIKitPhotoSummaryTileView: UIView {
     private var totalCount = 0
     private var style: Style = .day
 
-    // Read only during transition capture; preserve the grid's individual shapes.
-    var transitionPhotoViews: [UIView] {
-        Array(imageViews.prefix(references.count))
+    // Match individual photos, never crossfade two grids with different gaps.
+    var transitionPhotos: [(id: String, view: UIView)] {
+        references.enumerated().compactMap { index, reference in
+            // Leave the photo-count overlay on its background surface.
+            guard overflowLabel.isHidden || index != 3 else { return nil }
+            return (reference.id, imageViews[index])
+        }
     }
 
     override init(frame: CGRect) {

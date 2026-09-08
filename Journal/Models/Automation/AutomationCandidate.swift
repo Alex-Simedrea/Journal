@@ -38,15 +38,33 @@ final class AutomationCandidate {
     var endTime: Date?
     var timeZoneIdentifier: String
 
-    var visitLocation: Location?
+    @Attribute(originalName: "visitLocationPayload")
+    private var visitLocationData: Data?
+
+    var visitLocation: Location? {
+        get { PersistedJSON.decode(Location.self, from: visitLocationData) }
+        set { visitLocationData = newValue.flatMap(PersistedJSON.encode) }
+    }
     var visitHorizontalAccuracyMeters: Double?
     var visitPlaceID: UUID?
 
     var motionKind: MotionTransitKind?
     var motionConfidenceRawValue: Int?
-    var originLocation: Location?
+    @Attribute(originalName: "originLocationPayload")
+    private var originLocationData: Data?
+
+    var originLocation: Location? {
+        get { PersistedJSON.decode(Location.self, from: originLocationData) }
+        set { originLocationData = newValue.flatMap(PersistedJSON.encode) }
+    }
     var originPlaceID: UUID?
-    var destinationLocation: Location?
+    @Attribute(originalName: "destinationLocationPayload")
+    private var destinationLocationData: Data?
+
+    var destinationLocation: Location? {
+        get { PersistedJSON.decode(Location.self, from: destinationLocationData) }
+        set { destinationLocationData = newValue.flatMap(PersistedJSON.encode) }
+    }
     var destinationPlaceID: UUID?
 
     var acceptedEntryID: UUID?
@@ -83,14 +101,14 @@ final class AutomationCandidate {
         self.startTime = startTime
         self.endTime = endTime
         self.timeZoneIdentifier = timeZoneIdentifier
-        self.visitLocation = visitLocation
+        self.visitLocationData = (visitLocation).flatMap(PersistedJSON.encode)
         self.visitHorizontalAccuracyMeters = visitHorizontalAccuracyMeters
         self.visitPlaceID = visitPlaceID
         self.motionKind = motionKind
         self.motionConfidenceRawValue = motionConfidenceRawValue
-        self.originLocation = originLocation
+        self.originLocationData = (originLocation).flatMap(PersistedJSON.encode)
         self.originPlaceID = originPlaceID
-        self.destinationLocation = destinationLocation
+        self.destinationLocationData = (destinationLocation).flatMap(PersistedJSON.encode)
         self.destinationPlaceID = destinationPlaceID
         self.acceptedEntryID = acceptedEntryID
         self.provenanceRecordedAt = provenanceRecordedAt

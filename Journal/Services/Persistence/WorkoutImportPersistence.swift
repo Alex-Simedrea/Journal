@@ -13,8 +13,17 @@ nonisolated struct ResolvedWorkoutImport: Sendable {
     let locations: WorkoutResolvedLocations
 }
 
-@ModelActor
-actor WorkoutImportPersistence {
+@MainActor
+final class WorkoutImportPersistence {
+    // A context does not substitute for owning the container/store lifetime.
+    let modelContainer: ModelContainer
+    let modelContext: ModelContext
+
+    init(modelContainer: ModelContainer) {
+        self.modelContainer = modelContainer
+        modelContext = modelContainer.mainContext
+    }
+
     func references() throws -> [WorkoutEntryReference] {
         try workoutEntries().compactMap { entry in
             guard let details = entry.workoutDetails else { return nil }
@@ -37,11 +46,11 @@ actor WorkoutImportPersistence {
             clearResolvedLocationReviews(in: existingEntries)
 
             var entriesByWorkoutUUID = Dictionary(
-                uniqueKeysWithValues: existingEntries.compactMap { entry in
+                existingEntries.compactMap { entry in
                     entry.workoutDetails.map {
                         ($0.healthKitWorkoutUUID, entry)
                     }
-                }
+                }, uniquingKeysWith: { first, _ in first }
             )
 
             for deletedUUID in changeSet.deletedWorkoutUUIDs {
@@ -100,8 +109,8 @@ actor WorkoutImportPersistence {
             )
             _ = try EntryLinkingService.reconcile(in: modelContext)
             guard modelContext.hasChanges else { return }
-            try modelContext.save()
-            await TimelineDataChange.post(.structure)
+            try JournalPersistence.save(modelContext)
+            TimelineDataChange.post(.structure)
         } catch {
             modelContext.rollback()
             throw error

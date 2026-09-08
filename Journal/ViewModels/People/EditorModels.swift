@@ -27,10 +27,9 @@ final class ManualPersonEditorModel {
         let person = Person(name: trimmedName)
         modelContext.insert(person)
         do {
-            try modelContext.save()
+            try JournalPersistence.save(modelContext)
             return person
         } catch {
-            modelContext.delete(person)
             errorMessage = error.localizedDescription
             return nil
         }

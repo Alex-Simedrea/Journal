@@ -61,6 +61,7 @@ final class ManualTransitComposerModel {
         people: [Person],
         modelContext: ModelContext
     ) async -> Bool {
+        guard !isSaving else { return false }
         let origin = places.first(where: { $0.id == originPlaceID })
         let destination = places.first(where: { $0.id == destinationPlaceID })
         let resolvedOrigin = origin?.location ?? originLocation
@@ -103,10 +104,7 @@ final class ManualTransitComposerModel {
                 rawInput: nil,
                 in: modelContext
             )
-            _ = try? await EntryWeatherService.populate(
-                entry,
-                in: modelContext
-            )
+            EntryWeatherService.refreshInBackground(entry, in: modelContext)
             return true
         } catch {
             errorMessage = error.localizedDescription

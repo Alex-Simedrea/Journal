@@ -63,10 +63,10 @@ final class VisitMonitoringCoordinator: NSObject, CLLocationManagerDelegate {
             horizontalAccuracyMeters: visit.horizontalAccuracy
         )
         Task {
-            let maintenance = await JournalPersistenceActors.shared.maintenance(
-                for: JournalModelContainerReference(modelContainer)
+            let maintenance = await JournalPersistenceServices.shared.maintenance(
+                for: modelContainer
             )
-            await maintenance.persistVisit(snapshot)
+            maintenance.persistVisit(snapshot)
         }
     }
 
@@ -77,55 +77,50 @@ final class VisitMonitoringCoordinator: NSObject, CLLocationManagerDelegate {
         print("Visit monitoring failed: \(error)")
     }
 
-    nonisolated static func enrichClosedVisits(
-        in modelContext: ModelContext
-    ) async throws {
-        let candidates = try modelContext.fetch(
-            FetchDescriptor<AutomationCandidate>()
-        ).filter {
-            $0.kind == .visit
-                && $0.endTime != nil
-                && $0.visitLocation != nil
+    static func enrichClosedVisits(
+        in modelContext: ModelContext,
+        resolve: (Location) async throws -> Location = { location in
+            await LocationService.shared.location(at: location.coordinate)
         }
-        guard !candidates.isEmpty else { return }
-        let places = try modelContext.fetch(FetchDescriptor<Place>())
-
-        for candidate in candidates {
-            guard let storedLocation = candidate.visitLocation else { continue }
-            if storedLocation.formattedAddress == nil
-                || storedLocation.timeZoneIdentifier == nil {
-                let enriched = await LocationService.shared.location(
-                    at: storedLocation.coordinate
-                )
-                candidate.visitLocation = Location(
-                    latitude: storedLocation.latitude,
-                    longitude: storedLocation.longitude,
-                    displayName: enriched.displayName
-                        ?? storedLocation.displayName,
-                    formattedAddress: enriched.formattedAddress
-                        ?? storedLocation.formattedAddress,
-                    compactAddress: enriched.compactAddress
-                        ?? storedLocation.compactAddress,
-                    timeZoneIdentifier: enriched.timeZoneIdentifier
-                        ?? storedLocation.timeZoneIdentifier,
-                    cityName: enriched.cityName ?? storedLocation.cityName,
-                    countryName: enriched.countryName
-                        ?? storedLocation.countryName,
-                    countryCode: enriched.countryCode
-                        ?? storedLocation.countryCode
+    ) async throws {
+        // Hold only IDs/values over geocoding. A candidate can be accepted,
+        // dismissed, edited, or deleted while the lookup is suspended.
+        let targets = try modelContext.fetch(FetchDescriptor<AutomationCandidate>())
+            .compactMap { candidate -> (UUID, Location)? in
+                guard candidate.kind == .visit, candidate.status == .pending,
+                      candidate.endTime != nil,
+                      let location = candidate.visitLocation else { return nil }
+                return (candidate.id, location)
+            }
+        for (id, original) in targets {
+            var resolved = original
+            if original.formattedAddress == nil || original.timeZoneIdentifier == nil {
+                let enriched = try await resolve(original)
+                resolved = Location(
+                    latitude: original.latitude, longitude: original.longitude,
+                    displayName: enriched.displayName ?? original.displayName,
+                    formattedAddress: enriched.formattedAddress ?? original.formattedAddress,
+                    compactAddress: enriched.compactAddress ?? original.compactAddress,
+                    timeZoneIdentifier: enriched.timeZoneIdentifier ?? original.timeZoneIdentifier,
+                    cityName: enriched.cityName ?? original.cityName,
+                    countryName: enriched.countryName ?? original.countryName,
+                    countryCode: enriched.countryCode ?? original.countryCode
                 )
             }
-
+            try Task.checkCancellation()
+            guard let candidate = try modelContext.fetch(FetchDescriptor<AutomationCandidate>(
+                predicate: #Predicate { $0.id == id }
+            )).first, candidate.status == .pending,
+                  candidate.visitLocation == original else { continue }
+            candidate.visitLocation = resolved
             if candidate.visitPlaceID == nil {
                 let coordinate = WorkoutCoordinateSnapshot(
-                    latitude: storedLocation.latitude,
-                    longitude: storedLocation.longitude,
-                    horizontalAccuracyMeters: candidate
-                        .visitHorizontalAccuracyMeters ?? 0
+                    latitude: original.latitude, longitude: original.longitude,
+                    horizontalAccuracyMeters: candidate.visitHorizontalAccuracyMeters ?? 0
                 )
+                let places = try modelContext.fetch(FetchDescriptor<Place>())
                 if case .matched(let place) = WorkoutPlaceMatcher.match(
-                    coordinate: coordinate,
-                    places: places
+                    coordinate: coordinate, places: places
                 ) {
                     candidate.visitPlaceID = place.id
                     candidate.visitLocation = place.location
@@ -134,9 +129,11 @@ final class VisitMonitoringCoordinator: NSObject, CLLocationManagerDelegate {
             candidate.timeZoneIdentifier = candidate.visitLocation?
                 .timeZoneIdentifier ?? candidate.timeZoneIdentifier
             candidate.updatedAt = .now
+            // Never leave staged mutations across the next suspension point.
+            try JournalPersistence.save(modelContext)
         }
         if modelContext.hasChanges {
-            try modelContext.save()
+            try JournalPersistence.save(modelContext)
         }
     }
 }

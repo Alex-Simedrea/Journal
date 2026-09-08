@@ -52,10 +52,13 @@ struct EntryEditingTests {
         #expect(try context.fetch(FetchDescriptor<LogEntry>()).isEmpty)
         #expect(entry.endTime == Date(timeIntervalSince1970: 3_000))
         #expect(entry.transitDetails?.sourceServiceIdentifier == "AF6634")
-        #expect(entry.people.isEmpty)
+        #expect(entry.people.first?.id == person.id)
+        #expect(entry.people.first !== person)
         #expect(session.selectedPeopleIDs == [person.id])
 
-        try TransitEntryStore.insert(entry, in: context)
+        let committed = try EntryDraftGraph.materialize(entry,
+            selectedPeopleIDs: session.selectedPeopleIDs, in: context)
+        try TransitEntryStore.insert(committed, in: context)
 
         #expect(try context.fetch(FetchDescriptor<LogEntry>()).count == 1)
     }

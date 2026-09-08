@@ -159,7 +159,7 @@ final class PlaceVisitReviewModel {
                 role: .place,
                 in: modelContext
             )
-            try modelContext.save()
+            try JournalPersistence.save(modelContext)
             EntryWeatherService.refreshInBackground(
                 entry,
                 in: modelContext

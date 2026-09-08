@@ -83,11 +83,13 @@ struct EntryDetailPeoplePickerTests {
     coordinator.present(.people)
     coordinator.session.selectedPeopleIDs = [person.id]
 
-    coordinator.returnToDetailsPreservingDraft(for: .people)
+    entry.people = [EntryDraftGraph.person(person)]
+    coordinator.returnToDetails(entry: entry)
 
     #expect(coordinator.route == .details)
     #expect(coordinator.session.selectedPeopleIDs == [person.id])
-    #expect(entry.people.isEmpty)
+    #expect(entry.people.first?.id == person.id)
+    #expect(entry.people.first !== person)
   }
 
   @Test("Search includes aliases and preserves alphabetic sections")

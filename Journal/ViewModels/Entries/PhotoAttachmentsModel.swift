@@ -96,9 +96,9 @@ final class EntryPhotoAttachmentsModel {
         in modelContext: ModelContext
     ) {
         do {
-            try modelContext.save()
+            try JournalPersistence.save(modelContext)
         } catch {
-            entry.photoReferences = originalReferences
+            modelContext.rollback()
             errorMessage = error.localizedDescription
         }
     }

@@ -25,9 +25,21 @@ nonisolated struct PlaceVisitFieldReview: Codable, Hashable, Identifiable, Senda
 final class PlaceVisitDetails {
     private var visitDescription: String?
     var place: Place?
-    var location: Location?
+    @Attribute(originalName: "locationPayload")
+    private var locationData: Data?
+
+    var location: Location? {
+        get { PersistedJSON.decode(Location.self, from: locationData) }
+        set { locationData = newValue.flatMap(PersistedJSON.encode) }
+    }
     var placeRawText: String?
-    var candidates: [LocationCandidate]
+    @Attribute(originalName: "candidates")
+    private var candidatesData: Data?
+
+    var candidates: [LocationCandidate] {
+        get { PersistedJSON.decode([LocationCandidate].self, from: candidatesData) ?? [] }
+        set { candidatesData = PersistedJSON.encode(newValue) }
+    }
     var unresolvedPeople: [String]
     @Attribute(originalName: "fieldReviews")
     private var fieldReviewsData: Data?
@@ -53,9 +65,9 @@ final class PlaceVisitDetails {
     ) {
         self.visitDescription = description
         self.place = place
-        self.location = location ?? place?.location
+        self.locationData = (location ?? place?.location).flatMap(PersistedJSON.encode)
         self.placeRawText = placeRawText
-        self.candidates = candidates
+        self.candidatesData = PersistedJSON.encode(candidates)
         self.unresolvedPeople = unresolvedPeople
         self.fieldReviewsData = PersistedJSON.encode(fieldReviews)
     }

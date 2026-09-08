@@ -23,6 +23,7 @@ enum JournalDeletionService {
     }
 
     static func delete(_ entry: LogEntry, in modelContext: ModelContext) throws {
+        guard entry.modelContext === modelContext, !entry.isDeleted else { return }
         let workoutUUID = entry.workoutDetails?.healthKitWorkoutUUID
         if let workoutUUID {
             WorkoutImportPreferences.exclude(workoutUUID)
@@ -53,11 +54,13 @@ enum JournalDeletionService {
     }
 
     static func delete(_ place: Place, in modelContext: ModelContext) throws {
+        guard place.modelContext === modelContext, !place.isDeleted else { return }
         try detachReferences(to: place, in: modelContext)
         try deleteModel(place, in: modelContext)
     }
 
     static func delete(_ person: Person, in modelContext: ModelContext) throws {
+        guard person.modelContext === modelContext, !person.isDeleted else { return }
         let contactIdentifier = person.contactIdentifier
         try detachReferences(to: person, in: modelContext)
         try deleteModel(person, in: modelContext)
@@ -151,7 +154,7 @@ enum JournalDeletionService {
         modelContext.delete(model)
 
         do {
-            try modelContext.save()
+            try JournalPersistence.save(modelContext)
         } catch {
             modelContext.rollback()
             throw error

@@ -39,6 +39,7 @@ struct EntryLocationPickerSheet: View {
                 }
             }
         }
+        .onDisappear { model.stop() }
     }
 
     private func select(_ selection: EntryLocationSelection) {
@@ -58,8 +59,7 @@ private struct EntryLocationSearchSection: View {
                 isResolving: model.isResolving
             ) { suggestion in
                 Task {
-                    await model.resolve(suggestion)
-                    if let selection = model.selection {
+                    if let selection = await model.resolve(suggestion) {
                         onSelect(selection)
                     }
                 }
@@ -82,8 +82,7 @@ private struct EntryCurrentLocationSection: View {
         Section {
             Button {
                 Task {
-                    await model.useCurrentLocation()
-                    if let selection = model.selection {
+                    if let selection = await model.useCurrentLocation() {
                         onSelect(selection)
                     }
                 }

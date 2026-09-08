@@ -3,28 +3,19 @@ import UIKit
 /// Keep clipping in points, outside the bitmap that stretches during a morph.
 @MainActor
 struct HomeFeedZoomTileSnapshot {
-    struct CornerRegion {
-        let frame: CGRect
-        let radius: CGFloat
-    }
-
     let image: UIImage
-    let regions: [CornerRegion]
+    let cornerRadius: CGFloat
 
     static func capture(_ view: UIView, background: UIColor,
                         displayScale: CGFloat) -> HomeFeedZoomTileSnapshot {
-        let regionViews = (view as? UIKitPhotoSummaryTileView)?.transitionPhotoViews ?? [view]
-        let regions = regionViews.map {
-            CornerRegion(frame: $0.convert($0.bounds, to: view), radius: $0.layer.cornerRadius)
-        }
+        let cornerRadius = view.layer.cornerRadius
         // Some map tiles clip both the container and its full-size image child.
-        // Photo grids also clip their count overlay. Remove those duplicate
-        // silhouette clips for this synchronous capture, then restore them before
+        // Remove duplicate silhouette clips for this capture, then restore them before
         // UIKit can commit a frame. Interior details (e.g. avatars) stay intact.
         var roundedLayers: [(CALayer, CGFloat)] = []
         func collect(_ child: UIView) {
             let frame = child.convert(child.bounds, to: view)
-            if child.layer.cornerRadius > 0, regions.contains(where: { $0.frame == frame }) {
+            if child.layer.cornerRadius > 0, frame == view.bounds {
                 roundedLayers.append((child.layer, child.layer.cornerRadius))
             }
             child.subviews.forEach(collect)
@@ -47,43 +38,7 @@ struct HomeFeedZoomTileSnapshot {
             context.cgContext.translateBy(x: -view.bounds.minX, y: -view.bounds.minY)
             view.layer.render(in: context.cgContext)
         }
-        return Self(image: image, regions: regions.map {
-            CornerRegion(frame: $0.frame.offsetBy(dx: -view.bounds.minX, dy: -view.bounds.minY),
-                         radius: $0.radius)
-        })
-    }
-}
-
-@MainActor
-final class HomeFeedZoomTileImageView: UIImageView {
-    private let snapshot: HomeFeedZoomTileSnapshot
-    private let shape = CAShapeLayer()
-
-    init(snapshot: HomeFeedZoomTileSnapshot) {
-        self.snapshot = snapshot
-        super.init(image: snapshot.image)
-        disableImplicitAnimations(for: shape)
-        shape.actions?["path"] = NSNull()
-        layer.mask = shape
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        updateClipping()
-    }
-
-    func updateClipping() {
-        let scale = CGAffineTransform(scaleX: bounds.width / snapshot.image.size.width,
-                                      y: bounds.height / snapshot.image.size.height)
-        let path = UIBezierPath()
-        for region in snapshot.regions {
-            let rect = region.frame.applying(scale)
-            path.append(UIBezierPath(roundedRect: rect, cornerRadius: region.radius))
-        }
-        shape.frame = bounds
-        shape.path = path.cgPath
+        return Self(image: image, cornerRadius: cornerRadius)
     }
 }
 
@@ -130,26 +85,27 @@ final class HomeFeedZoomTransition: NSObject {
             let rect = tile.frame.applying(CGAffineTransform(scaleX: image.scale, y: image.scale))
             guard let cgImage = image.cgImage?.cropping(to: rect) else { return nil }
             let crop = UIImage(cgImage: cgImage, scale: image.scale, orientation: .up)
-            return HomeFeedZoomTileSnapshot(image: crop, regions: [
-                .init(frame: CGRect(origin: .zero, size: crop.size), radius: 16)
-            ])
+            return HomeFeedZoomTileSnapshot(image: crop, cornerRadius: 16)
         }
     }
 
     private final class FlyingTile {
         let view = UIView()
         var endpoints: [JournalSummaryScale: HomeFeedZoomTile] = [:]
-        var images: [JournalSummaryScale: HomeFeedZoomTileImageView] = [:]
+        var images: [JournalSummaryScale: UIImageView] = [:]
+        var cornerRadii: [JournalSummaryScale: CGFloat] = [:]
         var x: HomeFeedZoomSpring
         var y: HomeFeedZoomSpring
         var width: HomeFeedZoomSpring
         var height: HomeFeedZoomSpring
+        var cornerRadius: HomeFeedZoomSpring
 
-        init(frame: CGRect) {
+        init(frame: CGRect, cornerRadius: CGFloat) {
             x = HomeFeedZoomSpring(frame.midX)
             y = HomeFeedZoomSpring(frame.midY)
             width = HomeFeedZoomSpring(frame.width)
             height = HomeFeedZoomSpring(frame.height)
+            self.cornerRadius = HomeFeedZoomSpring(cornerRadius)
             view.isUserInteractionEnabled = false
             view.clipsToBounds = true
         }
@@ -158,7 +114,8 @@ final class HomeFeedZoomTransition: NSObject {
         func attach(_ tile: HomeFeedZoomTile, scene: Scene) -> Bool {
             guard let image = scene.croppedTile(tile) else { return false }
             endpoints[scene.scale] = tile
-            let imageView = HomeFeedZoomTileImageView(snapshot: image)
+            cornerRadii[scene.scale] = image.cornerRadius
+            let imageView = UIImageView(image: image.image)
             images[scene.scale] = imageView
             view.addSubview(imageView)
             scene.cutOut(tile.frame)
@@ -171,6 +128,7 @@ final class HomeFeedZoomTransition: NSObject {
             y.target = tile.frame.midY
             width.target = tile.frame.width
             height.target = tile.frame.height
+            cornerRadius.target = cornerRadii[scale] ?? cornerRadius.target
         }
 
         func advance(by delta: TimeInterval) {
@@ -178,10 +136,11 @@ final class HomeFeedZoomTransition: NSObject {
             y.advance(by: delta)
             width.advance(by: delta)
             height.advance(by: delta)
+            cornerRadius.advance(by: delta)
         }
 
         var isSettled: Bool {
-            x.isSettled && y.isSettled && width.isSettled && height.isSettled
+            x.isSettled && y.isSettled && width.isSettled && height.isSettled && cornerRadius.isSettled
         }
     }
 
@@ -278,7 +237,9 @@ final class HomeFeedZoomTransition: NSObject {
             if !reduceMotion {
                 if flyingTiles.isEmpty, scenes.count == 1, let source = scenes.first {
                     for match in HomeFeedZoomMatcher.matches(from: source.tiles, to: scene.tiles) {
-                        let tile = FlyingTile(frame: source.tiles[match.source].frame)
+                        guard let snapshot = source.croppedTile(source.tiles[match.source]) else { continue }
+                        let tile = FlyingTile(frame: source.tiles[match.source].frame,
+                                              cornerRadius: snapshot.cornerRadius)
                         guard tile.attach(source.tiles[match.source], scene: source) else { continue }
                         tile.attach(scene.tiles[match.target], scene: scene)
                         flyingTiles.append(tile)
@@ -425,13 +386,15 @@ final class HomeFeedZoomTransition: NSObject {
             tile.view.bounds = CGRect(x: 0, y: 0, width: max(1, tile.width.value),
                                       height: max(1, tile.height.value))
             tile.view.center = CGPoint(x: tile.x.value, y: tile.y.value)
+            // Both image textures share one evolving edge, including through
+            // reversals. Crossfading separately rounded images produces halos.
+            tile.view.layer.cornerRadius = max(0, tile.cornerRadius.value)
             var total = 0.0
             for scene in scenes {
                 guard let image = tile.images[scene.scale] else { continue }
                 let weight = max(0, min(1, scene.weight.value))
                 total += weight
                 image.frame = tile.view.bounds
-                image.updateClipping()
                 image.alpha = total > 0.0001 ? weight / total : 0
             }
             tile.view.alpha = min(1, total)

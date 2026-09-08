@@ -36,7 +36,8 @@ actor LocationGeographyClient {
     }
 }
 
-nonisolated enum LocationGeographyService {
+@MainActor
+enum LocationGeographyService {
     static func populateMissing(in modelContext: ModelContext) async {
         do {
             let placeTargets = try modelContext.fetch(FetchDescriptor<Place>())
@@ -99,8 +100,8 @@ nonisolated enum LocationGeographyService {
                 changed = true
             }
             guard changed else { return }
-            try modelContext.save()
-            await TimelineDataChange.post()
+            try JournalPersistence.save(modelContext)
+            TimelineDataChange.post()
         } catch {
             // Geography is supplementary; partial summaries remain useful.
         }

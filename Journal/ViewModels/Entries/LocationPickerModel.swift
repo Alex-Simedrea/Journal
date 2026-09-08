@@ -55,9 +55,22 @@ final class EntryLocationPickerModel {
 
     @ObservationIgnored
     private var mapUpdateTask: Task<Void, Never>?
+    @ObservationIgnored private var selectionRevision = 0
+    @ObservationIgnored private var onSelectionChange: ((EntryLocationSelection) -> Void)?
+    @ObservationIgnored private let currentLocationProvider: () async throws -> Location
 
-    func prepare(selection: EntryLocationSelection?) {
-        mapUpdateTask?.cancel()
+    init(currentLocationProvider: @escaping () async throws -> Location = {
+        try await LocationService.shared.captureCurrentLocation()
+    }) {
+        self.currentLocationProvider = currentLocationProvider
+    }
+
+    func prepare(
+        selection: EntryLocationSelection?,
+        onSelectionChange: ((EntryLocationSelection) -> Void)? = nil
+    ) {
+        stop()
+        self.onSelectionChange = onSelectionChange
         isResolving = false
         errorMessage = nil
         searchText = ""
@@ -77,42 +90,50 @@ final class EntryLocationPickerModel {
         setSelection(EntryLocationSelection(place: place))
     }
 
-    func resolve(_ suggestion: LocationSearchSuggestion) async {
-        isResolving = true
+    @discardableResult
+    func resolve(_ suggestion: LocationSearchSuggestion) async -> EntryLocationSelection? {
+        let revision = beginResolution()
         errorMessage = nil
-        defer { isResolving = false }
+        defer { if revision == selectionRevision { isResolving = false } }
 
         do {
             let mapItem = try await search.resolve(suggestion)
+            guard revision == selectionRevision, !Task.isCancelled else { return nil }
             var location = LocationService.location(
                 for: mapItem,
                 fallbackName: suggestion.title
             )
             location.displayName = suggestion.title
-            setSelection(EntryLocationSelection(
-                location: location,
-                title: suggestion.title
-            ))
+            let resolved = EntryLocationSelection(location: location, title: suggestion.title)
+            setSelection(resolved)
             searchText = ""
             search.clear()
+            return resolved
         } catch {
+            guard revision == selectionRevision, !Task.isCancelled else { return nil }
             errorMessage = error.localizedDescription
+            return nil
         }
     }
 
-    func useCurrentLocation() async {
-        isResolving = true
+    @discardableResult
+    func useCurrentLocation() async -> EntryLocationSelection? {
+        let revision = beginResolution()
         errorMessage = nil
-        defer { isResolving = false }
+        defer { if revision == selectionRevision { isResolving = false } }
 
         do {
-            let location = try await LocationService.shared.captureCurrentLocation()
-            setSelection(EntryLocationSelection(
-                location: location,
-                title: String(localized: "Current Location")
-            ))
+            let location = try await currentLocationProvider()
+            guard revision == selectionRevision, !Task.isCancelled else { return nil }
+            let resolved = EntryLocationSelection(
+                location: location, title: String(localized: "Current Location")
+            )
+            setSelection(resolved)
+            return resolved
         } catch {
+            guard revision == selectionRevision, !Task.isCancelled else { return nil }
             errorMessage = error.localizedDescription
+            return nil
         }
     }
 
@@ -131,27 +152,39 @@ final class EntryLocationPickerModel {
     ) {
         search.updateRegion(region)
         guard positionedByUser else { return }
-        mapUpdateTask?.cancel()
-        isResolving = true
+        let revision = beginResolution()
         mapUpdateTask = Task {
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
             let location = await LocationService.shared.location(at: coordinate)
-            guard !Task.isCancelled else { return }
-            selection = EntryLocationSelection(location: location)
+            guard !Task.isCancelled, revision == selectionRevision else { return }
+            let selection = EntryLocationSelection(location: location)
+            self.selection = selection
+            onSelectionChange?(selection)
             isResolving = false
         }
     }
 
     func stop() {
+        selectionRevision &+= 1
         mapUpdateTask?.cancel()
+        onSelectionChange = nil
         isResolving = false
     }
 
+    private func beginResolution() -> Int {
+        selectionRevision &+= 1
+        mapUpdateTask?.cancel()
+        isResolving = true
+        return selectionRevision
+    }
+
     private func setSelection(_ selection: EntryLocationSelection) {
+        selectionRevision &+= 1
         mapUpdateTask?.cancel()
         isResolving = false
         self.selection = selection
+        onSelectionChange?(selection)
         moveMap(to: selection.location.coordinate, meters: 700)
     }
 

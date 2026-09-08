@@ -6,7 +6,8 @@
 import Foundation
 import SwiftData
 
-nonisolated enum PlaceVisitEntryStore {
+@MainActor
+enum PlaceVisitEntryStore {
     static func insert(
         draft: ResolvedPlaceVisitDraft,
         rawInput: String?,
@@ -20,16 +21,17 @@ nonisolated enum PlaceVisitEntryStore {
         return entry
     }
 
-    static func makeEntry(
+    nonisolated static func makeEntry(
         draft: ResolvedPlaceVisitDraft,
-        rawInput: String?
+        rawInput: String?,
+        detachedRelationships: Bool = false
     ) -> LogEntry {
         let location = draft.location?.withFallbackDisplayName(
             draft.place?.name
         )
         let details = PlaceVisitDetails(
             description: draft.description,
-            place: draft.place,
+            place: detachedRelationships ? EntryDraftGraph.place(draft.place) : draft.place,
             location: location,
             placeRawText: draft.placeRawText,
             candidates: draft.candidates,
@@ -54,13 +56,18 @@ nonisolated enum PlaceVisitEntryStore {
             needsReview: draft.needsReview
         )
         entry.placeVisitDetails = details
-        entry.people = draft.people
+        entry.people = detachedRelationships ? draft.people.map(EntryDraftGraph.person) : draft.people
         return entry
     }
 
     static func insert(_ entry: LogEntry, in modelContext: ModelContext) throws {
-        modelContext.insert(entry)
-        _ = try EntryLinkingService.reconcile(in: modelContext)
-        try modelContext.save()
+        do {
+            modelContext.insert(entry)
+            _ = try EntryLinkingService.reconcile(in: modelContext)
+            try JournalPersistence.save(modelContext)
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
     }
 }

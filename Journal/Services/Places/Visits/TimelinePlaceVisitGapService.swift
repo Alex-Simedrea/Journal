@@ -113,7 +113,8 @@ enum TimelinePlaceVisitGapService {
                 fieldReviews: [],
                 entryKindReviewReason: nil
             ),
-            rawInput: nil
+            rawInput: nil,
+            detachedRelationships: true
         )
         draft.startTimeZoneIdentifier = arrival.endTimeZoneIdentifier
         draft.endTimeZoneIdentifier = departure.startTimeZoneIdentifier
@@ -140,8 +141,9 @@ enum TimelinePlaceVisitGapService {
         else {
             throw TimelinePlaceVisitGapError.invalidDraft
         }
-        draft.people = try modelContext.fetch(FetchDescriptor<Person>())
-            .filter { selectedPeopleIDs.contains($0.id) }
+        let draft = try EntryDraftGraph.materialize(
+            draft, selectedPeopleIDs: selectedPeopleIDs, in: modelContext
+        )
         try PlaceVisitEntryStore.insert(draft, in: modelContext)
         TimelineDataChange.post(.structure)
         return draft.id

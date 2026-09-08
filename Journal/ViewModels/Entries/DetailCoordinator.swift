@@ -202,11 +202,8 @@ final class EntryDetailCoordinator {
         errorMessage = nil
     }
 
-    func returnToDetailsPreservingDraft(for route: EntryDetailRoute) {
-        movesForward = false
-        session.commitDraft(for: route)
-        path = [.details]
-        errorMessage = nil
+    func reloadAfterLinkEdit(entry: LogEntry) {
+        session.reload(from: entry, preservingDraftsFor: path)
     }
 
     func returnToLocations(entry: LogEntry) {
@@ -253,12 +250,21 @@ final class EntryDetailEditSession {
         targetKind = baseline.targetKind
     }
 
-    func reload(from entry: LogEntry) {
+    func reload(from entry: LogEntry, preservingDraftsFor routes: [EntryDetailRoute] = []) {
+        let pending = EntryDetailDraftBaseline(session: self)
+        let dirtyRoutes = routes.filter { isDirty(for: $0) }
         baseline = EntryDetailDraftBaseline(entry: entry)
         restoreAllDrafts()
+        for route in dirtyRoutes {
+            restoreDraft(for: route, from: pending)
+        }
     }
 
     func restoreDraft(for route: EntryDetailRoute) {
+        restoreDraft(for: route, from: baseline)
+    }
+
+    private func restoreDraft(for route: EntryDetailRoute, from baseline: EntryDetailDraftBaseline) {
         switch route {
         case .time:
             startTime = baseline.startTime
@@ -274,7 +280,7 @@ final class EntryDetailEditSession {
             transitOperator = baseline.transitOperator
             transitServiceIdentifier = baseline.transitServiceIdentifier
         case .location(let role):
-            restoreLocation(role)
+            restoreLocation(role, from: baseline)
         case .entryKind:
             targetKind = baseline.targetKind
         case .addPerson:
@@ -318,15 +324,6 @@ final class EntryDetailEditSession {
         case .details, .links, .linkResolution, .timeZone, .locations, .placeSymbol,
              .destructiveConfirmation:
             false
-        }
-    }
-
-    func commitDraft(for route: EntryDetailRoute) {
-        switch route {
-        case .people:
-            baseline.selectedPeopleIDs = selectedPeopleIDs
-        default:
-            break
         }
     }
 
@@ -391,7 +388,7 @@ final class EntryDetailEditSession {
         targetKind = baseline.targetKind
     }
 
-    private func restoreLocation(_ role: EntryDetailLocationRole) {
+    private func restoreLocation(_ role: EntryDetailLocationRole, from baseline: EntryDetailDraftBaseline) {
         if let selection = baseline.locationSelections[role] {
             locationSelections[role] = selection
         } else {
@@ -421,6 +418,21 @@ private struct EntryDetailDraftBaseline {
     let transitServiceIdentifier: String
     let locationSelections: [EntryDetailLocationRole: EntryLocationSelection]
     let targetKind: LogKind
+
+    @MainActor
+    init(session: EntryDetailEditSession) {
+        startTime = session.startTime
+        endTime = session.endTime
+        startTimeZoneIdentifier = session.startTimeZoneIdentifier
+        endTimeZoneIdentifier = session.endTimeZoneIdentifier
+        selectedPeopleIDs = session.selectedPeopleIDs
+        photoReferences = session.photoReferences
+        transitType = session.transitType
+        transitOperator = session.transitOperator
+        transitServiceIdentifier = session.transitServiceIdentifier
+        locationSelections = session.locationSelections
+        targetKind = session.targetKind
+    }
 
     init(entry: LogEntry) {
         let fallbackEnd = entry.endTime ?? .now

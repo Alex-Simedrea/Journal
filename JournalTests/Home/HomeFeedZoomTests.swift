@@ -111,8 +111,8 @@ struct HomeFeedZoomTests {
         #expect(overlay.subviews[0].transform.a < 1)
         #expect(overlay.subviews[1].transform.a > 1)
         let actor = try #require(overlay.subviews.last)
-        #expect(actor.layer.cornerRadius == 0) // Each snapshot carries its own shape.
-        #expect(actor.subviews.first?.layer.mask is CAShapeLayer)
+        #expect(actor.layer.cornerRadius == 16)
+        #expect(actor.subviews.allSatisfy { $0.layer.mask == nil && $0.layer.cornerRadius == 0 })
         #expect(actor.clipsToBounds)
         #expect(overlay.subviews[0].layer.mask == nil)
         #expect(overlay.subviews[0].subviews.first?.backgroundColor != nil)
@@ -178,54 +178,126 @@ struct HomeFeedZoomTests {
         map.cancelLoading()
     }
 
-    @Test("Transition clipping preserves photo-grid radii in points without changing live tiles")
-    func photoSnapshotCorners() throws {
+    @Test("Photo matching uses individual identities and preserves the live grid styling")
+    func photoGridMatching() throws {
+        let references = (0..<4).map { PhotoReference(assetLocalIdentifier: "corner-test-\($0)") }
         for style in [UIKitPhotoSummaryTileView.Style.day, .period] {
             for count in [1, 4] {
                 let photos = UIKitPhotoSummaryTileView(frame: CGRect(x: 0, y: 0, width: 180, height: 180))
-                photos.configure(references: (0..<count).map {
-                    PhotoReference(assetLocalIdentifier: "corner-test-\($0)")
-                }, totalCount: count == 4 ? 7 : 1, style: style, loadsContent: false)
+                photos.configure(references: Array(references.prefix(count)),
+                                 totalCount: count == 4 ? 7 : 1, style: style, loadsContent: false)
                 photos.layoutIfNeeded()
-                for photo in photos.transitionPhotoViews { photo.backgroundColor = .red }
-                let originalRadii = photos.transitionPhotoViews.map { $0.layer.cornerRadius }
                 let radius: CGFloat = count == 1 ? (style == .day ? 16 : 18) : (style == .day ? 10 : 14)
-                #expect(originalRadii.allSatisfy { $0 == radius })
-                let snapshot = HomeFeedZoomTileSnapshot.capture(photos, background: .blue, displayScale: 3)
-                #expect(photos.transitionPhotoViews.map { $0.layer.cornerRadius } == originalRadii)
-                #expect(snapshot.regions.count == count)
-                let moving = HomeFeedZoomTileImageView(snapshot: snapshot)
-                for factor: CGFloat in [0.55, 1, 2] {
-                    moving.frame = CGRect(x: 0, y: 0, width: 180 * factor, height: 180 * factor)
-                    moving.layoutIfNeeded()
-                    let format = UIGraphicsImageRendererFormat()
-                    format.scale = 3
-                    let rendered = UIGraphicsImageRenderer(size: moving.bounds.size, format: format).image { context in
-                        UIColor.blue.setFill()
-                        context.fill(moving.bounds)
-                        moving.layer.render(in: context.cgContext)
-                    }
-                    for region in snapshot.regions {
-                        let origin = CGPoint(x: region.frame.minX * factor, y: region.frame.minY * factor)
-                        // These points straddle the same circular corner at every
-                        // size. Baking the radius into the image fails at 0.55x/2x.
-                        for (fraction, inside) in [(0.15, false), (0.45, true)] {
-                            let point = CGPoint(x: origin.x + radius * fraction, y: origin.y + radius * fraction)
-                            let crop = try #require(rendered.cgImage?.cropping(to: CGRect(
-                                x: point.x * rendered.scale, y: point.y * rendered.scale, width: 1, height: 1)))
-                            var pixel = [UInt8](repeating: 0, count: 4)
-                            try pixel.withUnsafeMutableBytes { bytes in
-                                let context = try #require(CGContext(data: bytes.baseAddress, width: 1, height: 1,
-                                    bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
-                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-                                context.draw(crop, in: CGRect(x: 0, y: 0, width: 1, height: 1))
-                            }
-                            #expect(inside ? pixel[0] > 80 && pixel[2] < 30 : pixel[2] > 220 && pixel[0] < 30)
-                        }
-                    }
+                let tiles = photos.zoomTiles(owner: "source", days: Set(days), in: photos)
+                #expect(tiles.count == (style == .day && count == 4 ? 3 : count))
+                for tile in tiles {
+                    let photo = try #require(tile.view)
+                    #expect(photo is UIKitSummaryPhotoView)
+                    #expect(tile.contentIDs.count == 1)
+                    #expect(tile.frame == photo.frame)
+                    let snapshot = HomeFeedZoomTileSnapshot.capture(photo, background: .blue, displayScale: 3)
+                    #expect(snapshot.cornerRadius == radius)
+                    #expect(photo.layer.cornerRadius == radius)
+                    #expect(photo.clipsToBounds)
                 }
+                let target = UIKitPhotoSummaryTileView(frame: CGRect(x: 0, y: 0, width: 260, height: 260))
+                target.configure(references: Array(references.reversed()), totalCount: 4,
+                                 style: .period, loadsContent: false)
+                target.layoutIfNeeded()
+                let destination = target.zoomTiles(owner: "target", days: Set(days), in: target)
+                let matches = HomeFeedZoomMatcher.matches(from: tiles, to: destination)
+                #expect(matches.count == tiles.count)
+                #expect(matches.allSatisfy { tiles[$0.source].contentIDs == destination[$0.target].contentIDs })
             }
         }
+    }
+
+    @Test("Crossfading photos share one continuous corner shape through reversals")
+    func photoMorphCorners() throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        let controller = UIViewController()
+        window.rootViewController = controller
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let collection = UICollectionView(frame: controller.view.bounds,
+                                           collectionViewLayout: UICollectionViewFlowLayout())
+        controller.view.addSubview(collection)
+        func photo(_ id: String, size: CGFloat, radius: CGFloat, color: UIColor) -> (UIView, HomeFeedZoomTile) {
+            let view = UIView(frame: CGRect(x: 30, y: 180, width: size, height: size))
+            view.backgroundColor = color
+            view.clipsToBounds = true
+            view.layer.cornerRadius = radius
+            let tile = HomeFeedZoomTile(id: id, owner: id, role: "photos", family: .photos,
+                days: Set(days), contentIDs: ["same-photo"], frame: view.frame, view: view)
+            return (view, tile)
+        }
+        let (sourceView, source) = photo("day", size: 80, radius: 10, color: .red)
+        let (targetView, target) = photo("month", size: 220, radius: 18, color: .green)
+        let transition = HomeFeedZoomTransition()
+        transition.begin(in: controller.view, collectionView: collection, scale: .days, anchor: nil, tiles: [source])
+        defer { transition.finish() }
+        transition.completePreparation(collectionView: collection, scale: .months, anchor: nil, tiles: [target])
+        let overlay = try #require(collection.subviews.first { $0.accessibilityIdentifier == "home-feed-zoom-overlay" })
+        let actor = try #require(overlay.subviews.last)
+        #expect(actor.layer.cornerRadius == 10)
+        for index in 0..<16 {
+            transition.advance(by: 1.0 / 120)
+            #expect(actor.layer.cornerRadius > 10 && actor.layer.cornerRadius < 18)
+            #expect(actor.subviews.allSatisfy { $0.layer.cornerRadius == 0 && $0.layer.mask == nil })
+            // Compare every pixel to a single rounded surface with the same
+            // color blend. This catches baked corners and stacked edge masks.
+            let reference = UIView(frame: actor.bounds)
+            reference.clipsToBounds = true
+            reference.layer.cornerRadius = actor.layer.cornerRadius
+            for (image, color) in zip(actor.subviews, [UIColor.red, .green]) {
+                let square = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { context in
+                    color.setFill()
+                    context.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
+                }
+                let fill = UIImageView(image: square)
+                fill.frame = reference.bounds
+                fill.alpha = image.alpha
+                reference.addSubview(fill)
+            }
+            func pixels(_ view: UIView) throws -> [UInt8] {
+                let format = UIGraphicsImageRendererFormat()
+                format.scale = 3
+                let image = UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { context in
+                    UIColor.blue.setFill()
+                    context.fill(view.bounds)
+                    view.layer.render(in: context.cgContext)
+                }
+                if index == 7 {
+                    Attachment.record(try #require(image.pngData()),
+                        named: view === actor ? "Photo-corners-actual.png" : "Photo-corners-reference.png")
+                }
+                let cgImage = try #require(image.cgImage)
+                var bytes = [UInt8](repeating: 0, count: cgImage.width * cgImage.height * 4)
+                try bytes.withUnsafeMutableBytes { buffer in
+                    let context = try #require(CGContext(data: buffer.baseAddress,
+                        width: cgImage.width, height: cgImage.height, bitsPerComponent: 8,
+                        bytesPerRow: cgImage.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+                    context.draw(cgImage, in: CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height))
+                }
+                return bytes
+            }
+            let actual = try pixels(actor)
+            let expected = try pixels(reference)
+            let differences = zip(actual, expected).map { abs(Int($0) - Int($1)) }
+            let error = differences.max() ?? 0
+            let position = differences.firstIndex(of: error) ?? 0
+            #expect(error < 4, "pixel byte \(position), actual \(actual[position]), expected \(expected[position]), mean \(Double(differences.reduce(0, +)) / Double(differences.count))")
+            if index == 7 {
+                let radius = actor.layer.cornerRadius
+                transition.prepareForRetarget()
+                transition.completePreparation(collectionView: collection, scale: .days, anchor: nil, tiles: [])
+                #expect(actor.layer.cornerRadius == radius)
+            }
+        }
+        #expect(sourceView.layer.cornerRadius == 10)
+        #expect(targetView.layer.cornerRadius == 18)
     }
 
     @Test("Source snapshots preserve uncommitted map and avatar image layers")

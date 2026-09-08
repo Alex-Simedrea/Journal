@@ -70,10 +70,7 @@ final class PlaceVisitComposerModel {
                 rawInput: nil,
                 in: modelContext
             )
-            _ = try? await EntryWeatherService.populate(
-                entry,
-                in: modelContext
-            )
+            EntryWeatherService.refreshInBackground(entry, in: modelContext)
             return true
         } catch {
             errorMessage = error.localizedDescription

@@ -13,6 +13,14 @@ struct PersonDetailSheet: View {
     let person: Person
 
     var body: some View {
+        if person.modelContext != nil && !person.isDeleted {
+            detailContent
+        } else {
+            ContentUnavailableView("Item Unavailable", systemImage: "exclamationmark.triangle")
+        }
+    }
+
+    private var detailContent: some View {
         NavigationStack {
             Form {
                 PersonDetailAvatarSection(

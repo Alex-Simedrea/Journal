@@ -99,19 +99,55 @@ final class TransitDetails {
     var sourceServiceIdentifier: String?
 
     var originPlace: Place?
-    var originLocation: Location?
+    @Attribute(originalName: "originLocationPayload")
+    private var originLocationData: Data?
+
+    var originLocation: Location? {
+        get { PersistedJSON.decode(Location.self, from: originLocationData) }
+        set { originLocationData = newValue.flatMap(PersistedJSON.encode) }
+    }
     var originRawText: String?
     var destinationPlace: Place?
-    var destinationLocation: Location?
+    @Attribute(originalName: "destinationLocationPayload")
+    private var destinationLocationData: Data?
+
+    var destinationLocation: Location? {
+        get { PersistedJSON.decode(Location.self, from: destinationLocationData) }
+        set { destinationLocationData = newValue.flatMap(PersistedJSON.encode) }
+    }
     var destinationRawText: String?
 
     var durationSource: DurationSource
     var distanceMeters: Double?
-    var recordedRoute: [RecordedRoutePoint] = []
-    var recordedMotion: [RecordedMotionObservation] = []
+    @Attribute(originalName: "recordedRoute")
+    private var recordedRouteData: Data?
+
+    var recordedRoute: [RecordedRoutePoint] {
+        get { PersistedJSON.decode([RecordedRoutePoint].self, from: recordedRouteData) ?? [] }
+        set { recordedRouteData = PersistedJSON.encode(newValue) }
+    }
+    @Attribute(originalName: "recordedMotion")
+    private var recordedMotionData: Data?
+
+    var recordedMotion: [RecordedMotionObservation] {
+        get { PersistedJSON.decode([RecordedMotionObservation].self, from: recordedMotionData) ?? [] }
+        set { recordedMotionData = PersistedJSON.encode(newValue) }
+    }
     var recordedTransitMode: RecordedTransitMode?
-    var originCandidates: [LocationCandidate]
-    var destinationCandidates: [LocationCandidate]
+    @Attribute(originalName: "originCandidates")
+    private var originCandidatesData: Data?
+
+    var originCandidates: [LocationCandidate] {
+        get { PersistedJSON.decode([LocationCandidate].self, from: originCandidatesData) ?? [] }
+        set { originCandidatesData = PersistedJSON.encode(newValue) }
+    }
+    @Attribute(originalName: "destinationCandidates")
+    private var destinationCandidatesData: Data?
+
+    var destinationCandidates: [LocationCandidate] {
+        get { PersistedJSON.decode([LocationCandidate].self, from: destinationCandidatesData) ?? [] }
+        set { destinationCandidatesData = PersistedJSON.encode(newValue) }
+    }
     var unresolvedPeople: [String]
     @Attribute(originalName: "fieldReviews")
     private var fieldReviewsData: Data?
@@ -150,18 +186,18 @@ final class TransitDetails {
         self.sourceOrganizationName = sourceOrganizationName
         self.sourceServiceIdentifier = sourceServiceIdentifier
         self.originPlace = originPlace
-        self.originLocation = originLocation ?? originPlace?.location
+        self.originLocationData = (originLocation ?? originPlace?.location).flatMap(PersistedJSON.encode)
         self.originRawText = originRawText
         self.destinationPlace = destinationPlace
-        self.destinationLocation = destinationLocation ?? destinationPlace?.location
+        self.destinationLocationData = (destinationLocation ?? destinationPlace?.location).flatMap(PersistedJSON.encode)
         self.destinationRawText = destinationRawText
         self.durationSource = durationSource
         self.distanceMeters = distanceMeters
-        self.recordedRoute = recordedRoute
-        self.recordedMotion = recordedMotion
+        self.recordedRouteData = PersistedJSON.encode(recordedRoute)
+        self.recordedMotionData = PersistedJSON.encode(recordedMotion)
         self.recordedTransitMode = recordedTransitMode
-        self.originCandidates = originCandidates
-        self.destinationCandidates = destinationCandidates
+        self.originCandidatesData = PersistedJSON.encode(originCandidates)
+        self.destinationCandidatesData = PersistedJSON.encode(destinationCandidates)
         self.unresolvedPeople = unresolvedPeople
         self.fieldReviewsData = PersistedJSON.encode(fieldReviews)
     }

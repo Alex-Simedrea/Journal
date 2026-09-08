@@ -20,6 +20,14 @@ struct PlaceDetailSheet: View {
     }
 
     var body: some View {
+        if place.modelContext != nil && !place.isDeleted {
+            detailContent
+        } else {
+            ContentUnavailableView("Item Unavailable", systemImage: "exclamationmark.triangle")
+        }
+    }
+
+    private var detailContent: some View {
         NavigationStack {
             Form {
                 PlaceEditorDetailsSection(model: model)

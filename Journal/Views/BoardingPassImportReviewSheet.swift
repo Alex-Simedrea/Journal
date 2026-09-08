@@ -58,6 +58,7 @@ struct BoardingPassImportReviewSheet: View {
                 transitTypeNames: transitTypes.map(\.canonicalName)
             )) {
                 await model.prepare(places: places, transitTypes: transitTypes)
+                guard !Task.isCancelled else { return }
                 draftEntry = model.makeDraftEntry(places: places)
             }
         }

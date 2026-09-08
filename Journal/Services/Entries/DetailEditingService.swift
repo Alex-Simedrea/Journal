@@ -90,12 +90,13 @@ enum EntryDetailEditingService {
         in modelContext: ModelContext,
         persist: Bool = true
     ) throws {
-        let selectedPeople = people.filter {
+        // A newly created person may not have reached the view's @Query yet.
+        let selectedPeople = try modelContext.fetch(FetchDescriptor<Person>()).filter {
             session.selectedPeopleIDs.contains($0.id)
         }
-        if persist {
-            entry.people = selectedPeople
-        }
+        // Confirmed fields belong to the draft itself, so reloading another
+        // editor cannot discard them. Saved people must remain outside its graph.
+        entry.people = persist ? selectedPeople : selectedPeople.map(EntryDraftGraph.person)
         switch entry.kind {
         case .transit:
             entry.transitDetails?.unresolvedPeople = []
@@ -159,11 +160,12 @@ enum EntryDetailEditingService {
         if persist {
             _ = try EntryLinkingService.reconcile(in: modelContext)
         }
-        let place = try associatedPlace(
+        let selectedPlace = try associatedPlace(
             with: selection.placeID,
             places: places,
             in: modelContext
         )
+        let place = persist ? selectedPlace : EntryDraftGraph.place(selectedPlace)
 
         switch entry.kind {
         case .transit:
@@ -236,7 +238,8 @@ enum EntryDetailEditingService {
         entry: LogEntry,
         session: EntryDetailEditSession,
         places: [Place],
-        in modelContext: ModelContext
+        in modelContext: ModelContext,
+        persist: Bool = true
     ) throws {
         guard entry.entryKindReviewReason != nil,
               session.targetKind != entry.kind else {
@@ -247,7 +250,8 @@ enum EntryDetailEditingService {
         case (.transit, .placeVisit):
             let selection = session.selection(for: .destination)
                 ?? session.selection(for: .origin)
-            let place = places.first { $0.id == selection?.placeID }
+            let selectedPlace = places.first { $0.id == selection?.placeID }
+            let place = persist ? selectedPlace : EntryDraftGraph.place(selectedPlace)
             entry.transitDetails = nil
             // Do not explicitly invalidate the old child while this entry's
             // detail navigation transition can still be rendering it.
@@ -293,8 +297,10 @@ enum EntryDetailEditingService {
         entry.weather = nil
         entry.endWeather = nil
         updateNeedsReview(entry)
-        try save(modelContext)
-        EntryWeatherService.refreshInBackground(entry, in: modelContext)
+        if persist {
+            try save(modelContext)
+            EntryWeatherService.refreshInBackground(entry, in: modelContext)
+        }
     }
 
     static func updateNeedsReview(_ entry: LogEntry) {
@@ -379,7 +385,7 @@ enum EntryDetailEditingService {
 
     private static func save(_ modelContext: ModelContext) throws {
         do {
-            try modelContext.save()
+            try JournalPersistence.save(modelContext)
         } catch {
             modelContext.rollback()
             throw error

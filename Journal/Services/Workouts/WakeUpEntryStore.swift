@@ -14,10 +14,12 @@ nonisolated enum WakeUpEntryStore {
         let existingEntries = try modelContext.fetch(
             FetchDescriptor<LogEntry>()
         ).filter { $0.kind == .wakeUp }
+        // Historical restores can contain multiple entries for one HealthKit
+        // sample; source UUID is not a unique schema attribute.
         var entriesBySourceUUID = Dictionary(
-            uniqueKeysWithValues: existingEntries.compactMap { entry in
+            existingEntries.compactMap { entry in
                 entry.wakeUpSourceSampleUUID.map { ($0, entry) }
-            }
+            }, uniquingKeysWith: { first, _ in first }
         )
         let currentSourceUUIDs = Set(snapshots.map(\.sourceSampleUUID))
 
@@ -30,9 +32,7 @@ nonisolated enum WakeUpEntryStore {
         for snapshot in snapshots {
             let timeZoneIdentifier = snapshot.timeZoneIdentifier
                 ?? TimeZone.current.identifier
-            let entry = entriesBySourceUUID.removeValue(
-                forKey: snapshot.sourceSampleUUID
-            ) ?? LogEntry(
+            let entry = entriesBySourceUUID[snapshot.sourceSampleUUID] ?? LogEntry(
                 kind: .wakeUp,
                 startTime: snapshot.sleepStart,
                 endTime: snapshot.wakeTime,
@@ -45,6 +45,7 @@ nonisolated enum WakeUpEntryStore {
                 needsReview: false
             )
 
+            entriesBySourceUUID[snapshot.sourceSampleUUID] = entry
             if entry.modelContext == nil {
                 modelContext.insert(entry)
             } else {

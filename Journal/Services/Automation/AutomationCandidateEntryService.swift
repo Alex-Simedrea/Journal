@@ -6,7 +6,8 @@ nonisolated enum AutomationCandidateEntryFactory {
         for candidate: AutomationCandidate,
         places: [Place],
         needsReview: Bool,
-        id: UUID? = nil
+        id: UUID? = nil,
+        detachedRelationships: Bool = false
     ) -> LogEntry? {
         guard candidate.status == .pending,
               let endTime = candidate.endTime,
@@ -21,14 +22,16 @@ nonisolated enum AutomationCandidateEntryFactory {
                 for: candidate,
                 endTime: endTime,
                 places: places,
-                needsReview: needsReview
+                needsReview: needsReview,
+                detachedRelationships: detachedRelationships
             )
         case .transit:
             entry = makeTransitEntry(
                 for: candidate,
                 endTime: endTime,
                 places: places,
-                needsReview: needsReview
+                needsReview: needsReview,
+                detachedRelationships: detachedRelationships
             )
         }
 
@@ -43,7 +46,8 @@ nonisolated enum AutomationCandidateEntryFactory {
         for candidate: AutomationCandidate,
         endTime: Date,
         places: [Place],
-        needsReview: Bool
+        needsReview: Bool,
+        detachedRelationships: Bool
     ) -> LogEntry? {
         guard let detectedLocation = candidate.visitLocation else { return nil }
         let place = places.first { $0.id == candidate.visitPlaceID }
@@ -77,7 +81,7 @@ nonisolated enum AutomationCandidateEntryFactory {
             fieldReviews: reviews,
             entryKindReviewReason: nil
         )
-        let entry = PlaceVisitEntryStore.makeEntry(draft: draft, rawInput: nil)
+        let entry = PlaceVisitEntryStore.makeEntry(draft: draft, rawInput: nil, detachedRelationships: detachedRelationships)
         let zone = location.timeZoneIdentifier
             ?? candidate.timeZoneIdentifier
         entry.startTimeZoneIdentifier = zone
@@ -89,7 +93,8 @@ nonisolated enum AutomationCandidateEntryFactory {
         for candidate: AutomationCandidate,
         endTime: Date,
         places: [Place],
-        needsReview: Bool
+        needsReview: Bool,
+        detachedRelationships: Bool
     ) -> LogEntry? {
         guard let detectedOrigin = candidate.originLocation,
               let detectedDestination = candidate.destinationLocation,
@@ -149,7 +154,7 @@ nonisolated enum AutomationCandidateEntryFactory {
             unresolvedPeople: [],
             fieldReviews: reviews
         )
-        let entry = TransitEntryStore.makeEntry(draft: draft, rawInput: nil)
+        let entry = TransitEntryStore.makeEntry(draft: draft, rawInput: nil, detachedRelationships: detachedRelationships)
         entry.startTimeZoneIdentifier = originLocation.timeZoneIdentifier
             ?? candidate.timeZoneIdentifier
         entry.endTimeZoneIdentifier = destinationLocation.timeZoneIdentifier
@@ -331,7 +336,7 @@ nonisolated enum AutomationCandidateEntryService {
         if insertedCount > 0 || removedCount > 0 || updatedProvenance
             || updatedTimelineEntry || !snappedCandidateIDs.isEmpty
             || !canonicalizedCandidateIDs.isEmpty || linksChanged {
-            try modelContext.save()
+            try JournalPersistence.save(modelContext)
             NotificationCenter.default.post(
                 name: .automationCandidatesDidChange,
                 object: nil

@@ -165,7 +165,7 @@ final class EntryKindConversionModel {
         entry.endWeather = nil
 
         do {
-            try modelContext.save()
+            try JournalPersistence.save(modelContext)
             EntryWeatherService.refreshInBackground(
                 entry,
                 in: modelContext

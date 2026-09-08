@@ -10,6 +10,22 @@ nonisolated enum JournalRecordingFinalization: Sendable, Equatable {
     case noUsableLocation
 }
 
+private struct RecordingFinalizationInput {
+    let id: UUID
+    let startedAt: Date
+    let endedAt: Date?
+    let mode: JournalRecordingMode
+    let points: [TrackedLocationPoint]
+
+    init(_ recording: ActiveJournalRecording) {
+        id = recording.id
+        startedAt = recording.startedAt
+        endedAt = recording.endedAt
+        mode = recording.mode
+        points = recording.points
+    }
+}
+
 @MainActor
 final class JournalRecordingFinalizer {
     private let motionService = JournalRecordingMotionService()
@@ -19,6 +35,7 @@ final class JournalRecordingFinalizer {
         _ recording: ActiveJournalRecording,
         in modelContext: ModelContext
     ) async throws -> JournalRecordingFinalization {
+        let recording = RecordingFinalizationInput(recording)
         let existing = try existingEntries(
             for: recording.id,
             in: modelContext
@@ -46,6 +63,7 @@ final class JournalRecordingFinalizer {
         )
 
         let places = try modelContext.fetch(FetchDescriptor<Place>())
+            .compactMap { EntryDraftGraph.place($0) }
         let regions = placeRegions(places)
         if recording.mode == .continuous {
             return try await finalizeContinuous(
@@ -66,7 +84,7 @@ final class JournalRecordingFinalizer {
     }
 
     private func finalizeSingle(
-        _ recording: ActiveJournalRecording,
+        _ recording: RecordingFinalizationInput,
         motion: [RecordedMotionObservation],
         places: [Place],
         regions: [JournalRecordingPlaceRegion],
@@ -134,14 +152,16 @@ final class JournalRecordingFinalizer {
             )
             result = .transit(mode)
         }
-        modelContext.insert(entry)
+        modelContext.insert(try EntryDraftGraph.materialize(
+            entry, selectedPeopleIDs: [], in: modelContext
+        ))
         _ = try EntryLinkingService.reconcile(in: modelContext)
-        try modelContext.save()
+        try JournalPersistence.save(modelContext)
         return result
     }
 
     private func finalizeContinuous(
-        _ recording: ActiveJournalRecording,
+        _ recording: RecordingFinalizationInput,
         motion: [RecordedMotionObservation],
         places: [Place],
         regions: [JournalRecordingPlaceRegion],
@@ -208,10 +228,12 @@ final class JournalRecordingFinalizer {
         }
 
         for entry in entries {
-            modelContext.insert(entry)
+            modelContext.insert(try EntryDraftGraph.materialize(
+                entry, selectedPeopleIDs: [], in: modelContext
+            ))
         }
         _ = try EntryLinkingService.reconcile(in: modelContext)
-        try modelContext.save()
+        try JournalPersistence.save(modelContext)
         do {
             // The passive timeline automation may have materialized review
             // drafts for the same CLVisit/motion observations. Reconcile now

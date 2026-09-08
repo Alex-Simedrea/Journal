@@ -34,7 +34,7 @@ enum TransitTypeSeeder {
         }
 
         if modelContext.hasChanges {
-            try modelContext.save()
+            try JournalPersistence.save(modelContext)
         }
     }
 

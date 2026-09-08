@@ -113,7 +113,7 @@ final class WorkoutPlaceReviewModel {
                     in: modelContext
                 )
             }
-            try modelContext.save()
+            try JournalPersistence.save(modelContext)
             EntryWeatherService.refreshInBackground(entry, in: modelContext)
             return true
         } catch {

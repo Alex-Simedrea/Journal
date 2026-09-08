@@ -230,7 +230,7 @@ private struct SavedPlaceBackfillMatchButton: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(match.slot.title)
                         .foregroundStyle(.primary)
-                    Text(match.entry.startTime ?? match.entry.createdAt, format: .dateTime.day().month().year().hour().minute())
+                    Text(match.entryDate, format: .dateTime.day().month().year().hour().minute())
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

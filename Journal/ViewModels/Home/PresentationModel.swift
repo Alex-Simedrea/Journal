@@ -35,7 +35,7 @@ final class HomePresentationModel {
     @ObservationIgnored
     private let workoutClient: HealthKitWorkoutClient
     @ObservationIgnored
-    private var loadedEntries: [LogEntry] = []
+    private var loadedEntries: [UUID: LogEntry] = [:]
     @ObservationIgnored
     private var pendingCandidateByEntryID: [UUID: AutomationCandidateSnapshot] = [:]
     @ObservationIgnored
@@ -56,7 +56,9 @@ final class HomePresentationModel {
     }
 
     func entry(withID id: UUID) -> LogEntry? {
-        loadedEntries.first { $0.id == id }
+        guard let entry = loadedEntries[id],
+              entry.modelContext != nil, !entry.isDeleted else { return nil }
+        return entry
     }
 
     func pendingAutomationCandidate(
@@ -94,9 +96,6 @@ final class HomePresentationModel {
 
         do {
             let entries = try modelContext.fetch(descriptor)
-            if WorkoutTimelinePlaceReconciler.reconcile(entries: entries) {
-                try modelContext.save()
-            }
             let places = try modelContext.fetch(FetchDescriptor<Place>())
             let placesByID = Dictionary(
                 uniqueKeysWithValues: places.map { ($0.id, $0) }
@@ -131,7 +130,7 @@ final class HomePresentationModel {
                 projection.occurrences.map(\.entryID)
                     + projection.reviewOccurrences.map(\.entryID)
             )
-            loadedEntries = entries
+            loadedEntries = Dictionary(entries.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             selectedDayEntries = entries
                 .filter { selectedEntryIDs.contains($0.id) }
                 .sorted {
@@ -153,7 +152,7 @@ final class HomePresentationModel {
             timelineErrorMessage = nil
             timelineRevision &+= 1
         } catch {
-            loadedEntries = []
+            loadedEntries = [:]
             selectedDayEntries = []
             timelineItems = []
             timelineRows = []

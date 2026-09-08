@@ -28,11 +28,28 @@ enum EntryLocationAssociationSlot: String {
 }
 
 struct EntryLocationAssociationMatch: Identifiable {
-    let entry: LogEntry
+    let entryID: UUID
+    let entryDate: Date
     let slot: EntryLocationAssociationSlot
     let location: Location
+    let associatedPlaceID: UUID?
 
-    var id: String { "\(entry.id.uuidString)-\(slot.rawValue)" }
+    var id: String { "\(entryID.uuidString)-\(slot.rawValue)" }
+
+    init(entry: LogEntry, slot: EntryLocationAssociationSlot, location: Location) {
+        entryID = entry.id
+        entryDate = entry.startTime ?? entry.createdAt
+        self.slot = slot
+        self.location = location
+        associatedPlaceID = switch slot {
+        case .transitOrigin: entry.transitDetails?.originPlace?.id
+        case .transitDestination: entry.transitDetails?.destinationPlace?.id
+        case .visit: entry.placeVisitDetails?.place?.id
+        case .workoutPlace: entry.workoutDetails?.place?.id
+        case .workoutOrigin: entry.workoutDetails?.originPlace?.id
+        case .workoutDestination: entry.workoutDetails?.destinationPlace?.id
+        }
+    }
 }
 
 @MainActor
@@ -49,7 +66,7 @@ enum SavedPlacePromotionService {
         return entries.flatMap(locationMatches)
             .filter { match in
                 isSameLocation(match.location, place.location, place: place)
-                    && existingPlace(for: match)?.id != place.id
+                    && match.associatedPlaceID != place.id
             }
     }
 
@@ -58,33 +75,41 @@ enum SavedPlacePromotionService {
         to place: Place,
         in modelContext: ModelContext
     ) throws {
+        guard place.modelContext === modelContext, !place.isDeleted else { return }
+        let entriesByID = Dictionary(try modelContext.fetch(FetchDescriptor<LogEntry>()).map {
+            ($0.id, $0)
+        }, uniquingKeysWith: { first, _ in first })
         for match in matches {
+            guard let entry = entriesByID[match.entryID],
+                  let current = locationMatches(in: entry).first(where: { $0.slot == match.slot }),
+                  current.location == match.location,
+                  current.associatedPlaceID == match.associatedPlaceID else { continue }
             switch match.slot {
             case .transitOrigin:
-                match.entry.transitDetails?.originPlace = place
-                match.entry.transitDetails?.fieldReviews.removeAll { $0.field == .origin }
+                entry.transitDetails?.originPlace = place
+                entry.transitDetails?.fieldReviews.removeAll { $0.field == .origin }
             case .transitDestination:
-                match.entry.transitDetails?.destinationPlace = place
-                match.entry.transitDetails?.fieldReviews.removeAll { $0.field == .destination }
+                entry.transitDetails?.destinationPlace = place
+                entry.transitDetails?.fieldReviews.removeAll { $0.field == .destination }
             case .visit:
-                match.entry.placeVisitDetails?.place = place
-                match.entry.placeVisitDetails?.fieldReviews.removeAll { $0.field == .place }
+                entry.placeVisitDetails?.place = place
+                entry.placeVisitDetails?.fieldReviews.removeAll { $0.field == .place }
             case .workoutPlace:
-                match.entry.workoutDetails?.place = place
-                match.entry.workoutDetails?.placeResolutionSource = .manual
-                match.entry.workoutDetails?.fieldReviews.removeAll { $0.field == .place }
+                entry.workoutDetails?.place = place
+                entry.workoutDetails?.placeResolutionSource = .manual
+                entry.workoutDetails?.fieldReviews.removeAll { $0.field == .place }
             case .workoutOrigin:
-                match.entry.workoutDetails?.originPlace = place
-                match.entry.workoutDetails?.originResolutionSource = .manual
-                match.entry.workoutDetails?.fieldReviews.removeAll { $0.field == .origin }
+                entry.workoutDetails?.originPlace = place
+                entry.workoutDetails?.originResolutionSource = .manual
+                entry.workoutDetails?.fieldReviews.removeAll { $0.field == .origin }
             case .workoutDestination:
-                match.entry.workoutDetails?.destinationPlace = place
-                match.entry.workoutDetails?.destinationResolutionSource = .manual
-                match.entry.workoutDetails?.fieldReviews.removeAll { $0.field == .destination }
+                entry.workoutDetails?.destinationPlace = place
+                entry.workoutDetails?.destinationResolutionSource = .manual
+                entry.workoutDetails?.fieldReviews.removeAll { $0.field == .destination }
             }
-            synchronizeReviewState(match.entry)
+            synchronizeReviewState(entry)
         }
-        try modelContext.save()
+        try JournalPersistence.save(modelContext)
     }
 
     private static func locationMatches(
@@ -114,19 +139,6 @@ enum SavedPlacePromotionService {
             }
         }
         return matches
-    }
-
-    private static func existingPlace(
-        for match: EntryLocationAssociationMatch
-    ) -> Place? {
-        switch match.slot {
-        case .transitOrigin: match.entry.transitDetails?.originPlace
-        case .transitDestination: match.entry.transitDetails?.destinationPlace
-        case .visit: match.entry.placeVisitDetails?.place
-        case .workoutPlace: match.entry.workoutDetails?.place
-        case .workoutOrigin: match.entry.workoutDetails?.originPlace
-        case .workoutDestination: match.entry.workoutDetails?.destinationPlace
-        }
     }
 
     private static func isSameLocation(

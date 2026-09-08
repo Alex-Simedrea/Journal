@@ -241,7 +241,9 @@ final class EntrySearchModel {
     }
 
     func entry(withID id: UUID) -> LogEntry? {
-        entriesByID[id]
+        guard let entry = entriesByID[id],
+              entry.modelContext != nil, !entry.isDeleted else { return nil }
+        return entry
     }
 
     func queryDidChange() {

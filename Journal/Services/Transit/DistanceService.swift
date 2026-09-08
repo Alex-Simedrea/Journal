@@ -20,7 +20,8 @@ nonisolated private struct TransitDistanceUpdate: Sendable {
     let distanceMeters: Double
 }
 
-nonisolated enum TransitDistanceService {
+@MainActor
+enum TransitDistanceService {
     static func populateMissing(in modelContext: ModelContext) async {
         guard let requests = try? modelContext.fetch(
             FetchDescriptor<LogEntry>()
@@ -60,8 +61,8 @@ nonisolated enum TransitDistanceService {
         }
         guard changed else { return }
         do {
-            try modelContext.save()
-            await TimelineDataChange.post()
+            try JournalPersistence.save(modelContext)
+            TimelineDataChange.post()
         } catch {
             modelContext.rollback()
         }
@@ -101,9 +102,9 @@ nonisolated enum TransitDistanceService {
               let details = entry.transitDetails else { return }
         details.distanceMeters = resolvedDistance
         do {
-            try modelContext.save()
+            try JournalPersistence.save(modelContext)
             if postsTimelineChange {
-                await TimelineDataChange.post()
+                TimelineDataChange.post()
             }
         } catch {
             modelContext.rollback()
@@ -117,10 +118,10 @@ nonisolated enum TransitDistanceService {
         let entryID = entry.id
         let container = modelContext.container
         entry.transitDetails?.distanceMeters = nil
-        try? modelContext.save()
+        try? JournalPersistence.save(modelContext)
         Task {
-            let maintenance = await JournalPersistenceActors.shared.maintenance(
-                for: JournalModelContainerReference(container)
+            let maintenance = await JournalPersistenceServices.shared.maintenance(
+                for: container
             )
             await maintenance.populateTransitDistance(entryID: entryID)
         }

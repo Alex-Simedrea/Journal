@@ -4,6 +4,12 @@ import Testing
 
 @testable import Journal
 
+// Tests deliberately open a separate actor to verify stored payload decoding.
+nonisolated private struct JournalModelContainerReference: @unchecked Sendable {
+    let container: ModelContainer
+    init(_ container: ModelContainer) { self.container = container }
+}
+
 @ModelActor
 private actor ReviewPersistenceProbe {
     func workoutReviewCounts() throws -> [Int] {
@@ -27,7 +33,7 @@ private actor ReviewPersistenceProbe {
 
 @Suite("Persistence actors")
 struct PersistenceActorTests {
-    @Test("Detached-created model actors do not use the main thread")
+    @Test("Persistence services share the UI context and executor")
     func backgroundModelActorExecutor() async throws {
         let schema = Schema([
             LogEntry.self,
@@ -43,10 +49,15 @@ struct PersistenceActorTests {
             for: schema,
             configurations: [ModelConfiguration(isStoredInMemoryOnly: true)]
         )
-        let actor = await JournalPersistenceActors.shared.maintenance(
-            for: JournalModelContainerReference(container)
+        let actor = await JournalPersistenceServices.shared.maintenance(
+            for: container
         )
-        #expect(await actor.executorUsesMainThreadForTesting() == false)
+        #expect(actor.executorUsesMainThreadForTesting())
+        #expect(actor.modelContext === container.mainContext)
+        let again = await JournalPersistenceServices.shared.maintenance(
+            for: container
+        )
+        #expect(actor === again)
     }
 
     @Test("Review collections materialize on a model actor")

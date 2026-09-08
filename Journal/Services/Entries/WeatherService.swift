@@ -169,12 +169,13 @@ actor WeatherKitEntryClient {
     }
 }
 
-nonisolated enum EntryWeatherService {
-    static func request(for entry: LogEntry) -> EntryWeatherRequest? {
+@MainActor
+enum EntryWeatherService {
+    nonisolated static func request(for entry: LogEntry) -> EntryWeatherRequest? {
         request(for: entry, endpoint: .start)
     }
 
-    static func request(
+    nonisolated static func request(
         for entry: LogEntry,
         endpoint: EntryWeatherEndpoint
     ) -> EntryWeatherRequest? {
@@ -246,9 +247,14 @@ nonisolated enum EntryWeatherService {
         case .start: currentEntry.weather = weather
         case .end: currentEntry.endWeather = weather
         }
-        try modelContext.save()
+        do {
+            try JournalPersistence.save(modelContext)
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
         if postsTimelineChange {
-            await TimelineDataChange.post()
+            TimelineDataChange.post()
         }
         return true
     }
@@ -287,7 +293,7 @@ nonisolated enum EntryWeatherService {
             }
         }
         if postsTimelineChange {
-            await TimelineDataChange.post()
+            TimelineDataChange.post()
         }
     }
 
@@ -298,8 +304,7 @@ nonisolated enum EntryWeatherService {
         let entryID = entry.id
         let container = modelContext.container
         Task {
-            let enrichmentContext = ModelContext(container)
-            enrichmentContext.autosaveEnabled = false
+            let enrichmentContext = container.mainContext
             await populateEndpoints(
                 entryID: entryID,
                 in: enrichmentContext,
@@ -330,7 +335,7 @@ nonisolated enum EntryWeatherService {
             )
         }
         if !entryIDs.isEmpty {
-            await TimelineDataChange.post()
+            TimelineDataChange.post()
         }
     }
 
@@ -345,7 +350,7 @@ nonisolated enum EntryWeatherService {
         return try modelContext.fetch(descriptor).first
     }
 
-    private static func resolvedLocation(
+    nonisolated private static func resolvedLocation(
         for entry: LogEntry,
         endpoint: EntryWeatherEndpoint
     ) -> Location? {

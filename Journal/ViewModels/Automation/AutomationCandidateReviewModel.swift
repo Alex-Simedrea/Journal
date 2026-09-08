@@ -16,7 +16,8 @@ final class AutomationCandidateReviewModel {
         guard let draft = AutomationCandidateEntryFactory.makeEntry(
             for: candidate,
             places: places,
-            needsReview: false
+            needsReview: false,
+            detachedRelationships: true
         ) else { return nil }
         guard let materializedEntry else { return draft }
 
@@ -40,12 +41,15 @@ final class AutomationCandidateReviewModel {
         in modelContext: ModelContext,
         performEnrichment: Bool = true
     ) async -> Bool {
-        guard candidate.status == .pending else { return false }
+        guard !isSaving, candidate.status == .pending else { return false }
         isSaving = true
         errorMessage = nil
         defer { isSaving = false }
 
         do {
+            let entry = try EntryDraftGraph.materialize(
+                entry, selectedPeopleIDs: [], in: modelContext
+            )
             let selectedPeople = try modelContext.fetch(
                 FetchDescriptor<Person>()
             ).filter { selectedPeopleIDs.contains($0.id) }
@@ -77,12 +81,11 @@ final class AutomationCandidateReviewModel {
                 in: modelContext
             )
             _ = try EntryLinkingService.reconcile(in: modelContext)
-            try modelContext.save()
+            try JournalPersistence.save(modelContext)
             guard performEnrichment else { return true }
             let acceptedEntryID = acceptedEntry.id
             let acceptedKind = acceptedEntry.kind
-            let enrichmentContext = ModelContext(modelContext.container)
-            enrichmentContext.autosaveEnabled = false
+            let enrichmentContext = modelContext.container.mainContext
             _ = try? await EntryWeatherService.populate(
                 entryID: acceptedEntryID,
                 in: enrichmentContext

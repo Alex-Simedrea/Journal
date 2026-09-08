@@ -254,7 +254,6 @@ final class TransitReviewModel {
         if let destination { addAlias(details.destinationRawText, to: destination) }
         entry.entryKindReviewReason = nil
         entry.needsReview = false
-        let originalWeather = entry.weather
         entry.weather = nil
         entry.endWeather = nil
 
@@ -273,7 +272,7 @@ final class TransitReviewModel {
                 role: .destination,
                 in: modelContext
             )
-            try modelContext.save()
+            try JournalPersistence.save(modelContext)
             EntryWeatherService.refreshInBackground(
                 entry,
                 in: modelContext
@@ -284,7 +283,7 @@ final class TransitReviewModel {
             )
             return true
         } catch {
-            entry.weather = originalWeather
+            modelContext.rollback()
             errorMessage = error.localizedDescription
             return false
         }

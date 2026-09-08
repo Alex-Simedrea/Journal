@@ -14,26 +14,21 @@ nonisolated extension Notification.Name {
 
 @MainActor
 enum JournalModelContainer {
-    static let shared: ModelContainer = {
-        do {
-            let configuration = ModelConfiguration()
-            let container = try ModelContainer(
-                for: LogEntry.self,
-                Person.self,
-                Place.self,
-                TransitDetails.self,
-                PlaceVisitDetails.self,
-                WorkoutDetails.self,
-                TransitType.self,
-                AutomationCandidate.self,
-                ActiveJournalRecording.self,
-                configurations: configuration
-            )
-            return container
-        } catch {
-            fatalError("Unable to create Journal model container: \(error)")
-        }
-    }()
+    static let result: Result<ModelContainer, Error> = Result {
+        let configuration = ModelConfiguration()
+        let container = try ModelContainer(
+            for: Schema(JournalSchemaV3.models),
+            migrationPlan: JournalSchemaMigration.self,
+            configurations: [configuration]
+        )
+        container.mainContext.autosaveEnabled = false
+        return container
+    }
+
+    static func load() throws -> ModelContainer {
+        try result.get()
+    }
+
 }
 
 @MainActor
@@ -73,7 +68,7 @@ enum AutomationCandidateStoreRepair {
                 }
             )
         }
-        try modelContext.save()
+        try JournalPersistence.save(modelContext)
         try AutomationCandidateEntryService.synchronizePending(
             in: modelContext
         )
@@ -114,7 +109,7 @@ enum AutomationCandidateStoreRepair {
                 in: modelContext
             )
         }
-        try modelContext.save()
+        try JournalPersistence.save(modelContext)
     }
 
     private static func preferredEntry(
@@ -142,11 +137,11 @@ enum AutomationCandidateStoreRepair {
             entry.placeVisitDetails = nil
             entry.workoutDetails = nil
         }
-        try modelContext.save()
+        try JournalPersistence.save(modelContext)
         for entry in entries {
             modelContext.delete(entry)
         }
-        try modelContext.save()
+        try JournalPersistence.save(modelContext)
     }
 
     private static func restoreMissingDetails(
@@ -210,9 +205,8 @@ final class JournalAppDelegate: NSObject, UIApplicationDelegate {
         guard AutomationCoordinator.isEnabledForCurrentProcess else {
             return true
         }
-        VisitMonitoringCoordinator.shared.configure(
-            modelContainer: JournalModelContainer.shared
-        )
+        guard let container = try? JournalModelContainer.load() else { return true }
+        VisitMonitoringCoordinator.shared.configure(modelContainer: container)
         VisitMonitoringCoordinator.shared.resumeIfAuthorized()
         JournalRecordingCoordinator.shared.restoreIfNeeded(
             applicationIsActive: application.applicationState == .active
@@ -276,11 +270,11 @@ final class AutomationCoordinator {
             motionSegments: motionSegments
         )
         await Task.yield()
-        await maintenance.synchronizeCandidates()
+        maintenance.synchronizeCandidates()
         await Task.yield()
         await maintenance.synchronizePhotos()
         MotionTransitDetectionService.shared.startLiveUpdates(
-            modelContainer: JournalModelContainer.shared
+            modelContainer: maintenance.modelContext.container
         )
     }
 
@@ -297,12 +291,12 @@ final class AutomationCoordinator {
             motionSegments: motionSegments
         )
         await Task.yield()
-        await maintenance.synchronizeCandidates()
+        maintenance.synchronizeCandidates()
         await Task.yield()
         await maintenance.synchronizePhotos()
         VisitMonitoringCoordinator.shared.resumeIfAuthorized()
         MotionTransitDetectionService.shared.startLiveUpdates(
-            modelContainer: JournalModelContainer.shared
+            modelContainer: maintenance.modelContext.container
         )
     }
 

@@ -31,7 +31,8 @@ nonisolated struct AutomaticPhotoMatchTarget: Hashable, Sendable {
     let geometry: AutomaticPhotoMatchGeometry
 }
 
-nonisolated enum PhotoAutoLinkService {
+@MainActor
+enum PhotoAutoLinkService {
     nonisolated static let minimumStaticRadiusMeters = 250.0
     nonisolated static let corridorMultiplier = 1.25
     nonisolated static let corridorAllowanceMeters = 2_000.0
@@ -41,7 +42,7 @@ nonisolated enum PhotoAutoLinkService {
         guard status == .authorized || status == .limited else { return }
 
         let matchInput = try matchTargets(in: modelContext)
-        let targetsByEntryID = matchInput.targets
+        let targetsByEntryID = matchInput
         guard !targetsByEntryID.isEmpty else { return }
 
         let intervals = mergedIntervals(
@@ -63,9 +64,22 @@ nonisolated enum PhotoAutoLinkService {
         }.value
         guard !matchesByEntryID.isEmpty else { return }
 
+        try applyMatches(matchesByEntryID, targets: targetsByEntryID, in: modelContext)
+    }
+
+    /// Revalidate after photo lookup: never use models captured before an await.
+    static func applyMatches(
+        _ matchesByEntryID: [UUID: [String]],
+        targets targetsByEntryID: [UUID: AutomaticPhotoMatchTarget],
+        in modelContext: ModelContext
+    ) throws {
+        let currentEntries = Dictionary(try modelContext.fetch(
+            FetchDescriptor<LogEntry>()
+        ).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var changed = false
         for (entryID, matchingIdentifiers) in matchesByEntryID {
-            guard let entry = matchInput.entriesByID[entryID] else { continue }
+            guard let entry = currentEntries[entryID],
+                  target(for: entry) == targetsByEntryID[entryID] else { continue }
             var identifiers = Set(
                 entry.photoReferences.map(\.assetLocalIdentifier)
             )
@@ -83,8 +97,8 @@ nonisolated enum PhotoAutoLinkService {
 
         guard changed else { return }
         do {
-            try modelContext.save()
-            await TimelineDataChange.post()
+            try JournalPersistence.save(modelContext)
+            TimelineDataChange.post()
         } catch {
             modelContext.rollback()
             throw error
@@ -121,10 +135,7 @@ nonisolated enum PhotoAutoLinkService {
 
     private static func matchTargets(
         in modelContext: ModelContext
-    ) throws -> (
-        targets: [UUID: AutomaticPhotoMatchTarget],
-        entriesByID: [UUID: LogEntry]
-    ) {
+    ) throws -> [UUID: AutomaticPhotoMatchTarget] {
         let entries = try modelContext.fetch(
             FetchDescriptor<LogEntry>(
                 predicate: #Predicate {
@@ -133,13 +144,11 @@ nonisolated enum PhotoAutoLinkService {
             )
         )
         var targets: [UUID: AutomaticPhotoMatchTarget] = [:]
-        var entriesByID: [UUID: LogEntry] = [:]
         for entry in entries {
             guard let target = target(for: entry) else { continue }
             targets[entry.id] = target
-            entriesByID[entry.id] = entry
         }
-        return (targets, entriesByID)
+        return targets
     }
 
     nonisolated static func matches(

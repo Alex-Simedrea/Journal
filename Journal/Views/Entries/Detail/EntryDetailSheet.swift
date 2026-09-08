@@ -72,6 +72,14 @@ struct EntryDetailSheet: View {
     }
 
     var body: some View {
+        if draftPresentation != nil || (entry.modelContext != nil && !entry.isDeleted) {
+            detailContent
+        } else {
+            ContentUnavailableView("Entry Unavailable", systemImage: "exclamationmark.triangle")
+        }
+    }
+
+    private var detailContent: some View {
         DynamicSheet(sizing: sheetSizing) {
             DynamicSheetNavigationContainer(
                 route: coordinator.route,
@@ -234,15 +242,8 @@ struct EntryDetailSheet: View {
             locationPickerModel.stop()
         }
         .onDisappear {
+            locationPickerModel.stop()
             addPlaceModel?.stop()
-        }
-        .task {
-            guard entry.modelContext != nil else { return }
-            do {
-                try EntryLinkingService.reconcileAndSave(in: modelContext)
-            } catch {
-                coordinator.errorMessage = error.localizedDescription
-            }
         }
     }
 
@@ -395,7 +396,8 @@ struct EntryDetailSheet: View {
                         allowsCurrentLocationCapture: true
                     )
                     coordinator.present(.addPlace(role))
-                }
+                },
+                isActive: { coordinator.route == .location(role) }
             )
         case .entryKind:
             EntryDetailEditorViewport(
@@ -573,7 +575,7 @@ private extension EntryDetailSheet {
                 linkPlaceSource = neighbor.kind == .workout ? .neighbor : .current
                 coordinator.present(.linkResolution(neighbor.id))
             }
-            coordinator.session.reload(from: entry)
+            coordinator.reloadAfterLinkEdit(entry: entry)
         } catch {
             coordinator.errorMessage = error.localizedDescription
         }
@@ -620,7 +622,7 @@ private extension EntryDetailSheet {
                 in: modelContext
             )
         }
-        coordinator.session.reload(from: entry)
+        coordinator.reloadAfterLinkEdit(entry: entry)
     }
 
     private func close() {
@@ -695,11 +697,7 @@ private extension EntryDetailSheet {
                     in: modelContext,
                     persist: persist
                 )
-                if persist {
-                    coordinator.returnToDetails(entry: entry)
-                } else {
-                    coordinator.returnToDetailsPreservingDraft(for: .people)
-                }
+                coordinator.returnToDetails(entry: entry)
             case .photos:
                 try EntryDetailEditingService.savePhotos(
                     entry: entry,
@@ -735,7 +733,8 @@ private extension EntryDetailSheet {
                     entry: entry,
                     session: coordinator.session,
                     places: places,
-                    in: modelContext
+                    in: modelContext,
+                    persist: persist
                 )
                 coordinator.returnToDetails(entry: entry)
             case .addPerson:
