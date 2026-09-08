@@ -182,6 +182,30 @@ assuming a live object updated in place.
   search screen appeared or a timeline change posted. It now consumes
   `HomeFeedProjectionStore.load()` value snapshots and resolves a live model
   by ID only when navigating to a result.
+- **Snapshots load at final geometry and resolved appearance.** A map tile
+  starts loading from `layoutSubviews`/`didMoveToWindow`, never from a
+  configure pass: a reused cell still carries the previous layout's tile
+  frames (the decoded image would aspect-fill a differently sized tile,
+  visibly zoomed), and a detached cell resolves `userInterfaceStyle` to
+  light, queueing wrong-appearance renders that starve the single MapKit
+  render slot — the dark-mode hybrid tiles that never appeared. In-flight
+  loads restart when layout changes the tile size, and a decoded image is
+  dropped (and re-requested) if the tile was re-laid-out while it decoded.
+- **Hybrid renders only cache finished imagery.** The hybrid `MKMapView`
+  session used to capture whatever was on screen three seconds in, which
+  could persist a globe whose imagery had not loaded — a permanently blank
+  cached tile. Capture now requires MapKit's finished-loading or
+  fully-rendered signal, waits up to twenty seconds for it, and fails (and
+  retries later) instead of caching a premature capture. The cache directory
+  advanced to v5 to retire tiles poisoned by the old behavior.
+- **Bottom-pinned viewports restore to the current bottom.** The zoom
+  transition records how far each captured scene was from its bottommost
+  offset; restoring a bottom-pinned scene re-pins to the current bottom
+  instead of clamping a stale offset (inset/content differences drifted the
+  feed upward). Scroll-to-latest targets the maximum content offset —
+  `scrollToItem(.bottom)` ignores the section inset below the last row — and
+  a no-op animated scroll completes its request directly because UIKit sends
+  no end-of-animation callback.
 
 Flows intentionally left on the main context: the day timeline
 (`HomePresentationModel`, bounded to one day's window and required to hand

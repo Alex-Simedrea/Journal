@@ -124,10 +124,10 @@ struct HomeFeedZoomTests {
         #expect(overlay.subviews.last === actor)
         #expect(actor.frame == before)
         #expect(overlay.subviews.count <= 3 + HomeFeedZoomMatcher.tileBudget)
-        #expect(transition.cachedOffset(for: .days, anchor: anchor) == collection.contentOffset)
-        #expect(transition.cachedOffset(for: .days, anchor: .day(days[1])) == nil)
-        #expect(transition.cachedOffset(for: .days, anchor: .day(days[1]),
-                                       preservesViewport: true) == collection.contentOffset)
+        #expect(transition.cachedViewport(for: .days, anchor: anchor)?.offset == collection.contentOffset)
+        #expect(transition.cachedViewport(for: .days, anchor: .day(days[1])) == nil)
+        #expect(transition.cachedViewport(for: .days, anchor: .day(days[1]),
+                                          preservesViewport: true)?.offset == collection.contentOffset)
         for index in 0..<30 {
             transition.prepareForRetarget()
             transition.completePreparation(collectionView: collection,

@@ -628,11 +628,16 @@ actor SummaryMapSnapshotStore {
     nonisolated static let shared = SummaryMapSnapshotStore()
     nonisolated static let byteLimit = 200 * 1_024 * 1_024
 
-    private static let cacheDirectoryName = "SummaryMapSnapshots-v4"
+    // v5: v4 could contain hybrid globes captured before their imagery
+    // loaded (the premature-timeout capture fixed in SummaryMapRenderSession).
+    // Those junk tiles are indistinguishable from good caches, so retire the
+    // whole revision once.
+    private static let cacheDirectoryName = "SummaryMapSnapshots-v5"
     private static let legacyCacheDirectoryNames = [
         "SummaryMapSnapshots",
         "SummaryMapSnapshots-v2",
         "SummaryMapSnapshots-v3",
+        "SummaryMapSnapshots-v4",
     ]
 
     private struct InFlight {
@@ -1339,6 +1344,7 @@ private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
     private var timeoutTask: Task<Void, Never>?
     private var finishTask: Task<Void, Never>?
     private var mapIsFullyRendered = false
+    private var mapDidFinishLoading = false
     private var didFinish = false
 
     private var allOverviewCoordinates: [CLLocationCoordinate2D] {
@@ -1416,7 +1422,26 @@ private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
                         for: usesHybridStyle ? .seconds(3) : .seconds(20)
                     )
                     guard !Task.isCancelled else { return }
-                    if usesHybridStyle, hostWindow != nil {
+                    guard usesHybridStyle else {
+                        failRendering(with: URLError(.timedOut))
+                        return
+                    }
+                    // Hybrid globes can stall in MapKit's readiness
+                    // callbacks after the imagery is on screen; capture
+                    // once either completion signal has fired. Never cache
+                    // a capture before that: persisting a half-loaded globe
+                    // leaves a blank tile on disk until the slot's content
+                    // changes.
+                    if hostWindow != nil,
+                       mapIsFullyRendered || mapDidFinishLoading {
+                        prepareMarkerViewsForCapture()
+                        finishRendering()
+                        return
+                    }
+                    try? await Task.sleep(for: .seconds(17))
+                    guard !Task.isCancelled else { return }
+                    if hostWindow != nil,
+                       mapIsFullyRendered || mapDidFinishLoading {
                         prepareMarkerViewsForCapture()
                         finishRendering()
                     } else {
@@ -1437,6 +1462,11 @@ private final class SummaryMapRenderSession: NSObject, MKMapViewDelegate {
     ) {
         guard fullyRendered else { return }
         mapIsFullyRendered = true
+        scheduleFinishIfReady()
+    }
+
+    func mapViewDidFinishLoadingMap(_ mapView: MKMapView) {
+        mapDidFinishLoading = true
         scheduleFinishIfReady()
     }
 

@@ -404,6 +404,17 @@ final class HomeFeedViewController: UIViewController {
         }
     }
 
+    private var maximumContentOffsetY: CGFloat {
+        let minimum = -collectionView.adjustedContentInset.top
+        return max(minimum, collectionView.contentSize.height
+            - collectionView.bounds.height
+            + collectionView.adjustedContentInset.bottom)
+    }
+
+    private func isLastItem(_ indexPath: IndexPath) -> Bool {
+        indexPath.item == collectionView.numberOfItems(inSection: indexPath.section) - 1
+    }
+
     private func performPendingScrollRequestIfPossible() {
         guard isViewLoaded,
               view.window != nil,
@@ -414,24 +425,54 @@ final class HomeFeedViewController: UIViewController {
 
         collectionView.layoutIfNeeded()
         pendingScrollRequest = nil
+        // `scrollToItem(.bottom)` aligns the cell's own bottom edge and
+        // ignores the section inset below the last row; the feed's "very
+        // bottom" is the maximum content offset.
+        let scrollsToVeryBottom = request.alignment == .bottom
+            && isLastItem(indexPath)
         if request.animated {
+            let target = scrollsToVeryBottom
+                ? CGPoint(x: collectionView.contentOffset.x, y: maximumContentOffsetY)
+                : nil
+            if let target, abs(target.y - collectionView.contentOffset.y) < 0.5 {
+                // Already there: UIKit sends no end-of-animation callback
+                // for a no-op scroll, so finish the request directly.
+                finishScrollRequest(request.id)
+                reportVisibleAnchor()
+                return
+            }
             animatedScrollRequestID = request.id
             setScrolling(true)
-            collectionView.scrollToItem(
-                at: indexPath,
-                at: request.alignment == .top ? .top : .bottom,
-                animated: true
-            )
+            if let target {
+                collectionView.setContentOffset(target, animated: true)
+            } else {
+                collectionView.scrollToItem(
+                    at: indexPath,
+                    at: request.alignment == .top ? .top : .bottom,
+                    animated: true
+                )
+            }
         } else {
             UIView.performWithoutAnimation {
                 if isPreparingScale,
-                   let offset = zoomTransition.cachedOffset(for: scale, anchor: request.anchor,
-                                                            preservesViewport: request.preservesZoomViewport) {
+                   let viewport = zoomTransition.cachedViewport(for: scale, anchor: request.anchor,
+                                                                preservesViewport: request.preservesZoomViewport) {
                     let minimum = -collectionView.adjustedContentInset.top
-                    let maximum = max(minimum, collectionView.contentSize.height
-                        - collectionView.bounds.height + collectionView.adjustedContentInset.bottom)
+                    let maximum = maximumContentOffsetY
+                    // A viewport captured at (or within a point of) the
+                    // bottom re-pins to the current bottom: insets and
+                    // content heights can differ slightly between capture
+                    // and restore, and clamping alone drifts the feed up.
+                    let y = viewport.bottomDistance < 1
+                        ? maximum
+                        : min(maximum, max(minimum, viewport.offset.y))
                     collectionView.setContentOffset(
-                        CGPoint(x: offset.x, y: min(maximum, max(minimum, offset.y))), animated: false)
+                        CGPoint(x: viewport.offset.x, y: y), animated: false)
+                } else if scrollsToVeryBottom {
+                    collectionView.setContentOffset(
+                        CGPoint(x: collectionView.contentOffset.x, y: maximumContentOffsetY),
+                        animated: false
+                    )
                 } else {
                     collectionView.scrollToItem(
                         at: indexPath,

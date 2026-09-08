@@ -50,6 +50,11 @@ final class HomeFeedZoomTransition: NSObject {
         let scale: JournalSummaryScale
         let anchor: HomeFeedAnchor?
         let offset: CGPoint
+        /// Distance between the captured offset and the captured content's
+        /// bottommost offset. Restoring a bottom-pinned viewport re-pins to
+        /// the *current* bottom, so inset or content-height differences
+        /// between capture and restore cannot drift the feed upward.
+        let bottomDistance: CGFloat
         let image: UIImage
         let view: UIImageView
         let tiles: [HomeFeedZoomTile]
@@ -58,11 +63,13 @@ final class HomeFeedZoomTransition: NSObject {
         let backgroundColor: UIColor
 
         init(scale: JournalSummaryScale, anchor: HomeFeedAnchor?, offset: CGPoint,
+             bottomDistance: CGFloat,
              image: UIImage, tiles: [HomeFeedZoomTile], weight: Double,
              backgroundColor: UIColor, tileImages: [String: HomeFeedZoomTileSnapshot]) {
             self.scale = scale
             self.anchor = anchor
             self.offset = offset
+            self.bottomDistance = bottomDistance
             self.image = image
             self.backgroundColor = backgroundColor
             self.tiles = tiles
@@ -219,9 +226,11 @@ final class HomeFeedZoomTransition: NSObject {
 
     /// Returning to an in-flight scene also restores its exact viewport, rather
     /// than jumping its partially visible top card to the top edge.
-    func cachedOffset(for scale: JournalSummaryScale, anchor: HomeFeedAnchor?,
-                      preservesViewport: Bool = false) -> CGPoint? {
-        scenes.first { $0.scale == scale && (preservesViewport || $0.anchor == anchor) }?.offset
+    func cachedViewport(for scale: JournalSummaryScale, anchor: HomeFeedAnchor?,
+                        preservesViewport: Bool = false)
+        -> (offset: CGPoint, bottomDistance: CGFloat)? {
+        scenes.first { $0.scale == scale && (preservesViewport || $0.anchor == anchor) }
+            .map { ($0.offset, $0.bottomDistance) }
     }
 
     func completePreparation(collectionView: UICollectionView,
@@ -323,7 +332,11 @@ final class HomeFeedZoomTransition: NSObject {
                     background: background, displayScale: displayScale)
             }
         }
+        let bottomOffset = collectionView.contentSize.height
+            - collectionView.bounds.height
+            + collectionView.adjustedContentInset.bottom
         return Scene(scale: scale, anchor: anchor, offset: collectionView.contentOffset,
+                     bottomDistance: max(0, bottomOffset - collectionView.contentOffset.y),
                      image: image, tiles: tiles, weight: weight, backgroundColor: background,
                      tileImages: tileImages)
     }

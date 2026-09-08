@@ -215,6 +215,7 @@ final class UIKitSummaryMapImageView: UIImageView {
     /// display). `nil` whenever the shown image may not match the source.
     private var requestKey: String?
     private var loadTask: Task<Void, Never>?
+    private var loadTaskSize = CGSize.zero
     private var generation = 0
 
     override init(frame: CGRect) {
@@ -297,8 +298,11 @@ final class UIKitSummaryMapImageView: UIImageView {
             // is decoded, instead of flashing an empty tile.
             image = nil
         }
+        // A reused cell still has the previous layout's tile frames and a
+        // detached cell has unresolved traits; `layoutSubviews` (and
+        // `didMoveToWindow`) start the load once geometry and appearance
+        // are the ones the snapshot will actually be displayed with.
         setNeedsLayout()
-        loadIfNeeded()
     }
 
     /// Resolve only already cached media before the transition freezes the view.
@@ -331,6 +335,14 @@ final class UIKitSummaryMapImageView: UIImageView {
         loadIfNeeded()
     }
 
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        // Loads are gated on window membership; joining a window runs a
+        // layout pass, whose `layoutSubviews` starts the load with final
+        // geometry and resolved traits.
+        if window != nil { setNeedsLayout() }
+    }
+
     func cancelLoading() {
         generation &+= 1
         loadTask?.cancel()
@@ -349,7 +361,21 @@ final class UIKitSummaryMapImageView: UIImageView {
 
     private func loadIfNeeded() {
         guard bounds.width > 1, bounds.height > 1 else { return }
-        guard loadTask == nil else { return }
+        // Off-window traits resolve to an unspecified appearance; a load
+        // started there queues a wrong-appearance MapKit render that starves
+        // the real one behind the single-render limiter.
+        guard window != nil else { return }
+        if loadTask != nil {
+            // The task targets the size captured when it started. Restart
+            // when layout has since changed the tile, so a reused cell never
+            // keeps a snapshot rendered for another layout's dimensions.
+            guard !loadTaskSize.nearlyEquals(bounds.size) else { return }
+            generation &+= 1
+            loadTask?.cancel()
+            loadTask = nil
+        }
+        let size = bounds.size
+        loadTaskSize = size
         let appearance: SummaryMapSnapshotRequest.Appearance =
             traitCollection.userInterfaceStyle == .dark ? .dark : .light
         let input: SummaryMapSnapshotRequestInput = switch source {
@@ -357,13 +383,13 @@ final class UIKitSummaryMapImageView: UIImageView {
             .overview(
                 slotID: slotID,
                 data: data,
-                size: bounds.size
+                size: size
             )
         case .place(let location):
             .place(
                 slotID: slotID,
                 location: location,
-                size: bounds.size
+                size: size
             )
         }
         let displayScale = traitCollection.displayScale
@@ -417,9 +443,22 @@ final class UIKitSummaryMapImageView: UIImageView {
                   ),
                   !Task.isCancelled,
                   self?.generation == expectedGeneration else { return }
-            self?.requestKey = expectedKey
-            self?.image = decoded
+            guard let self, self.bounds.size.nearlyEquals(size) else {
+                // Layout moved on while this snapshot rendered or decoded.
+                // `aspectFill` would show it zoomed through the center;
+                // request the current dimensions instead.
+                self?.setNeedsLayout()
+                return
+            }
+            requestKey = expectedKey
+            image = decoded
         }
+    }
+}
+
+nonisolated private extension CGSize {
+    func nearlyEquals(_ other: CGSize) -> Bool {
+        abs(width - other.width) < 0.5 && abs(height - other.height) < 0.5
     }
 }
 
